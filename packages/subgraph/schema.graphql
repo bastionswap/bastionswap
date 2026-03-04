@@ -1,0 +1,97 @@
+type Pool @entity {
+  id: ID! # poolId (bytes32)
+  token0: Bytes!
+  token1: Bytes!
+  hook: Bytes! # hook contract address
+  isBastion: Boolean!
+  issuer: Issuer # issuer (Bastion pools only)
+  issuedToken: Bytes # issued token address
+  escrow: Escrow # escrow state
+  insurancePool: InsurancePool # insurance pool state
+  triggerEvents: [TriggerEvent!]! @derivedFrom(field: "pool")
+  claims: [Claim!]! @derivedFrom(field: "pool")
+  createdAt: BigInt!
+  createdTx: Bytes!
+}
+
+type Escrow @entity {
+  id: ID! # escrowId (uint256 hex)
+  pool: Pool!
+  issuer: Bytes!
+  totalLocked: BigDecimal!
+  released: BigDecimal!
+  remaining: BigDecimal!
+  vestingSchedule: [VestingMilestone!]! @derivedFrom(field: "escrow")
+  commitment: Commitment
+  isTriggered: Boolean!
+  createdAt: BigInt!
+}
+
+type VestingMilestone @entity {
+  id: ID! # escrowId-index
+  escrow: Escrow!
+  timestamp: BigInt! # unlock time (absolute timestamp)
+  basisPoints: Int! # cumulative vesting ratio (10000 = 100%)
+}
+
+type Commitment @entity {
+  id: ID! # escrowId
+  escrow: Escrow!
+  dailyWithdrawLimit: BigInt!
+  lockDuration: BigInt!
+  maxSellPercent: BigInt!
+}
+
+type InsurancePool @entity {
+  id: ID! # poolId
+  pool: Pool!
+  balance: BigDecimal!
+  isTriggered: Boolean!
+  triggerType: Int
+  merkleRoot: Bytes
+  useMerkleProof: Boolean!
+  totalClaimed: BigDecimal!
+  feeRate: Int!
+  holderCount: Int!
+}
+
+type TriggerEvent @entity {
+  id: ID! # poolId-triggerType-timestamp
+  pool: Pool!
+  triggerType: Int!
+  triggerTypeName: String!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  escrowRedistributed: BigDecimal
+  insurancePayout: BigDecimal
+  withMerkleRoot: Boolean!
+}
+
+type Issuer @entity {
+  id: ID! # issuer address
+  pools: [Pool!]! @derivedFrom(field: "issuer")
+  reputationScore: BigInt!
+  totalEscrowsCreated: Int!
+  totalEscrowsCompleted: Int!
+  totalTriggersActivated: Int!
+  lastUpdated: BigInt!
+}
+
+type Claim @entity {
+  id: ID! # poolId-holderAddress
+  pool: Pool!
+  holder: Bytes!
+  amount: BigDecimal!
+  claimedAt: BigInt!
+  transactionHash: Bytes!
+}
+
+type ProtocolStats @entity {
+  id: ID! # "global"
+  totalBastionPools: Int!
+  totalStandardPools: Int!
+  totalEscrowLocked: BigDecimal!
+  totalInsuranceBalance: BigDecimal!
+  totalTriggersActivated: Int!
+  totalCompensationPaid: BigDecimal!
+}

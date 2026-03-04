@@ -1,0 +1,148 @@
+specVersion: 0.0.5
+schema:
+  file: ./schema.graphql
+
+dataSources:
+  - kind: ethereum
+    name: BastionHook
+    network: base-sepolia
+    source:
+      address: "0x243bD148C9DFeE05584182d420f319e234D80AC0"
+      abi: BastionHook
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Pool
+        - Escrow
+        - Issuer
+        - InsurancePool
+        - ProtocolStats
+      abis:
+        - name: BastionHook
+          file: ../contracts/out/BastionHook.sol/BastionHook.json
+      eventHandlers:
+        - event: IssuerRegistered(indexed bytes32,indexed address,address)
+          handler: handleIssuerRegistered
+        - event: EscrowCreated(indexed bytes32,indexed uint256,indexed address)
+          handler: handleEscrowCreated
+        - event: InsuranceFeeDeposited(indexed bytes32,uint256)
+          handler: handleInsuranceFeeDeposited
+        - event: IssuerSaleReported(indexed bytes32,indexed address,uint256)
+          handler: handleIssuerSaleReported
+        - event: LPRemovalReported(indexed bytes32,uint256,uint256)
+          handler: handleLPRemovalReported
+        - event: ExternalCallFailed(string,indexed bytes32)
+          handler: handleExternalCallFailed
+      file: ./src/mappings/bastionHook.ts
+
+  - kind: ethereum
+    name: EscrowVault
+    network: base-sepolia
+    source:
+      address: "0xC36E784E1dff616bDae4EAc7B310F0934FaF04a4"
+      abi: EscrowVault
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Escrow
+        - VestingMilestone
+        - Commitment
+        - Issuer
+        - ProtocolStats
+      abis:
+        - name: EscrowVault
+          file: ../contracts/out/EscrowVault.sol/EscrowVault.json
+      eventHandlers:
+        - event: EscrowCreated(indexed uint256,indexed bytes32,indexed address,uint256)
+          handler: handleEscrowVaultCreated
+        - event: VestedReleased(indexed uint256,uint256)
+          handler: handleVestedReleased
+        - event: Redistributed(indexed uint256,indexed uint8,uint256)
+          handler: handleRedistributed
+        - event: CommitmentSet(indexed uint256,(uint16,uint40,uint16))
+          handler: handleCommitmentSet
+      file: ./src/mappings/escrowVault.ts
+
+  - kind: ethereum
+    name: InsurancePool
+    network: base-sepolia
+    source:
+      address: "0xB98E0Fb673e5a0C6e15F1D0a9f36E7dA954A0D5E"
+      abi: InsurancePool
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - InsurancePool
+        - Claim
+        - ProtocolStats
+      abis:
+        - name: InsurancePool
+          file: ../contracts/out/InsurancePool.sol/InsurancePool.json
+      eventHandlers:
+        - event: FeeDeposited(indexed bytes32,uint256)
+          handler: handleFeeDeposited
+        - event: PayoutExecuted(indexed bytes32,indexed uint8,uint256)
+          handler: handlePayoutExecuted
+        - event: CompensationClaimed(indexed bytes32,indexed address,uint256)
+          handler: handleCompensationClaimed
+        - event: FeeRateUpdated(uint16,uint16)
+          handler: handleFeeRateUpdated
+      file: ./src/mappings/insurancePool.ts
+
+  - kind: ethereum
+    name: TriggerOracle
+    network: base-sepolia
+    source:
+      address: "0xD2BD10D3f2e3a057F0040663B1EEbf4d1874fEAB"
+      abi: TriggerOracle
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - TriggerEvent
+        - Pool
+        - InsurancePool
+        - ProtocolStats
+      abis:
+        - name: TriggerOracle
+          file: ../contracts/out/TriggerOracle.sol/TriggerOracle.json
+      eventHandlers:
+        - event: TriggerPending(indexed bytes32,indexed uint8,uint40)
+          handler: handleTriggerPending
+        - event: TriggerExecuted(indexed bytes32,indexed uint8,bool)
+          handler: handleTriggerExecuted
+        - event: MerkleRootSubmitted(indexed bytes32,bytes32)
+          handler: handleMerkleRootSubmitted
+      file: ./src/mappings/triggerOracle.ts
+
+  - kind: ethereum
+    name: ReputationEngine
+    network: base-sepolia
+    source:
+      address: "0x78dA752e9dBD73a9b0C0F5ddD15e854D2B879524"
+      abi: ReputationEngine
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Issuer
+      abis:
+        - name: ReputationEngine
+          file: ../contracts/out/ReputationEngine.sol/ReputationEngine.json
+      eventHandlers:
+        - event: ReputationUpdated(indexed address,indexed uint8,uint256)
+          handler: handleReputationUpdated
+      file: ./src/mappings/reputationEngine.ts

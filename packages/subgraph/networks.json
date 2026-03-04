@@ -1,1 +1,46 @@
-{}
+{
+  "base-sepolia": {
+    "BastionHook": {
+      "address": "0x243bD148C9DFeE05584182d420f319e234D80AC0",
+      "startBlock": 0
+    },
+    "EscrowVault": {
+      "address": "0xC36E784E1dff616bDae4EAc7B310F0934FaF04a4",
+      "startBlock": 0
+    },
+    "InsurancePool": {
+      "address": "0xB98E0Fb673e5a0C6e15F1D0a9f36E7dA954A0D5E",
+      "startBlock": 0
+    },
+    "TriggerOracle": {
+      "address": "0xD2BD10D3f2e3a057F0040663B1EEbf4d1874fEAB",
+      "startBlock": 0
+    },
+    "ReputationEngine": {
+      "address": "0x78dA752e9dBD73a9b0C0F5ddD15e854D2B879524",
+      "startBlock": 0
+    }
+  },
+  "base": {
+    "BastionHook": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    },
+    "EscrowVault": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    },
+    "InsurancePool": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    },
+    "TriggerOracle": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    },
+    "ReputationEngine": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    }
+  }
+}
