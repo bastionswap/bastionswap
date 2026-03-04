@@ -51,8 +51,8 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => token address that is the "issued" token (non-base asset)
     mapping(PoolId => address) internal _issuedTokens;
 
-    /// @dev poolId => pre-swap issuer balance snapshot (for router bypass detection)
-    mapping(PoolId => uint256) internal _preSwapIssuerBalance;
+    /// @dev Cached insurance fee rate (basis points) to avoid cross-contract call
+    uint16 internal _cachedFeeRate;
 
     // ─── Errors ───────────────────────────────────────────────────────
 
@@ -185,6 +185,7 @@ contract BastionHook is BaseTestHooks {
     }
 
     /// @notice Called before a swap. Snapshots issuer balance for router bypass detection (RISK-3).
+    ///         Uses EIP-1153 transient storage to pass data to afterSwap within the same tx.
     function beforeSwap(
         address,
         PoolKey calldata key,
@@ -195,8 +196,12 @@ contract BastionHook is BaseTestHooks {
         address issuedToken = _issuedTokens[poolId];
         address poolIssuer = _issuers[poolId];
 
+        // Cache issuedToken and issuer in transient storage for afterSwap
+        _tstore(_issuedTokenSlot(poolId), uint256(uint160(issuedToken)));
+        _tstore(_issuerSlot(poolId), uint256(uint160(poolIssuer)));
+
         if (issuedToken != address(0) && poolIssuer != address(0)) {
-            _preSwapIssuerBalance[poolId] = ERC20(issuedToken).balanceOf(poolIssuer);
+            _tstore(_preSwapBalanceSlot(poolId), ERC20(issuedToken).balanceOf(poolIssuer));
         }
 
         return (IHooks.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
@@ -204,6 +209,7 @@ contract BastionHook is BaseTestHooks {
 
     /// @notice Called after a swap. Deposits insurance fee on buys and
     ///         reports issuer sales to TriggerOracle.
+    ///         Reads issuedToken, issuer, and preSwapBalance from transient storage (set in beforeSwap).
     function afterSwap(
         address,
         PoolKey calldata key,
@@ -212,11 +218,10 @@ contract BastionHook is BaseTestHooks {
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, int128) {
         PoolId poolId = key.toId();
-        address issuedToken = _issuedTokens[poolId];
+        // Read from transient storage (set by beforeSwap in same tx)
+        address issuedToken = address(uint160(_tload(_issuedTokenSlot(poolId))));
 
         if (issuedToken != address(0)) {
-            // Determine if this is a "buy" of the issued token
-            // Buy = swapper receives the issued token
             bool isBuy = _isBuySwap(key, params, issuedToken);
 
             if (isBuy) {
@@ -224,9 +229,9 @@ contract BastionHook is BaseTestHooks {
             }
 
             // RISK-3: Check if issuer balance decreased (detects router bypass)
-            address poolIssuer = _issuers[poolId];
+            address poolIssuer = address(uint160(_tload(_issuerSlot(poolId))));
             if (poolIssuer != address(0)) {
-                uint256 preBalance = _preSwapIssuerBalance[poolId];
+                uint256 preBalance = _tload(_preSwapBalanceSlot(poolId));
                 uint256 postBalance = ERC20(issuedToken).balanceOf(poolIssuer);
                 if (postBalance < preBalance) {
                     uint256 soldAmount = preBalance - postBalance;
@@ -266,6 +271,15 @@ contract BastionHook is BaseTestHooks {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  FEE RATE SYNC
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @notice Sync cached fee rate from InsurancePool. Call after governance changes.
+    function syncFeeRate() external {
+        _cachedFeeRate = insurancePool.feeRate();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  INTERNAL
     // ═══════════════════════════════════════════════════════════════════
 
@@ -290,6 +304,11 @@ contract BastionHook is BaseTestHooks {
         // Register issuer
         _issuers[poolId] = issuer;
         _issuedTokens[poolId] = token;
+
+        // Initialize cached fee rate on first pool creation
+        if (_cachedFeeRate == 0) {
+            _cachedFeeRate = insurancePool.feeRate();
+        }
 
         // Pull tokens from issuer (who must have approved this hook) and approve to EscrowVault
         ERC20(token).safeTransferFrom(issuer, address(this), amount);
@@ -340,10 +359,8 @@ contract BastionHook is BaseTestHooks {
         SwapParams calldata,
         address issuedToken
     ) internal {
-        // The fee is based on the base asset (ETH/WETH) amount spent
-        // For simplicity, we calculate fee on the "input" side of the swap
-        uint256 feeRate = insurancePool.feeRate();
-        if (feeRate == 0) return;
+        uint256 cachedFee = _cachedFeeRate;
+        if (cachedFee == 0) return;
 
         // Get the amount of base asset spent (the non-issued token)
         // In a buy: swapper sends base asset, receives issued token
@@ -361,7 +378,7 @@ contract BastionHook is BaseTestHooks {
         if (baseAmount >= 0) return;
         uint256 absBaseAmount = uint256(uint128(int128(-baseAmount)));
 
-        uint256 feeAmount = (absBaseAmount * feeRate) / 10_000;
+        uint256 feeAmount = (absBaseAmount * cachedFee) / 10_000;
         if (feeAmount == 0) return;
 
         // The fee is deposited as ETH to InsurancePool
@@ -371,6 +388,28 @@ contract BastionHook is BaseTestHooks {
             insurancePool.depositFee{value: feeAmount}(poolId);
             emit InsuranceFeeDeposited(poolId, feeAmount);
         }
+    }
+
+    // ─── Transient Storage Helpers (EIP-1153) ──────────────────────────
+
+    function _tstore(bytes32 slot, uint256 value) internal {
+        assembly { tstore(slot, value) }
+    }
+
+    function _tload(bytes32 slot) internal view returns (uint256 value) {
+        assembly { value := tload(slot) }
+    }
+
+    function _preSwapBalanceSlot(PoolId poolId) internal pure returns (bytes32) {
+        return keccak256(abi.encode(poolId, "preSwapBalance"));
+    }
+
+    function _issuedTokenSlot(PoolId poolId) internal pure returns (bytes32) {
+        return keccak256(abi.encode(poolId, "issuedToken"));
+    }
+
+    function _issuerSlot(PoolId poolId) internal pure returns (bytes32) {
+        return keccak256(abi.encode(poolId, "issuer"));
     }
 
     /// @dev Allow receiving ETH for insurance fee deposits
