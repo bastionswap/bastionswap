@@ -255,7 +255,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("=== SCENARIO 1 COMPLETE ===");
     }
 
-    function _scenario1_verifyCreation() internal {
+    function _scenario1_verifyCreation() internal view {
         assertTrue(hook.isIssuer(_poolId, issuerAddr), "issuer not registered");
         assertEq(issuedToken.balanceOf(address(escrowVault)), ESCROW_AMOUNT, "escrow not funded");
         assertTrue(triggerOracle.isConfigSet(_poolId), "trigger config not set");

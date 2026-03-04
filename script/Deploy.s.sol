@@ -96,7 +96,7 @@ contract Deploy is Script {
 
     // ─── Internal Helpers ───────────────────────────────────────────────
 
-    function _precompute(address deployer, address poolManager) internal returns (Addresses memory a) {
+    function _precompute(address deployer, address poolManager) internal view returns (Addresses memory a) {
         uint64 nonce = vm.getNonce(deployer);
         console2.log("Deployer nonce:", nonce);
 

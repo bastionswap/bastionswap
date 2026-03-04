@@ -348,8 +348,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         vm.prank(issuerAddr);
         escrowVault.releaseVested(escrowId);
 
-        uint256 issuedBalBefore = issuedToken.balanceOf(address(escrowVault));
-
         // Simulate commitment breach reported by hook
         vm.prank(address(hook));
         triggerOracle.reportCommitmentBreach(poolId);
@@ -821,12 +819,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_afterSwap_directCall_issuerSell_bothTokenDirections() public {
         _initPoolWithIssuer();
 
-        address issuedAddr = address(issuedToken);
-        bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-
-        // Test the opposite token direction from what naturally occurs
-        // If issued is token0, we already test that path. Test with issued as token1 scenario
-        // by creating a second pool with reversed token order.
+        // Test both token direction branches by calling afterSwap with both delta directions.
         // Instead, just directly test both delta branches by calling afterSwap twice
         // with swapped deltas.
 
@@ -911,16 +904,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
     function test_afterSwap_directCall_issuerSell_totalSupplyZero() public {
         _initPoolWithIssuer();
-
-        address issuedAddr = address(issuedToken);
-        bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-
-        // Burn all issued tokens to make totalSupply = 0
-        uint256 totalSupply = issuedToken.totalSupply();
-        // Can't easily burn all - instead deploy a mock token with 0 supply
-        // Simpler: just test with amount that results in 0 after cast
-        // Actually, the totalSupply check is in _reportIssuerSale which reads ERC20.totalSupply()
-        // We can't make it 0 since tokens exist. Skip this edge case.
+        // totalSupply is non-zero since tokens exist, so this path is unreachable
+        // in normal conditions. Kept as a documentation placeholder.
     }
 
     function test_onlyPoolManager_reverts() public {

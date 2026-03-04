@@ -529,7 +529,7 @@ contract TriggerOracleTest is Test {
     //  CONFIG & REGISTRATION TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_setTriggerConfig_storesCorrectly() public {
+    function test_setTriggerConfig_storesCorrectly() public view {
         ITriggerOracle.TriggerConfig memory cfg = oracle.getTriggerConfig(defaultPoolId);
         assertEq(cfg.lpRemovalThreshold, 5000);
         assertEq(cfg.dumpThresholdPercent, 3000);
@@ -542,7 +542,7 @@ contract TriggerOracleTest is Test {
         oracle.setTriggerConfig(defaultPoolId, _defaultConfig());
     }
 
-    function test_registerIssuer_storesCorrectly() public {
+    function test_registerIssuer_storesCorrectly() public view {
         assertEq(oracle.getPoolIssuer(defaultPoolId), issuer);
     }
 

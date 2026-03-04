@@ -140,7 +140,7 @@ contract BastionHook is BaseTestHooks {
 
     /// @notice Called before liquidity is removed. Reports LP removal to TriggerOracle.
     function beforeRemoveLiquidity(
-        address sender,
+        address,
         PoolKey calldata key,
         ModifyLiquidityParams calldata params,
         bytes calldata
@@ -231,7 +231,7 @@ contract BastionHook is BaseTestHooks {
 
     function _registerIssuerAndCreateEscrow(
         PoolId poolId,
-        PoolKey calldata key,
+        PoolKey calldata,
         bytes calldata hookData
     ) internal {
         // Decode hookData — issuer address is explicitly provided
@@ -297,7 +297,7 @@ contract BastionHook is BaseTestHooks {
         PoolId poolId,
         BalanceDelta delta,
         PoolKey calldata key,
-        SwapParams calldata params,
+        SwapParams calldata,
         address issuedToken
     ) internal {
         // The fee is based on the base asset (ETH/WETH) amount spent
