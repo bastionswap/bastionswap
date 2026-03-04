@@ -1,0 +1,506 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "bastionHook",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "triggerOracle",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "insurancePool",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "reputationEngine",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "BASTION_HOOK",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "INSURANCE_POOL",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "REPUTATION_ENGINE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IReputationEngine"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "TRIGGER_ORACLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "calculateVestedAmount",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "createEscrow",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      },
+      {
+        "name": "issuer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "vestingSchedule",
+        "type": "tuple[]",
+        "internalType": "struct IEscrowVault.VestingStep[]",
+        "components": [
+          {
+            "name": "timeOffset",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "basisPoints",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      },
+      {
+        "name": "commitment",
+        "type": "tuple",
+        "internalType": "struct IEscrowVault.IssuerCommitment",
+        "components": [
+          {
+            "name": "dailyWithdrawLimit",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "lockDuration",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "maxSellPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getEscrowStatus",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "status",
+        "type": "tuple",
+        "internalType": "struct IEscrowVault.EscrowStatus",
+        "components": [
+          {
+            "name": "totalLocked",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "released",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "remaining",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nextUnlockTime",
+            "type": "uint40",
+            "internalType": "uint40"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "releaseVested",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "releasedAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setCommitment",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "newCommitment",
+        "type": "tuple",
+        "internalType": "struct IEscrowVault.IssuerCommitment",
+        "components": [
+          {
+            "name": "dailyWithdrawLimit",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "lockDuration",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "maxSellPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "triggerRedistribution",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "triggerType_",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "redistributedAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "CommitmentSet",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newCommitment",
+        "type": "tuple",
+        "indexed": false,
+        "internalType": "struct IEscrowVault.IssuerCommitment",
+        "components": [
+          {
+            "name": "dailyWithdrawLimit",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "lockDuration",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "maxSellPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "EscrowCreated",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "PoolId"
+      },
+      {
+        "name": "issuer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ExternalCallFailed",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Redistributed",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "triggerType",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "uint8"
+      },
+      {
+        "name": "redistributedAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "VestedReleased",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "releasedAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "CommitmentNotStricter",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "DailyLimitExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EmptySchedule",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EscrowAlreadyExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EscrowNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EscrowTriggered",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NothingToRelease",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyHook",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyIssuer",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyTriggerOracle",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ScheduleBpsExceedsMax",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ScheduleBpsNotIncreasing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ScheduleFinalBpsNot10000",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ScheduleTimesNotIncreasing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ScheduleTooLong",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAmount",
+    "inputs": []
+  }
+]

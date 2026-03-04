@@ -10,6 +10,9 @@ packages/contracts/broadcast/
 packages/subgraph/build/
 packages/subgraph/generated/
 
+# Frontend
+.next/
+
 # Environment
 .env
 .env.local
