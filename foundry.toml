@@ -13,6 +13,11 @@ fs_permissions = [{ access = "read-write", path = "./" }]
 optimizer_runs = 1_000_000
 via_ir = true
 
+[invariant]
+runs = 10000
+depth = 50
+fail_on_revert = false
+
 [rpc_endpoints]
 base_sepolia = "${BASE_SEPOLIA_RPC}"
 base_mainnet = "${BASE_MAINNET_RPC}"
