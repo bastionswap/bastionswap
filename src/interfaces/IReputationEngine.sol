@@ -45,4 +45,21 @@ interface IReputationEngine {
     /// @param eventType Type of event being recorded
     /// @param data Arbitrary encoded data providing context about the event
     function recordEvent(address issuer, EventType eventType, bytes calldata data) external;
+
+    /// @notice Encodes an issuer's score data for cross-chain transmission.
+    /// @param issuer Address of the token issuer
+    /// @return data ABI-encoded score data
+    function encodeScoreData(address issuer) external view returns (bytes memory data);
+
+    /// @notice Decodes score data received from a cross-chain message.
+    /// @param data ABI-encoded score data
+    /// @return score The reputation score
+    /// @return poolsCreated Number of pools created
+    /// @return escrowsCompleted Number of escrows completed
+    /// @return triggerCount Total trigger count
+    /// @return uniqueTokens Number of unique tokens
+    function decodeScoreData(bytes calldata data)
+        external
+        pure
+        returns (uint256 score, uint16 poolsCreated, uint16 escrowsCompleted, uint16 triggerCount, uint16 uniqueTokens);
 }
