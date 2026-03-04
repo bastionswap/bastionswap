@@ -1,0 +1,9 @@
+{
+  "name": "@bastionswap/subgraph",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "echo 'TODO: configure subgraph build'",
+    "codegen": "echo 'TODO: configure subgraph codegen'"
+  }
+}

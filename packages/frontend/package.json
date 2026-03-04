@@ -1,0 +1,9 @@
+{
+  "name": "@bastionswap/frontend",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'TODO: configure frontend dev server'",
+    "build": "echo 'TODO: configure frontend build'"
+  }
+}

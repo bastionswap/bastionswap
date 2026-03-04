@@ -1,25 +1,29 @@
-# Compiler files
-cache/
-out/
-
-# Broadcast logs
-broadcast/
-
-# Dotenv file
-.env
-.env.*
-
 # Dependencies
 node_modules/
 
-# OS
-.DS_Store
-Thumbs.db
+# Foundry (contracts)
+packages/contracts/out/
+packages/contracts/cache/
+packages/contracts/broadcast/
 
-# IDE
-.vscode/
-.idea/
+# Subgraph
+packages/subgraph/build/
+packages/subgraph/generated/
+
+# Environment
+.env
+.env.local
+.env.*
 
 # Coverage
 lcov.info
 coverage/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Turbo
+.turbo/
