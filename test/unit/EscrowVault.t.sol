@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {EscrowVault} from "../../src/core/EscrowVault.sol";
 import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 // ─── Mock Token ───────────────────────────────────────────────────────────────
 

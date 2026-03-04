@@ -4,8 +4,8 @@ pragma solidity ^0.8.26;
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 /// @title EscrowVault
 /// @notice Manages time-locked and condition-based vesting of issuer LP funds.
