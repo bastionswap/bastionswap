@@ -13,7 +13,6 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 contract InsurancePool is IInsurancePool, ReentrancyGuard {
     // ─── Constants ────────────────────────────────────────────────────
 
-    uint16 internal constant BPS_BASE = 10_000;
     uint16 internal constant MAX_FEE_RATE = 200; // 2%
     uint40 internal constant CLAIM_PERIOD = 30 days;
     uint40 internal constant FALLBACK_CLAIM_PERIOD = 7 days;

@@ -279,8 +279,8 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         if (len == 0) revert EmptySchedule();
         if (len > MAX_SCHEDULE_LENGTH) revert ScheduleTooLong();
 
-        uint40 prevTime;
-        uint16 prevBps;
+        uint40 prevTime = 0;
+        uint16 prevBps = 0;
 
         for (uint256 i; i < len; ++i) {
             if (i > 0) {
@@ -307,7 +307,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         if (elapsed <= escrow.commitment.lockDuration) return 0;
         uint256 effectiveElapsed = elapsed - escrow.commitment.lockDuration;
 
-        uint16 vestedBps;
+        uint16 vestedBps = 0;
         for (uint256 i; i < schedule.length; ++i) {
             if (schedule[i].timeOffset <= effectiveElapsed) {
                 vestedBps = schedule[i].basisPoints;

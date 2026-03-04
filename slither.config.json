@@ -1,0 +1,4 @@
+{
+  "filter_paths": "lib/,test/,node_modules/,script/",
+  "compile_force_framework": "foundry"
+}

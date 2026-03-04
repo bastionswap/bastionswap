@@ -499,7 +499,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @dev Compute stable LP: totalLP minus LP added within MIN_LP_AGE (RISK-4).
     function _computeStableLP(bytes32 key, uint256 totalLP) internal view returns (uint256) {
         Record[] storage additions = _lpAdditions[key];
-        uint256 recentLP;
+        uint256 recentLP = 0;
         uint256 cutoff = block.timestamp > MIN_LP_AGE ? block.timestamp - MIN_LP_AGE : 0;
         uint256 len = additions.length;
         for (uint256 i; i < len; ++i) {

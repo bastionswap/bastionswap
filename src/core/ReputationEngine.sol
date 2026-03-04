@@ -155,9 +155,8 @@ contract ReputationEngine is IReputationEngine {
             profile.uniqueTokens++;
         }
 
-        // Add escrow history weighted value (amount * lockDuration in days / 1e18)
-        uint256 durationDays = uint256(commitment.lockDuration) / 1 days;
-        profile.totalLockedWeighted += (amount * durationDays) / 1e18;
+        // Add escrow history weighted value (amount * lockDuration / (1 day * 1e18))
+        profile.totalLockedWeighted += (amount * uint256(commitment.lockDuration)) / (1 days * 1e18);
 
         // Add commitment strictness score
         profile.commitmentScore += _calcSingleCommitmentStrictness(commitment);

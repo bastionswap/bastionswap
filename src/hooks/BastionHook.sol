@@ -164,18 +164,18 @@ contract BastionHook is BaseTestHooks {
         if (removeAmount > 0) {
             uint256 totalLP = _totalLiquidity[poolId];
 
+            // Update tracked liquidity before external call (CEI pattern)
+            if (removeAmount <= totalLP) {
+                _totalLiquidity[poolId] = totalLP - removeAmount;
+            } else {
+                _totalLiquidity[poolId] = 0;
+            }
+
             // Report LP removal to TriggerOracle (for all LPs, but especially issuers)
             if (_issuers[poolId] != address(0) && totalLP > 0) {
                 try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
                     emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
                 }
-            }
-
-            // Update tracked liquidity
-            if (removeAmount <= _totalLiquidity[poolId]) {
-                _totalLiquidity[poolId] -= removeAmount;
-            } else {
-                _totalLiquidity[poolId] = 0;
             }
 
             emit LPRemovalReported(poolId, removeAmount, totalLP);
