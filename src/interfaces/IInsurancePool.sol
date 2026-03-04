@@ -97,10 +97,31 @@ interface IInsurancePool {
     /// @param newFeeRate New fee rate in basis points (max 200 = 2%)
     function setFeeRate(uint16 newFeeRate) external;
 
-    /// @notice Emergency withdrawal of pool funds.
-    /// @dev Can only be called by governance. For extreme situations only.
+    /// @notice Pending emergency withdrawal request.
+    struct EmergencyRequest {
+        PoolId poolId;
+        address to;
+        uint256 amount;
+        uint40 requestedAt;
+    }
+
+    /// @notice Emitted when an emergency withdrawal is requested.
+    event EmergencyWithdrawRequested(bytes32 indexed requestId, PoolId indexed poolId, address to, uint256 amount);
+
+    /// @notice Emitted when an emergency withdrawal request is cancelled.
+    event EmergencyWithdrawCancelled(bytes32 indexed requestId);
+
+    /// @notice Request an emergency withdrawal (subject to timelock).
     /// @param poolId Pool to withdraw from
     /// @param to Recipient address
     /// @param amount Amount to withdraw
-    function emergencyWithdraw(PoolId poolId, address to, uint256 amount) external;
+    function requestEmergencyWithdraw(PoolId poolId, address to, uint256 amount) external returns (bytes32 requestId);
+
+    /// @notice Execute a previously requested emergency withdrawal after timelock delay.
+    /// @param requestId The request identifier
+    function executeEmergencyWithdraw(bytes32 requestId) external;
+
+    /// @notice Cancel a pending emergency withdrawal request.
+    /// @param requestId The request identifier
+    function cancelEmergencyWithdraw(bytes32 requestId) external;
 }

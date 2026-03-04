@@ -18,9 +18,9 @@ import {HookMiner} from "./HookMiner.sol";
 ///         Resolves circular immutable dependencies via nonce-based address pre-computation
 ///         and deploys BastionHook to a CREATE2-mined address matching V4 hook flag pattern.
 contract Deploy is Script {
-    // Hook permission flags: beforeAddLiquidity | beforeRemoveLiquidity | afterSwap
+    // Hook permission flags: beforeAddLiquidity | beforeRemoveLiquidity | beforeSwap | afterSwap
     uint160 constant HOOK_FLAGS =
-        uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.AFTER_SWAP_FLAG);
+        uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
 
     struct Addresses {
         address factory;
@@ -114,7 +114,7 @@ contract Deploy is Script {
         );
 
         // Mine CREATE2 salt for hook flag matching
-        console2.log("Mining CREATE2 salt for hook flags 0x0A40...");
+        console2.log("Mining CREATE2 salt for hook flags 0x0AC0...");
         (a.hook, a.salt) = HookMiner.find(a.factory, HOOK_FLAGS, a.hookCreationCode, 0);
 
         require(uint160(a.hook) & 0x3FFF == HOOK_FLAGS, "Hook flag mismatch");

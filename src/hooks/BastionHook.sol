@@ -51,6 +51,9 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => token address that is the "issued" token (non-base asset)
     mapping(PoolId => address) internal _issuedTokens;
 
+    /// @dev poolId => pre-swap issuer balance snapshot (for router bypass detection)
+    mapping(PoolId => uint256) internal _preSwapIssuerBalance;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyPoolManager();
@@ -98,7 +101,7 @@ contract BastionHook is BaseTestHooks {
             afterAddLiquidity: false,
             beforeRemoveLiquidity: true,
             afterRemoveLiquidity: false,
-            beforeSwap: false,
+            beforeSwap: true,
             afterSwap: true,
             beforeDonate: false,
             afterDonate: false,
@@ -132,7 +135,15 @@ contract BastionHook is BaseTestHooks {
 
         // Track total liquidity
         if (params.liquidityDelta > 0) {
-            _totalLiquidity[poolId] += uint256(int256(params.liquidityDelta));
+            uint256 addedLP = uint256(int256(params.liquidityDelta));
+            _totalLiquidity[poolId] += addedLP;
+
+            // RISK-4: Report LP addition for flash-loan inflation tracking
+            if (_issuers[poolId] != address(0)) {
+                try triggerOracle.reportLPAddition(poolId, addedLP) {} catch {
+                    emit ExternalCallFailed("TriggerOracle.reportLPAddition", poolId);
+                }
+            }
         }
 
         return IHooks.beforeAddLiquidity.selector;
@@ -173,10 +184,28 @@ contract BastionHook is BaseTestHooks {
         return IHooks.beforeRemoveLiquidity.selector;
     }
 
+    /// @notice Called before a swap. Snapshots issuer balance for router bypass detection (RISK-3).
+    function beforeSwap(
+        address,
+        PoolKey calldata key,
+        SwapParams calldata,
+        bytes calldata
+    ) external override onlyPoolManager returns (bytes4, BeforeSwapDelta, uint24) {
+        PoolId poolId = key.toId();
+        address issuedToken = _issuedTokens[poolId];
+        address poolIssuer = _issuers[poolId];
+
+        if (issuedToken != address(0) && poolIssuer != address(0)) {
+            _preSwapIssuerBalance[poolId] = ERC20(issuedToken).balanceOf(poolIssuer);
+        }
+
+        return (IHooks.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
+    }
+
     /// @notice Called after a swap. Deposits insurance fee on buys and
     ///         reports issuer sales to TriggerOracle.
     function afterSwap(
-        address sender,
+        address,
         PoolKey calldata key,
         SwapParams calldata params,
         BalanceDelta delta,
@@ -194,10 +223,21 @@ contract BastionHook is BaseTestHooks {
                 _collectInsuranceFee(poolId, delta, key, params, issuedToken);
             }
 
-            // Check if issuer is selling tokens
+            // RISK-3: Check if issuer balance decreased (detects router bypass)
             address poolIssuer = _issuers[poolId];
-            if (sender == poolIssuer && !isBuy) {
-                _reportIssuerSale(poolId, poolIssuer, delta, key, issuedToken);
+            if (poolIssuer != address(0)) {
+                uint256 preBalance = _preSwapIssuerBalance[poolId];
+                uint256 postBalance = ERC20(issuedToken).balanceOf(poolIssuer);
+                if (postBalance < preBalance) {
+                    uint256 soldAmount = preBalance - postBalance;
+                    uint256 totalSupply = ERC20(issuedToken).totalSupply();
+                    if (totalSupply > 0) {
+                        try triggerOracle.reportIssuerSale(poolId, poolIssuer, soldAmount, totalSupply) {} catch {
+                            emit ExternalCallFailed("TriggerOracle.reportIssuerSale", poolId);
+                        }
+                        emit IssuerSaleReported(poolId, poolIssuer, soldAmount);
+                    }
+                }
             }
         }
 
@@ -261,8 +301,8 @@ contract BastionHook is BaseTestHooks {
         );
         _escrowIds[poolId] = escrowId;
 
-        // Register issuer and config in TriggerOracle
-        triggerOracle.registerIssuer(poolId, issuer);
+        // Register issuer and config in TriggerOracle (RISK-5: pass totalSupply snapshot)
+        triggerOracle.registerIssuer(poolId, issuer, ERC20(token).totalSupply());
         triggerOracle.setTriggerConfig(poolId, triggerConfig);
 
         // Record pool creation in reputation engine
@@ -331,38 +371,6 @@ contract BastionHook is BaseTestHooks {
             insurancePool.depositFee{value: feeAmount}(poolId);
             emit InsuranceFeeDeposited(poolId, feeAmount);
         }
-    }
-
-    /// @dev Report issuer token sale to TriggerOracle.
-    function _reportIssuerSale(
-        PoolId poolId,
-        address issuer,
-        BalanceDelta delta,
-        PoolKey calldata key,
-        address issuedToken
-    ) internal {
-        // The issuer sold the issued token (sell = !buy)
-        bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
-        int128 issuedAmount;
-        if (issuedIsToken0) {
-            issuedAmount = delta.amount0();
-        } else {
-            issuedAmount = delta.amount1();
-        }
-
-        // In a sell, the swapper sends issued tokens (negative delta)
-        if (issuedAmount >= 0) return;
-        uint256 soldAmount = uint256(uint128(int128(-issuedAmount)));
-
-        // Get total supply for percentage calculation
-        uint256 totalSupply = ERC20(issuedToken).totalSupply();
-        if (totalSupply == 0) return;
-
-        try triggerOracle.reportIssuerSale(poolId, issuer, soldAmount, totalSupply) {} catch {
-            emit ExternalCallFailed("TriggerOracle.reportIssuerSale", poolId);
-        }
-
-        emit IssuerSaleReported(poolId, issuer, soldAmount);
     }
 
     /// @dev Allow receiving ETH for insurance fee deposits

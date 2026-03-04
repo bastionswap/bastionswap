@@ -119,11 +119,12 @@ contract TriggerOracleTest is Test {
 
     function _registerIssuer() internal {
         vm.prank(hook);
-        oracle.registerIssuer(defaultPoolId, issuer);
+        oracle.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
     }
 
     function _executeAfterGrace() internal {
         vm.warp(block.timestamp + 1 hours);
+        vm.prank(guardian);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
@@ -325,6 +326,7 @@ contract TriggerOracleTest is Test {
         oracle.reportCommitmentBreach(defaultPoolId);
 
         // Try to execute immediately
+        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.GracePeriodNotElapsed.selector);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
@@ -334,6 +336,7 @@ contract TriggerOracleTest is Test {
         oracle.reportCommitmentBreach(defaultPoolId);
 
         vm.warp(block.timestamp + 1 hours);
+        vm.prank(guardian);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
 
         ITriggerOracle.TriggerResult memory result = oracle.checkTrigger(defaultPoolId);
@@ -349,11 +352,13 @@ contract TriggerOracleTest is Test {
 
         // Exactly at grace period boundary (1 hour - 1 second) => should fail
         vm.warp(startTime + 1 hours - 1);
+        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.GracePeriodNotElapsed.selector);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
 
         // Exactly at 1 hour => should succeed
         vm.warp(startTime + 1 hours);
+        vm.prank(guardian);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
 
         assertTrue(oracle.checkTrigger(defaultPoolId).triggered);
@@ -420,10 +425,12 @@ contract TriggerOracleTest is Test {
             defaultPoolId, ITriggerOracle.TriggerType.COMMITMENT_BREACH, ""
         );
 
+        vm.prank(guardian);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
     function test_executeTrigger_revertsNoPending() public {
+        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.NoPendingTrigger.selector);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
@@ -438,6 +445,7 @@ contract TriggerOracleTest is Test {
         _executeAfterGrace();
 
         // Trying to execute again should revert (no pending)
+        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.NoPendingTrigger.selector);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
@@ -491,6 +499,7 @@ contract TriggerOracleTest is Test {
         oracle.pause();
 
         vm.warp(block.timestamp + 1 hours);
+        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.IsPaused.selector);
         oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
@@ -549,12 +558,12 @@ contract TriggerOracleTest is Test {
     function test_registerIssuer_revertsZeroAddress() public {
         vm.prank(hook);
         vm.expectRevert(TriggerOracle.ZeroAddress.selector);
-        oracle.registerIssuer(defaultPoolId, address(0));
+        oracle.registerIssuer(defaultPoolId, address(0), TOTAL_SUPPLY);
     }
 
     function test_registerIssuer_revertsNotHook() public {
         vm.expectRevert(TriggerOracle.OnlyHook.selector);
-        oracle.registerIssuer(defaultPoolId, issuer);
+        oracle.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
     }
 
     function test_isConfigSet() public view {
@@ -581,7 +590,7 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracle.setTriggerConfig(poolId2, _defaultConfig());
         vm.prank(hook);
-        oracle.registerIssuer(poolId2, issuer);
+        oracle.registerIssuer(poolId2, issuer, TOTAL_SUPPLY);
 
         // Now trigger pool1 again by re-creating pending state manually is not possible,
         // so we test the path by trying executeTrigger when isTriggered=true and pending exists
@@ -702,7 +711,7 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracle.setTriggerConfig(poolId2, _defaultConfig());
         vm.prank(hook);
-        oracle.registerIssuer(poolId2, makeAddr("issuer2"));
+        oracle.registerIssuer(poolId2, makeAddr("issuer2"), TOTAL_SUPPLY);
 
         // Trigger pool 1
         vm.prank(hook);
@@ -735,7 +744,7 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracleWithBadEscrow.setTriggerConfig(defaultPoolId, _defaultConfig());
         vm.prank(hook);
-        oracleWithBadEscrow.registerIssuer(defaultPoolId, issuer);
+        oracleWithBadEscrow.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
 
         vm.prank(hook);
         oracleWithBadEscrow.reportCommitmentBreach(defaultPoolId);
@@ -743,6 +752,7 @@ contract TriggerOracleTest is Test {
 
         vm.expectEmit(false, true, false, true);
         emit TriggerOracle.ExternalCallFailed("EscrowVault.triggerRedistribution", defaultPoolId);
+        vm.prank(guardian);
         oracleWithBadEscrow.executeTrigger(defaultPoolId, bytes32(0));
 
         assertTrue(oracleWithBadEscrow.checkTrigger(defaultPoolId).triggered);
@@ -758,7 +768,7 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracleWithBadInsurance.setTriggerConfig(defaultPoolId, _defaultConfig());
         vm.prank(hook);
-        oracleWithBadInsurance.registerIssuer(defaultPoolId, issuer);
+        oracleWithBadInsurance.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
 
         // Use issuer dump for totalEligibleSupply > 0
         vm.prank(hook);
@@ -767,6 +777,7 @@ contract TriggerOracleTest is Test {
 
         vm.expectEmit(false, true, false, true);
         emit TriggerOracle.ExternalCallFailed("InsurancePool.executePayout", defaultPoolId);
+        vm.prank(guardian);
         oracleWithBadInsurance.executeTrigger(defaultPoolId, bytes32(0));
 
         assertTrue(oracleWithBadInsurance.checkTrigger(defaultPoolId).triggered);
@@ -781,7 +792,7 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracleWithBadRep.setTriggerConfig(defaultPoolId, _defaultConfig());
         vm.prank(hook);
-        oracleWithBadRep.registerIssuer(defaultPoolId, issuer);
+        oracleWithBadRep.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
 
         vm.prank(hook);
         oracleWithBadRep.reportCommitmentBreach(defaultPoolId);
@@ -789,6 +800,7 @@ contract TriggerOracleTest is Test {
 
         vm.expectEmit(false, true, false, true);
         emit TriggerOracle.ExternalCallFailed("ReputationEngine.recordEvent", defaultPoolId);
+        vm.prank(guardian);
         oracleWithBadRep.executeTrigger(defaultPoolId, bytes32(0));
 
         assertTrue(oracleWithBadRep.checkTrigger(defaultPoolId).triggered);
@@ -826,5 +838,147 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         vm.expectRevert(TriggerOracle.ConfigNotSet.selector);
         oracle.reportCommitmentBreach(unconfigured);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  RISK-1: PAUSE AUTO-EXPIRY TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_pause_auto_expires_after_7_days() public {
+        vm.prank(guardian);
+        oracle.pause();
+        assertTrue(oracle.paused());
+
+        // Still paused after 6 days
+        vm.warp(block.timestamp + 6 days);
+        assertTrue(oracle.paused());
+
+        // Auto-expires after 7 days
+        vm.warp(block.timestamp + 1 days + 1);
+        assertFalse(oracle.paused());
+
+        // Operations should work again without explicit unpause
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+        (bool exists,,) = oracle.getPendingTrigger(defaultPoolId);
+        assertTrue(exists);
+    }
+
+    function test_pause_blocks_operations_within_duration() public {
+        vm.prank(guardian);
+        oracle.pause();
+
+        // All operations blocked while paused
+        vm.prank(hook);
+        vm.expectRevert(TriggerOracle.IsPaused.selector);
+        oracle.reportLPRemoval(defaultPoolId, 510 ether, TOTAL_LP);
+
+        vm.prank(hook);
+        vm.expectRevert(TriggerOracle.IsPaused.selector);
+        oracle.reportIssuerSale(defaultPoolId, issuer, 310_000 ether, TOTAL_SUPPLY);
+
+        vm.prank(hook);
+        vm.expectRevert(TriggerOracle.IsPaused.selector);
+        oracle.reportCommitmentBreach(defaultPoolId);
+    }
+
+    function test_unpause_clears_pausedUntil() public {
+        vm.prank(guardian);
+        oracle.pause();
+        assertGt(oracle.pausedUntil(), 0);
+
+        vm.prank(guardian);
+        oracle.unpause();
+        assertEq(oracle.pausedUntil(), 0);
+        assertFalse(oracle.paused());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  RISK-4: LP INFLATION VIA FLASH LOAN TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_flash_loan_lp_inflation_detected() public {
+        // Simulate flash-loan LP inflation: add LP, then immediately remove
+        // The recently-added LP should not count as stable LP
+
+        // Report LP addition (simulating flash loan add)
+        vm.prank(hook);
+        oracle.reportLPAddition(defaultPoolId, 900 ether);
+
+        // Now try to remove LP — with inflated totalLP = 1000 ether
+        // stableLP = totalLP - recentLP = 1000 - 900 = 100 ether
+        // Removing 51 ether from 100 stableLP = 51% > 50% threshold
+        vm.prank(hook);
+        oracle.reportLPRemoval(defaultPoolId, 51 ether, TOTAL_LP);
+
+        (bool exists, ITriggerOracle.TriggerType triggerType,) = oracle.getPendingTrigger(defaultPoolId);
+        assertTrue(exists);
+        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
+    }
+
+    function test_stable_lp_after_min_age() public {
+        // Add LP, wait past MIN_LP_AGE, then it counts as stable
+        vm.prank(hook);
+        oracle.reportLPAddition(defaultPoolId, 900 ether);
+
+        // Warp past MIN_LP_AGE (1 hour)
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        // Now stableLP = totalLP (all LP is old enough)
+        // Removing 51 ether from 1000 total = 5.1% < 50% threshold
+        vm.prank(hook);
+        oracle.reportLPRemoval(defaultPoolId, 51 ether, TOTAL_LP);
+
+        (bool exists,,) = oracle.getPendingTrigger(defaultPoolId);
+        assertFalse(exists);
+    }
+
+    function test_lp_removal_uses_stable_lp() public {
+        // Add LP recently (within MIN_LP_AGE)
+        vm.prank(hook);
+        oracle.reportLPAddition(defaultPoolId, 500 ether);
+
+        // totalLP = 1000, recentLP = 500, stableLP = 500
+        // Remove 260 from 500 stableLP = 52% > 50% threshold => should trigger
+        vm.prank(hook);
+        oracle.reportLPRemoval(defaultPoolId, 260 ether, TOTAL_LP);
+
+        (bool exists, ITriggerOracle.TriggerType triggerType,) = oracle.getPendingTrigger(defaultPoolId);
+        assertTrue(exists);
+        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  RISK-5: TOTAL SUPPLY INFLATION TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_initial_supply_snapshot_stored() public view {
+        uint256 initialSupply = oracle.getInitialTotalSupply(defaultPoolId);
+        assertEq(initialSupply, TOTAL_SUPPLY);
+    }
+
+    function test_dump_detection_uses_initial_supply() public {
+        // Register with initial supply of 1M
+        // Then report sale with inflated totalSupply of 2M
+        // Without fix: 310k / 2M = 15.5% < 30% threshold (no trigger)
+        // With fix: min(2M, 1M) = 1M, so 310k / 1M = 31% > 30% threshold (trigger!)
+
+        vm.prank(hook);
+        oracle.reportIssuerSale(defaultPoolId, issuer, 310_000 ether, 2_000_000 ether);
+
+        (bool exists, ITriggerOracle.TriggerType triggerType,) = oracle.getPendingTrigger(defaultPoolId);
+        assertTrue(exists);
+        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.ISSUER_DUMP));
+    }
+
+    function test_supply_inflation_event_emitted() public {
+        // Report sale with totalSupply > 1.5x initial => should emit SupplyInflationDetected
+        uint256 inflatedSupply = (TOTAL_SUPPLY * 2); // 2x initial
+
+        vm.expectEmit(true, false, false, true);
+        emit TriggerOracle.SupplyInflationDetected(defaultPoolId, TOTAL_SUPPLY, inflatedSupply);
+
+        vm.prank(hook);
+        oracle.reportIssuerSale(defaultPoolId, issuer, 310_000 ether, inflatedSupply);
     }
 }

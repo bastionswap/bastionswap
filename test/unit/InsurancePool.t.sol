@@ -649,60 +649,130 @@ contract InsurancePoolTest is Test {
     //  EMERGENCY WITHDRAW TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_emergencyWithdraw_happyPath() public {
+    function test_emergencyWithdraw_timelockFlow() public {
         _deposit(DEPOSIT_AMOUNT);
 
         address recipient = makeAddr("recipient");
 
+        // Request
         vm.prank(governance);
-        pool.emergencyWithdraw(defaultPoolId, recipient, 5 ether);
+        bytes32 requestId = pool.requestEmergencyWithdraw(defaultPoolId, recipient, 5 ether);
+
+        // Cannot execute before delay
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.EmergencyDelayNotElapsed.selector);
+        pool.executeEmergencyWithdraw(requestId);
+
+        // Warp past delay
+        vm.warp(block.timestamp + 2 days);
+
+        // Execute
+        vm.prank(governance);
+        pool.executeEmergencyWithdraw(requestId);
 
         assertEq(recipient.balance, 5 ether);
         IInsurancePool.PoolStatus memory status = pool.getPoolStatus(defaultPoolId);
         assertEq(status.balance, 5 ether);
     }
 
-    function test_emergencyWithdraw_emitsEvent() public {
+    function test_emergencyWithdraw_emitsEvents() public {
         _deposit(DEPOSIT_AMOUNT);
 
         address recipient = makeAddr("recipient");
+
+        vm.prank(governance);
+        bytes32 requestId = pool.requestEmergencyWithdraw(defaultPoolId, recipient, 5 ether);
+
+        vm.warp(block.timestamp + 2 days);
 
         vm.expectEmit(true, true, false, true);
         emit IInsurancePool.EmergencyWithdrawal(defaultPoolId, recipient, 5 ether);
 
         vm.prank(governance);
-        pool.emergencyWithdraw(defaultPoolId, recipient, 5 ether);
+        pool.executeEmergencyWithdraw(requestId);
     }
 
-    function test_emergencyWithdraw_revertsNotGovernance() public {
+    function test_emergencyWithdraw_requestRevertsNotGovernance() public {
         _deposit(DEPOSIT_AMOUNT);
 
         vm.expectRevert(InsurancePool.OnlyGovernance.selector);
-        pool.emergencyWithdraw(defaultPoolId, holder1, 1 ether);
+        pool.requestEmergencyWithdraw(defaultPoolId, holder1, 1 ether);
     }
 
-    function test_emergencyWithdraw_revertsZeroAddress() public {
+    function test_emergencyWithdraw_requestRevertsZeroAddress() public {
         _deposit(DEPOSIT_AMOUNT);
 
         vm.prank(governance);
         vm.expectRevert(InsurancePool.ZeroAddress.selector);
-        pool.emergencyWithdraw(defaultPoolId, address(0), 1 ether);
+        pool.requestEmergencyWithdraw(defaultPoolId, address(0), 1 ether);
     }
 
-    function test_emergencyWithdraw_revertsZeroAmount() public {
+    function test_emergencyWithdraw_requestRevertsZeroAmount() public {
         _deposit(DEPOSIT_AMOUNT);
 
         vm.prank(governance);
         vm.expectRevert(InsurancePool.ZeroAmount.selector);
-        pool.emergencyWithdraw(defaultPoolId, holder1, 0);
+        pool.requestEmergencyWithdraw(defaultPoolId, holder1, 0);
     }
 
-    function test_emergencyWithdraw_revertsInsufficientBalance() public {
+    function test_emergencyWithdraw_executeRevertsInsufficientBalance() public {
         _deposit(1 ether);
 
         vm.prank(governance);
+        bytes32 requestId = pool.requestEmergencyWithdraw(defaultPoolId, holder1, 2 ether);
+
+        vm.warp(block.timestamp + 2 days);
+
+        vm.prank(governance);
         vm.expectRevert(InsurancePool.InsufficientPoolBalance.selector);
-        pool.emergencyWithdraw(defaultPoolId, holder1, 2 ether);
+        pool.executeEmergencyWithdraw(requestId);
+    }
+
+    function test_emergencyWithdraw_cancel() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        vm.prank(governance);
+        bytes32 requestId = pool.requestEmergencyWithdraw(defaultPoolId, holder1, 5 ether);
+
+        vm.prank(governance);
+        pool.cancelEmergencyWithdraw(requestId);
+
+        // Cannot execute cancelled request
+        vm.warp(block.timestamp + 2 days);
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.EmergencyRequestNotFound.selector);
+        pool.executeEmergencyWithdraw(requestId);
+    }
+
+    function test_emergencyWithdraw_doubleExecuteReverts() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        vm.prank(governance);
+        bytes32 requestId = pool.requestEmergencyWithdraw(defaultPoolId, holder1, 5 ether);
+
+        vm.warp(block.timestamp + 2 days);
+
+        vm.prank(governance);
+        pool.executeEmergencyWithdraw(requestId);
+
+        // Double execute should revert
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.EmergencyRequestNotFound.selector);
+        pool.executeEmergencyWithdraw(requestId);
+    }
+
+    function test_emergencyWithdraw_beforeDelayReverts() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        vm.prank(governance);
+        bytes32 requestId = pool.requestEmergencyWithdraw(defaultPoolId, holder1, 5 ether);
+
+        // Try at 1 day (before 2 day delay)
+        vm.warp(block.timestamp + 1 days);
+
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.EmergencyDelayNotElapsed.selector);
+        pool.executeEmergencyWithdraw(requestId);
     }
 
     // ═══════════════════════════════════════════════════════════════════

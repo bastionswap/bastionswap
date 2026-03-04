@@ -86,4 +86,9 @@ interface ITriggerOracle {
     /// @param poolId Uniswap V4 pool identifier
     /// @param config New trigger configuration to apply
     function setTriggerConfig(PoolId poolId, TriggerConfig calldata config) external;
+
+    /// @notice Reports an LP addition event for flash-loan inflation tracking.
+    /// @param poolId Pool identifier
+    /// @param amount Amount of LP added
+    function reportLPAddition(PoolId poolId, uint256 amount) external;
 }

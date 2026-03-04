@@ -72,7 +72,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         deployFreshManagerAndRouters();
 
         uint160 flags = uint160(
-            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.AFTER_SWAP_FLAG
+            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         address hookAddr = address(flags);
 
@@ -337,6 +337,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     function _scenario1_executeTrigger() internal {
         // Cannot execute before grace period
+        vm.prank(guardian);
         vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
         triggerOracle.executeTrigger(_poolId, bytes32(0));
 
@@ -350,6 +351,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         emit IEscrowVault.Redistributed(_escrowId, uint8(ITriggerOracle.TriggerType.RUG_PULL), expectedRedist);
 
         uint256 g = gasleft();
+        vm.prank(guardian);
         triggerOracle.executeTrigger(_poolId, bytes32(0));
         console.log("Gas: executeTrigger", g - gasleft());
 
@@ -604,6 +606,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     function _scenario3_executeTrigger() internal {
         // Grace period: cannot execute early
+        vm.prank(guardian);
         vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
         triggerOracle.executeTrigger(_poolId, bytes32(0));
 
@@ -634,6 +637,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         );
 
         uint256 g = gasleft();
+        vm.prank(guardian);
         triggerOracle.executeTrigger(_poolId, _scenario3MerkleRoot);
         console.log("Gas: executeTrigger (ISSUER_DUMP)", g - gasleft());
 

@@ -15,6 +15,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     uint16 internal constant BPS_BASE = 10_000;
     uint16 internal constant MAX_FEE_RATE = 200; // 2%
     uint40 internal constant CLAIM_PERIOD = 30 days;
+    uint40 internal constant EMERGENCY_DELAY = 2 days;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -42,6 +43,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     /// @notice Current fee rate in basis points (default 100 = 1%)
     uint16 public feeRate;
 
+    /// @dev Emergency withdrawal requests subject to timelock
+    mapping(bytes32 => IInsurancePool.EmergencyRequest) public emergencyRequests;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyHook();
@@ -60,6 +64,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error InvalidMerkleProof();
     error MerkleRootNotSet();
     error ExceedsPoolBalance();
+    error EmergencyDelayNotElapsed();
+    error EmergencyRequestNotFound();
+    error EmergencyRequestAlreadyExecuted();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -183,19 +190,51 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     }
 
     /// @inheritdoc IInsurancePool
-    function emergencyWithdraw(PoolId poolId, address to, uint256 amount) external onlyGovernance nonReentrant {
+    function requestEmergencyWithdraw(PoolId poolId, address to, uint256 amount)
+        external
+        onlyGovernance
+        returns (bytes32 requestId)
+    {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
 
-        PoolData storage pool = _getPool(poolId);
-        if (pool.balance < amount) revert InsufficientPoolBalance();
+        requestId = keccak256(abi.encode(poolId, to, amount, block.timestamp));
+        emergencyRequests[requestId] = IInsurancePool.EmergencyRequest({
+            poolId: poolId,
+            to: to,
+            amount: amount,
+            requestedAt: uint40(block.timestamp)
+        });
 
-        pool.balance -= amount;
+        emit IInsurancePool.EmergencyWithdrawRequested(requestId, poolId, to, amount);
+    }
 
-        (bool success,) = to.call{value: amount}("");
+    /// @inheritdoc IInsurancePool
+    function executeEmergencyWithdraw(bytes32 requestId) external onlyGovernance nonReentrant {
+        IInsurancePool.EmergencyRequest memory req = emergencyRequests[requestId];
+        if (req.requestedAt == 0) revert EmergencyRequestNotFound();
+        if (block.timestamp < req.requestedAt + EMERGENCY_DELAY) revert EmergencyDelayNotElapsed();
+
+        // Delete before execution to prevent re-entrancy / double-execute
+        delete emergencyRequests[requestId];
+
+        PoolData storage pool = _getPool(req.poolId);
+        if (pool.balance < req.amount) revert InsufficientPoolBalance();
+
+        pool.balance -= req.amount;
+
+        (bool success,) = req.to.call{value: req.amount}("");
         if (!success) revert TransferFailed();
 
-        emit EmergencyWithdrawal(poolId, to, amount);
+        emit EmergencyWithdrawal(req.poolId, req.to, req.amount);
+    }
+
+    /// @inheritdoc IInsurancePool
+    function cancelEmergencyWithdraw(bytes32 requestId) external onlyGovernance {
+        if (emergencyRequests[requestId].requestedAt == 0) revert EmergencyRequestNotFound();
+        delete emergencyRequests[requestId];
+
+        emit IInsurancePool.EmergencyWithdrawCancelled(requestId);
     }
 
     /// @notice Check if a holder has already claimed for a pool

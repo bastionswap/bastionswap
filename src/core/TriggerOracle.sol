@@ -17,6 +17,8 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     uint16 internal constant BPS_BASE = 10_000;
     uint40 internal constant GRACE_PERIOD = 1 hours;
     uint256 internal constant MAX_TRACKER_ENTRIES = 50;
+    uint40 internal constant MAX_PAUSE_DURATION = 7 days;
+    uint40 internal constant MIN_LP_AGE = 1 hours;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -65,8 +67,14 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @dev poolId hash => issuer address (set when escrow is created via hook)
     mapping(bytes32 => address) internal _poolIssuers;
 
-    /// @dev Global pause flag
-    bool public paused;
+    /// @dev Pause expiry timestamp (0 = not paused)
+    uint40 public pausedUntil;
+
+    /// @dev poolId hash => LP addition records for flash-loan inflation tracking
+    mapping(bytes32 => Record[]) internal _lpAdditions;
+
+    /// @dev poolId hash => initial total supply snapshot at pool creation
+    mapping(bytes32 => uint256) internal _initialTotalSupply;
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -76,6 +84,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     event Unpaused(address indexed by);
     event IssuerRegistered(PoolId indexed poolId, address indexed issuer);
     event ExternalCallFailed(string target, PoolId indexed poolId);
+    event SupplyInflationDetected(PoolId indexed poolId, uint256 initial, uint256 current);
 
     // ─── Errors ───────────────────────────────────────────────────────
 
@@ -101,7 +110,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     }
 
     modifier whenNotPaused() {
-        if (paused) revert IsPaused();
+        if (block.timestamp < pausedUntil) revert IsPaused();
         _;
     }
 
@@ -141,8 +150,12 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
         TriggerConfig memory cfg = state.config;
 
+        // RISK-4: Use stable LP (LP present >= MIN_LP_AGE) instead of raw totalLP
+        uint256 stableLP = _computeStableLP(key, totalLP);
+        uint256 effectiveLP = stableLP > 0 ? stableLP : totalLP;
+
         // Check single-tx threshold (>50% default)
-        uint256 removalBps = (amount * BPS_BASE) / totalLP;
+        uint256 removalBps = (amount * BPS_BASE) / effectiveLP;
         if (removalBps >= cfg.lpRemovalThreshold) {
             _initPendingTrigger(poolId, key, TriggerType.RUG_PULL, 0);
             return;
@@ -153,7 +166,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
         // Check 24h cumulative (>80% = slowRugCumulativeThreshold default)
         uint256 cumulative = _sumWindow(_lpRemovals[key], cfg.dumpWindowSeconds);
-        uint256 cumulativeBps = (cumulative * BPS_BASE) / totalLP;
+        uint256 cumulativeBps = (cumulative * BPS_BASE) / effectiveLP;
         if (cumulativeBps >= cfg.slowRugCumulativeThreshold) {
             _initPendingTrigger(poolId, key, TriggerType.RUG_PULL, 0);
         }
@@ -178,7 +191,17 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
         TriggerConfig memory cfg = state.config;
         uint256 cumulative = _sumWindow(_issuerSales[key][issuer], cfg.dumpWindowSeconds);
-        uint256 cumulativeBps = (cumulative * BPS_BASE) / totalSupply;
+
+        // RISK-5: Use min(totalSupply, initialTotalSupply) as denominator
+        uint256 initialSupply = _initialTotalSupply[key];
+        uint256 denominator = (initialSupply > 0 && totalSupply > initialSupply) ? initialSupply : totalSupply;
+
+        // Emit inflation detection event if current supply exceeds initial by 50%
+        if (initialSupply > 0 && totalSupply > (initialSupply * 3) / 2) {
+            emit SupplyInflationDetected(poolId, initialSupply, totalSupply);
+        }
+
+        uint256 cumulativeBps = (cumulative * BPS_BASE) / denominator;
 
         if (cumulativeBps >= cfg.dumpThresholdPercent) {
             _initPendingTrigger(poolId, key, TriggerType.ISSUER_DUMP, totalSupply);
@@ -200,6 +223,14 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         _initPendingTrigger(poolId, key, TriggerType.COMMITMENT_BREACH, 0);
     }
 
+    /// @notice Reports an LP addition event for flash-loan inflation tracking (RISK-4).
+    /// @param poolId Pool identifier
+    /// @param amount Amount of LP added
+    function reportLPAddition(PoolId poolId, uint256 amount) external onlyHook {
+        bytes32 key = _key(poolId);
+        _pushRecord(_lpAdditions[key], amount);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  TRIGGER EXECUTION (after grace period)
     // ═══════════════════════════════════════════════════════════════════
@@ -207,7 +238,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @notice Execute a pending trigger after the grace period has elapsed.
     /// @param poolId Pool identifier
     /// @param merkleRoot Merkle root of (holder, balance) snapshot for insurance claims
-    function executeTrigger(PoolId poolId, bytes32 merkleRoot) external nonReentrant whenNotPaused {
+    function executeTrigger(PoolId poolId, bytes32 merkleRoot) external onlyGuardian nonReentrant whenNotPaused {
         bytes32 key = _key(poolId);
         PendingTrigger storage pending = _pendingTriggers[key];
         if (pending.detectedAt == 0) revert NoPendingTrigger();
@@ -276,24 +307,31 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @notice Register the issuer for a pool (called by Hook during pool creation).
     /// @param poolId Pool identifier
     /// @param issuer Issuer address
-    function registerIssuer(PoolId poolId, address issuer) external onlyHook {
+    /// @param totalSupply Initial total supply snapshot for dump detection denominator
+    function registerIssuer(PoolId poolId, address issuer, uint256 totalSupply) external onlyHook {
         if (issuer == address(0)) revert ZeroAddress();
         bytes32 key = _key(poolId);
         _poolIssuers[key] = issuer;
+        _initialTotalSupply[key] = totalSupply;
 
         emit IssuerRegistered(poolId, issuer);
     }
 
-    /// @notice Pause all trigger detection and execution.
+    /// @notice Pause all trigger detection and execution for up to MAX_PAUSE_DURATION.
     function pause() external onlyGuardian {
-        paused = true;
+        pausedUntil = uint40(block.timestamp) + MAX_PAUSE_DURATION;
         emit Paused(msg.sender);
     }
 
-    /// @notice Unpause trigger detection and execution.
+    /// @notice Unpause trigger detection and execution immediately.
     function unpause() external onlyGuardian {
-        paused = false;
+        pausedUntil = 0;
         emit Unpaused(msg.sender);
+    }
+
+    /// @notice Check if the oracle is currently paused.
+    function paused() external view returns (bool) {
+        return block.timestamp < pausedUntil;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -332,6 +370,11 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @notice Check if a pool's trigger config has been set.
     function isConfigSet(PoolId poolId) external view returns (bool) {
         return _poolStates[_key(poolId)].configSet;
+    }
+
+    /// @notice Get the initial total supply snapshot for a pool.
+    function getInitialTotalSupply(PoolId poolId) external view returns (uint256) {
+        return _initialTotalSupply[_key(poolId)];
     }
 
     // ─── Internal Functions ───────────────────────────────────────────
@@ -378,6 +421,20 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
             }
             records.pop();
         }
+    }
+
+    /// @dev Compute stable LP: totalLP minus LP added within MIN_LP_AGE (RISK-4).
+    function _computeStableLP(bytes32 key, uint256 totalLP) internal view returns (uint256) {
+        Record[] storage additions = _lpAdditions[key];
+        uint256 recentLP;
+        uint256 cutoff = block.timestamp > MIN_LP_AGE ? block.timestamp - MIN_LP_AGE : 0;
+        uint256 len = additions.length;
+        for (uint256 i; i < len; ++i) {
+            if (additions[i].timestamp > cutoff) {
+                recentLP += additions[i].amount;
+            }
+        }
+        return totalLP > recentLP ? totalLP - recentLP : 0;
     }
 
     /// @dev Sum amounts within the sliding window ending at block.timestamp.
