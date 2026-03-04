@@ -65,10 +65,15 @@ interface IInsurancePool {
     /// @param triggerType The type of trigger event that occurred
     /// @param totalEligibleSupply Total token supply eligible for pro-rata claims
     /// @param merkleRoot Merkle root of (holder, balance) snapshot at trigger time
+    /// @param issuedToken Address of the issued token (for fallback balanceOf claims)
     /// @return totalPayout Total amount earmarked for distribution
-    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32 merkleRoot)
-        external
-        returns (uint256 totalPayout);
+    function executePayout(
+        PoolId poolId,
+        uint8 triggerType,
+        uint256 totalEligibleSupply,
+        bytes32 merkleRoot,
+        address issuedToken
+    ) external returns (uint256 totalPayout);
 
     /// @notice Allows a holder to claim their pro-rata compensation after a payout.
     /// @dev Reverts if not triggered, already claimed, or claim period expired.

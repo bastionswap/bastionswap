@@ -337,12 +337,12 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     function _scenario1_executeTrigger() internal {
         // Cannot execute before grace period
-        vm.prank(guardian);
         vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
-        triggerOracle.executeTrigger(_poolId, bytes32(0));
+        triggerOracle.executeTrigger(_poolId);
 
         (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
-        vm.warp(executeAfter);
+        // Warp past grace + 24h deadline (fallback path, no merkle root)
+        vm.warp(executeAfter + 24 hours);
 
         uint256 insuranceTokensBefore = issuedToken.balanceOf(address(insurancePool));
         uint256 expectedRedist = ESCROW_AMOUNT - 10 ether; // 90 ether
@@ -351,9 +351,8 @@ contract E2E_ScenariosTest is Test, Deployers {
         emit IEscrowVault.Redistributed(_escrowId, uint8(ITriggerOracle.TriggerType.RUG_PULL), expectedRedist);
 
         uint256 g = gasleft();
-        vm.prank(guardian);
-        triggerOracle.executeTrigger(_poolId, bytes32(0));
-        console.log("Gas: executeTrigger", g - gasleft());
+        triggerOracle.executeTrigger(_poolId);
+        console.log("Gas: executeTrigger (fallback)", g - gasleft());
 
         // Verify trigger state
         assertTrue(triggerOracle.checkTrigger(_poolId).triggered);
@@ -387,7 +386,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         bytes32 merkleRoot = _hashPair(leaf1, leaf2);
 
         vm.prank(address(triggerOracle));
-        insurancePool.executePayout(_poolId, uint8(ITriggerOracle.TriggerType.RUG_PULL), totalSupply, merkleRoot);
+        insurancePool.executePayout(_poolId, uint8(ITriggerOracle.TriggerType.RUG_PULL), totalSupply, merkleRoot, address(0));
 
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
         assertTrue(ps.isTriggered);
@@ -606,9 +605,8 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     function _scenario3_executeTrigger() internal {
         // Grace period: cannot execute early
-        vm.prank(guardian);
         vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
-        triggerOracle.executeTrigger(_poolId, bytes32(0));
+        triggerOracle.executeTrigger(_poolId);
 
         (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
         vm.warp(executeAfter);
@@ -627,6 +625,13 @@ contract E2E_ScenariosTest is Test, Deployers {
         _scenario3T1Bal = t1Bal;
         _scenario3T2Bal = t2Bal;
 
+        // Path A: Guardian submits Merkle root, then wait challenge period
+        vm.prank(guardian);
+        triggerOracle.submitMerkleRoot(_poolId, _scenario3MerkleRoot);
+
+        // Wait for challenge period (1 hour)
+        vm.warp(block.timestamp + 1 hours);
+
         // Expect both Redistributed and PayoutExecuted events
         vm.expectEmit(true, false, false, true, address(escrowVault));
         emit IEscrowVault.Redistributed(_escrowId, uint8(ITriggerOracle.TriggerType.ISSUER_DUMP), ESCROW_AMOUNT);
@@ -637,9 +642,8 @@ contract E2E_ScenariosTest is Test, Deployers {
         );
 
         uint256 g = gasleft();
-        vm.prank(guardian);
-        triggerOracle.executeTrigger(_poolId, _scenario3MerkleRoot);
-        console.log("Gas: executeTrigger (ISSUER_DUMP)", g - gasleft());
+        triggerOracle.executeTrigger(_poolId);
+        console.log("Gas: executeTrigger (ISSUER_DUMP, Path A)", g - gasleft());
 
         // Verify trigger state
         assertTrue(triggerOracle.checkTrigger(_poolId).triggered);

@@ -120,7 +120,7 @@ contract InsurancePoolTest is Test {
 
     function _triggerPayoutWithRoot(uint256 totalSupply, bytes32 merkleRoot) internal {
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, totalSupply, merkleRoot);
+        pool.executePayout(defaultPoolId, 1, totalSupply, merkleRoot, address(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -187,7 +187,7 @@ contract InsurancePoolTest is Test {
 
         _setupDefaultTree();
         vm.prank(oracle);
-        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot);
+        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot, address(0));
 
         assertEq(totalPayout, DEPOSIT_AMOUNT);
 
@@ -205,14 +205,14 @@ contract InsurancePoolTest is Test {
         emit IInsurancePool.PayoutExecuted(defaultPoolId, 1, DEPOSIT_AMOUNT);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot, address(0));
     }
 
     function test_executePayout_revertsNotOracle() public {
         _deposit(DEPOSIT_AMOUNT);
 
         vm.expectRevert(InsurancePool.OnlyTriggerOracle.selector);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(0));
     }
 
     function test_executePayout_revertsAlreadyTriggered() public {
@@ -221,7 +221,7 @@ contract InsurancePoolTest is Test {
 
         vm.prank(oracle);
         vm.expectRevert(InsurancePool.AlreadyTriggered.selector);
-        pool.executePayout(defaultPoolId, 2, TOTAL_SUPPLY, bytes32(0));
+        pool.executePayout(defaultPoolId, 2, TOTAL_SUPPLY, bytes32(0), address(0));
     }
 
     function test_executePayout_revertsZeroEligibleSupply() public {
@@ -229,14 +229,14 @@ contract InsurancePoolTest is Test {
 
         vm.prank(oracle);
         vm.expectRevert(InsurancePool.ZeroEligibleSupply.selector);
-        pool.executePayout(defaultPoolId, 1, 0, bytes32(0));
+        pool.executePayout(defaultPoolId, 1, 0, bytes32(0), address(0));
     }
 
     function test_executePayout_emptyPool() public {
         // Triggering on empty pool is allowed but payout is 0
         _setupDefaultTree();
         vm.prank(oracle);
-        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot);
+        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot, address(0));
         assertEq(totalPayout, 0);
 
         IInsurancePool.PoolStatus memory status = pool.getPoolStatus(defaultPoolId);
@@ -258,7 +258,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         vm.prank(holder1);
         uint256 claimed = pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -278,7 +278,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         vm.expectEmit(true, true, false, true);
         emit IInsurancePool.CompensationClaimed(defaultPoolId, holder1, expectedAmount);
@@ -299,7 +299,7 @@ contract InsurancePoolTest is Test {
             _buildTree3(holder1, balance1, holder2, balance2, holder3, balance3);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         vm.prank(holder1);
         uint256 claim1 = pool.claimCompensation(defaultPoolId, balance1, p1);
@@ -330,7 +330,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, totalSupply - holderBalance);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, totalSupply, root);
+        pool.executePayout(defaultPoolId, 1, totalSupply, root, address(0));
 
         vm.prank(holder1);
         uint256 claimed = pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -357,7 +357,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         vm.prank(holder1);
         pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -375,7 +375,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // Warp past claim period (30 days)
         vm.warp(block.timestamp + 30 days + 1);
@@ -393,7 +393,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // Warp to exactly the deadline (should still work)
         vm.warp(block.timestamp + 30 days);
@@ -411,7 +411,7 @@ contract InsurancePoolTest is Test {
         (bytes32 root,,) = _buildTree2(holder1, 100_000 ether, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(holder1);
@@ -426,7 +426,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // Claim should revert with ZeroAmount because compensation = 0
         vm.prank(holder1);
@@ -442,7 +442,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         assertFalse(pool.hasClaimed(defaultPoolId, holder1));
 
@@ -467,7 +467,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         vm.prank(holder1);
         uint256 claimed = pool.claimCompensation(defaultPoolId, balance1, proof1);
@@ -485,7 +485,7 @@ contract InsurancePoolTest is Test {
         (bytes32 root,,) = _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // Use a bogus proof
         bytes32[] memory badProof = new bytes32[](1);
@@ -506,7 +506,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, realBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // Claim with wrong balance + correct proof for real balance => proof check fails
         vm.prank(holder1);
@@ -524,7 +524,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // holder3 (not in tree) tries to use holder2's proof
         vm.prank(holder3);
@@ -540,7 +540,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         vm.prank(holder1);
         pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -567,7 +567,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // Both can claim their share (may be 0 due to rounding)
         vm.prank(holder1);
@@ -814,7 +814,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         vm.prank(holder1);
         pool.claimCompensation(defaultPoolId, balance1, proof1); // 50%
@@ -860,7 +860,7 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
 
         // Claim from pool 1 gets pool 1's funds
         vm.prank(holder1);
@@ -870,5 +870,74 @@ contract InsurancePoolTest is Test {
         // Pool 2 untouched
         IInsurancePool.PoolStatus memory status2 = pool.getPoolStatus(poolId2);
         assertEq(status2.balance, 20 ether);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  FALLBACK CLAIM TESTS (balanceOf mode)
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_fallbackClaim_happyPath() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        // Deploy a mock ERC20 for fallback claims
+        MockToken mockToken = new MockToken();
+        mockToken.mint(holder1, 100_000 ether);
+
+        // Trigger payout without merkle root (fallback mode)
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+
+        // Claim using balanceOf
+        bytes32[] memory emptyProof = new bytes32[](0);
+        vm.prank(holder1);
+        uint256 claimed = pool.claimCompensation(defaultPoolId, 100_000 ether, emptyProof);
+
+        assertEq(claimed, 1 ether); // 10% of 10 ether
+    }
+
+    function test_fallbackClaim_7dayPeriod() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        MockToken mockToken = new MockToken();
+        mockToken.mint(holder1, 100_000 ether);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+
+        // Warp past 7-day fallback claim period
+        vm.warp(block.timestamp + 7 days + 1);
+
+        bytes32[] memory emptyProof = new bytes32[](0);
+        vm.prank(holder1);
+        vm.expectRevert(InsurancePool.ClaimPeriodExpired.selector);
+        pool.claimCompensation(defaultPoolId, 100_000 ether, emptyProof);
+    }
+
+    function test_fallbackClaim_insufficientBalance() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        MockToken mockToken = new MockToken();
+        mockToken.mint(holder1, 50_000 ether); // less than claimed
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+
+        bytes32[] memory emptyProof = new bytes32[](0);
+        vm.prank(holder1);
+        vm.expectRevert(InsurancePool.InsufficientTokenBalance.selector);
+        pool.claimCompensation(defaultPoolId, 100_000 ether, emptyProof);
+    }
+}
+
+contract MockToken {
+    string public name = "Mock";
+    string public symbol = "MCK";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
     }
 }

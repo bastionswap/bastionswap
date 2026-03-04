@@ -302,7 +302,7 @@ contract BastionHook is BaseTestHooks {
         _escrowIds[poolId] = escrowId;
 
         // Register issuer and config in TriggerOracle (RISK-5: pass totalSupply snapshot)
-        triggerOracle.registerIssuer(poolId, issuer, ERC20(token).totalSupply());
+        triggerOracle.registerIssuer(poolId, issuer, ERC20(token).totalSupply(), token);
         triggerOracle.setTriggerConfig(poolId, triggerConfig);
 
         // Record pool creation in reputation engine

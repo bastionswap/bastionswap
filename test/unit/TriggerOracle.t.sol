@@ -33,7 +33,7 @@ contract MockInsurancePool {
     uint256 public lastTotalSupply;
     bool public payoutCalled;
 
-    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32)
+    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32, address)
         external
         returns (uint256)
     {
@@ -46,7 +46,7 @@ contract MockInsurancePool {
 }
 
 contract RevertingInsurancePool {
-    function executePayout(PoolId, uint8, uint256, bytes32) external pure returns (uint256) {
+    function executePayout(PoolId, uint8, uint256, bytes32, address) external pure returns (uint256) {
         revert("insurance pool revert");
     }
 }
@@ -119,13 +119,22 @@ contract TriggerOracleTest is Test {
 
     function _registerIssuer() internal {
         vm.prank(hook);
-        oracle.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
+        oracle.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY, address(0xBEEF));
     }
 
+    /// @dev Execute via fallback path (no merkle root, wait grace + 24h deadline)
     function _executeAfterGrace() internal {
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 1 hours + 24 hours);
+        oracle.executeTrigger(defaultPoolId);
+    }
+
+    /// @dev Submit merkle root then execute via Path A (root + challenge period)
+    function _submitRootAndExecuteAfterGrace(bytes32 merkleRoot) internal {
+        vm.warp(block.timestamp + 1 hours); // past grace
         vm.prank(guardian);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        oracle.submitMerkleRoot(defaultPoolId, merkleRoot);
+        vm.warp(block.timestamp + 1 hours); // past challenge
+        oracle.executeTrigger(defaultPoolId);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -325,19 +334,17 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracle.reportCommitmentBreach(defaultPoolId);
 
-        // Try to execute immediately
-        vm.prank(guardian);
+        // Try to execute immediately (even fallback path needs grace period)
         vm.expectRevert(TriggerOracle.GracePeriodNotElapsed.selector);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        oracle.executeTrigger(defaultPoolId);
     }
 
     function test_gracePeriod_canExecuteAfterElapsed() public {
         vm.prank(hook);
         oracle.reportCommitmentBreach(defaultPoolId);
 
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(guardian);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        // Use fallback path: grace + 24h deadline
+        _executeAfterGrace();
 
         ITriggerOracle.TriggerResult memory result = oracle.checkTrigger(defaultPoolId);
         assertTrue(result.triggered);
@@ -352,14 +359,17 @@ contract TriggerOracleTest is Test {
 
         // Exactly at grace period boundary (1 hour - 1 second) => should fail
         vm.warp(startTime + 1 hours - 1);
-        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.GracePeriodNotElapsed.selector);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        oracle.executeTrigger(defaultPoolId);
 
-        // Exactly at 1 hour => should succeed
+        // Past grace but no root and before deadline => WaitingForMerkleRoot
         vm.warp(startTime + 1 hours);
-        vm.prank(guardian);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        vm.expectRevert(TriggerOracle.WaitingForMerkleRoot.selector);
+        oracle.executeTrigger(defaultPoolId);
+
+        // Past grace + 24h deadline => should succeed
+        vm.warp(startTime + 1 hours + 24 hours);
+        oracle.executeTrigger(defaultPoolId);
 
         assertTrue(oracle.checkTrigger(defaultPoolId).triggered);
     }
@@ -418,21 +428,19 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracle.reportCommitmentBreach(defaultPoolId);
 
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 1 hours + 24 hours);
 
         vm.expectEmit(true, true, false, true);
         emit ITriggerOracle.TriggerDetected(
             defaultPoolId, ITriggerOracle.TriggerType.COMMITMENT_BREACH, ""
         );
 
-        vm.prank(guardian);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        oracle.executeTrigger(defaultPoolId);
     }
 
     function test_executeTrigger_revertsNoPending() public {
-        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.NoPendingTrigger.selector);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        oracle.executeTrigger(defaultPoolId);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -445,9 +453,8 @@ contract TriggerOracleTest is Test {
         _executeAfterGrace();
 
         // Trying to execute again should revert (no pending)
-        vm.prank(guardian);
         vm.expectRevert(TriggerOracle.NoPendingTrigger.selector);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        oracle.executeTrigger(defaultPoolId);
     }
 
     function test_duplicateTrigger_reportIgnoredAfterTriggered() public {
@@ -498,10 +505,9 @@ contract TriggerOracleTest is Test {
         vm.prank(guardian);
         oracle.pause();
 
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(guardian);
+        vm.warp(block.timestamp + 1 hours + 24 hours);
         vm.expectRevert(TriggerOracle.IsPaused.selector);
-        oracle.executeTrigger(defaultPoolId, bytes32(0));
+        oracle.executeTrigger(defaultPoolId);
     }
 
     function test_unpause_resumesOperation() public {
@@ -558,12 +564,12 @@ contract TriggerOracleTest is Test {
     function test_registerIssuer_revertsZeroAddress() public {
         vm.prank(hook);
         vm.expectRevert(TriggerOracle.ZeroAddress.selector);
-        oracle.registerIssuer(defaultPoolId, address(0), TOTAL_SUPPLY);
+        oracle.registerIssuer(defaultPoolId, address(0), TOTAL_SUPPLY, address(0xBEEF));
     }
 
     function test_registerIssuer_revertsNotHook() public {
         vm.expectRevert(TriggerOracle.OnlyHook.selector);
-        oracle.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
+        oracle.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY, address(0xBEEF));
     }
 
     function test_isConfigSet() public view {
@@ -590,7 +596,7 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracle.setTriggerConfig(poolId2, _defaultConfig());
         vm.prank(hook);
-        oracle.registerIssuer(poolId2, issuer, TOTAL_SUPPLY);
+        oracle.registerIssuer(poolId2, issuer, TOTAL_SUPPLY, address(0xBEEF));
 
         // Now trigger pool1 again by re-creating pending state manually is not possible,
         // so we test the path by trying executeTrigger when isTriggered=true and pending exists
@@ -711,7 +717,7 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracle.setTriggerConfig(poolId2, _defaultConfig());
         vm.prank(hook);
-        oracle.registerIssuer(poolId2, makeAddr("issuer2"), TOTAL_SUPPLY);
+        oracle.registerIssuer(poolId2, makeAddr("issuer2"), TOTAL_SUPPLY, address(0xBEEF));
 
         // Trigger pool 1
         vm.prank(hook);
@@ -744,16 +750,15 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracleWithBadEscrow.setTriggerConfig(defaultPoolId, _defaultConfig());
         vm.prank(hook);
-        oracleWithBadEscrow.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
+        oracleWithBadEscrow.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY, address(0xBEEF));
 
         vm.prank(hook);
         oracleWithBadEscrow.reportCommitmentBreach(defaultPoolId);
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 1 hours + 24 hours);
 
         vm.expectEmit(false, true, false, true);
         emit TriggerOracle.ExternalCallFailed("EscrowVault.triggerRedistribution", defaultPoolId);
-        vm.prank(guardian);
-        oracleWithBadEscrow.executeTrigger(defaultPoolId, bytes32(0));
+        oracleWithBadEscrow.executeTrigger(defaultPoolId);
 
         assertTrue(oracleWithBadEscrow.checkTrigger(defaultPoolId).triggered);
     }
@@ -768,17 +773,16 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracleWithBadInsurance.setTriggerConfig(defaultPoolId, _defaultConfig());
         vm.prank(hook);
-        oracleWithBadInsurance.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
+        oracleWithBadInsurance.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY, address(0xBEEF));
 
         // Use issuer dump for totalEligibleSupply > 0
         vm.prank(hook);
         oracleWithBadInsurance.reportIssuerSale(defaultPoolId, issuer, 310_000 ether, TOTAL_SUPPLY);
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 1 hours + 24 hours);
 
         vm.expectEmit(false, true, false, true);
         emit TriggerOracle.ExternalCallFailed("InsurancePool.executePayout", defaultPoolId);
-        vm.prank(guardian);
-        oracleWithBadInsurance.executeTrigger(defaultPoolId, bytes32(0));
+        oracleWithBadInsurance.executeTrigger(defaultPoolId);
 
         assertTrue(oracleWithBadInsurance.checkTrigger(defaultPoolId).triggered);
     }
@@ -792,16 +796,15 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracleWithBadRep.setTriggerConfig(defaultPoolId, _defaultConfig());
         vm.prank(hook);
-        oracleWithBadRep.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY);
+        oracleWithBadRep.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY, address(0xBEEF));
 
         vm.prank(hook);
         oracleWithBadRep.reportCommitmentBreach(defaultPoolId);
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(block.timestamp + 1 hours + 24 hours);
 
         vm.expectEmit(false, true, false, true);
         emit TriggerOracle.ExternalCallFailed("ReputationEngine.recordEvent", defaultPoolId);
-        vm.prank(guardian);
-        oracleWithBadRep.executeTrigger(defaultPoolId, bytes32(0));
+        oracleWithBadRep.executeTrigger(defaultPoolId);
 
         assertTrue(oracleWithBadRep.checkTrigger(defaultPoolId).triggered);
     }
@@ -980,5 +983,141 @@ contract TriggerOracleTest is Test {
 
         vm.prank(hook);
         oracle.reportIssuerSale(defaultPoolId, issuer, 310_000 ether, inflatedSupply);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SUBMIT MERKLE ROOT TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_submitMerkleRoot_happyPath() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        bytes32 root = bytes32(uint256(0xABCD));
+        vm.prank(guardian);
+        oracle.submitMerkleRoot(defaultPoolId, root);
+
+        (bytes32 storedRoot, uint40 submittedAt) = oracle.getPendingMerkleRoot(defaultPoolId);
+        assertEq(storedRoot, root);
+        assertEq(submittedAt, block.timestamp);
+    }
+
+    function test_submitMerkleRoot_revertsNotGuardian() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        vm.expectRevert(TriggerOracle.OnlyGuardian.selector);
+        oracle.submitMerkleRoot(defaultPoolId, bytes32(uint256(1)));
+    }
+
+    function test_submitMerkleRoot_revertsNoPendingTrigger() public {
+        vm.prank(guardian);
+        vm.expectRevert(TriggerOracle.NoPendingTrigger.selector);
+        oracle.submitMerkleRoot(defaultPoolId, bytes32(uint256(1)));
+    }
+
+    function test_submitMerkleRoot_revertsZeroRoot() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        vm.prank(guardian);
+        vm.expectRevert(TriggerOracle.ZeroMerkleRoot.selector);
+        oracle.submitMerkleRoot(defaultPoolId, bytes32(0));
+    }
+
+    function test_submitMerkleRoot_revertsAlreadySubmitted() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        vm.prank(guardian);
+        oracle.submitMerkleRoot(defaultPoolId, bytes32(uint256(1)));
+
+        vm.prank(guardian);
+        vm.expectRevert(TriggerOracle.MerkleRootAlreadySubmitted.selector);
+        oracle.submitMerkleRoot(defaultPoolId, bytes32(uint256(2)));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  EXECUTE TRIGGER - PATH A (with Merkle root)
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_executeTrigger_pathA_withMerkleRoot() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        bytes32 root = bytes32(uint256(0xABCD));
+        _submitRootAndExecuteAfterGrace(root);
+
+        assertTrue(oracle.checkTrigger(defaultPoolId).triggered);
+        // Pending merkle root should be cleared
+        (bytes32 storedRoot,) = oracle.getPendingMerkleRoot(defaultPoolId);
+        assertEq(storedRoot, bytes32(0));
+    }
+
+    function test_executeTrigger_pathA_challengeNotElapsed() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        vm.warp(block.timestamp + 1 hours); // past grace
+        vm.prank(guardian);
+        oracle.submitMerkleRoot(defaultPoolId, bytes32(uint256(0xABCD)));
+
+        // Try immediately after submission — challenge not elapsed
+        vm.expectRevert(TriggerOracle.MerkleRootChallengeNotElapsed.selector);
+        oracle.executeTrigger(defaultPoolId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  EXECUTE TRIGGER - PATH B (fallback, no Merkle root)
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_executeTrigger_pathB_fallbackNoRoot() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        // Grace + 24h deadline
+        _executeAfterGrace();
+
+        assertTrue(oracle.checkTrigger(defaultPoolId).triggered);
+    }
+
+    function test_executeTrigger_pathB_waitingForMerkleRoot() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        // Past grace but before 24h deadline
+        vm.warp(block.timestamp + 1 hours + 12 hours);
+        vm.expectRevert(TriggerOracle.WaitingForMerkleRoot.selector);
+        oracle.executeTrigger(defaultPoolId);
+    }
+
+    function test_executeTrigger_permissionless() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        vm.warp(block.timestamp + 1 hours + 24 hours);
+
+        // Execute from a random bot address — should work (permissionless)
+        vm.prank(bot);
+        oracle.executeTrigger(defaultPoolId);
+
+        assertTrue(oracle.checkTrigger(defaultPoolId).triggered);
+    }
+
+    function test_executeTrigger_pathA_permissionless() public {
+        vm.prank(hook);
+        oracle.reportCommitmentBreach(defaultPoolId);
+
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(guardian);
+        oracle.submitMerkleRoot(defaultPoolId, bytes32(uint256(0xABCD)));
+
+        vm.warp(block.timestamp + 1 hours); // past challenge
+
+        // Execute from random address
+        vm.prank(bot);
+        oracle.executeTrigger(defaultPoolId);
+
+        assertTrue(oracle.checkTrigger(defaultPoolId).triggered);
     }
 }

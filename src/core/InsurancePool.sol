@@ -5,6 +5,7 @@ import {IInsurancePool} from "../interfaces/IInsurancePool.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 /// @title InsurancePool
 /// @notice Per-token isolated insurance pool funded by a portion of buy-side swap fees.
@@ -15,6 +16,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     uint16 internal constant BPS_BASE = 10_000;
     uint16 internal constant MAX_FEE_RATE = 200; // 2%
     uint40 internal constant CLAIM_PERIOD = 30 days;
+    uint40 internal constant FALLBACK_CLAIM_PERIOD = 7 days;
     uint40 internal constant EMERGENCY_DELAY = 2 days;
 
     // ─── Immutables ───────────────────────────────────────────────────
@@ -34,6 +36,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 payoutBalance; // balance snapshot at trigger time for claims
         bytes32 merkleRoot; // Merkle root of (holder, balance) snapshot at trigger time
         uint256 totalClaimed; // cumulative claimed amount (safety check)
+        bool useMerkleProof; // true = Merkle path, false = balanceOf fallback
+        address issuedToken; // issued token address for fallback balanceOf claims
         mapping(address => bool) claimed;
     }
 
@@ -67,6 +71,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error EmergencyDelayNotElapsed();
     error EmergencyRequestNotFound();
     error EmergencyRequestAlreadyExecuted();
+    error InsufficientTokenBalance();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -107,12 +112,13 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     }
 
     /// @inheritdoc IInsurancePool
-    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32 merkleRoot)
-        external
-        onlyTriggerOracle
-        nonReentrant
-        returns (uint256 totalPayout)
-    {
+    function executePayout(
+        PoolId poolId,
+        uint8 triggerType,
+        uint256 totalEligibleSupply,
+        bytes32 merkleRoot,
+        address issuedToken
+    ) external onlyTriggerOracle nonReentrant returns (uint256 totalPayout) {
         PoolData storage pool = _getPool(poolId);
         if (pool.isTriggered) revert AlreadyTriggered();
         if (totalEligibleSupply == 0) revert ZeroEligibleSupply();
@@ -125,6 +131,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         pool.totalEligibleSupply = totalEligibleSupply;
         pool.payoutBalance = totalPayout;
         pool.merkleRoot = merkleRoot;
+        pool.useMerkleProof = (merkleRoot != bytes32(0));
+        pool.issuedToken = issuedToken;
 
         emit PayoutExecuted(poolId, triggerType, totalPayout);
     }
@@ -138,13 +146,22 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         PoolData storage pool = _getPool(poolId);
         if (!pool.isTriggered) revert NotTriggered();
         if (pool.claimed[msg.sender]) revert AlreadyClaimed();
-        if (block.timestamp > pool.triggerTimestamp + CLAIM_PERIOD) revert ClaimPeriodExpired();
         if (holderBalance == 0) revert ZeroAmount();
-        if (pool.merkleRoot == bytes32(0)) revert MerkleRootNotSet();
 
-        // Verify Merkle proof (double hashing to prevent second preimage attack)
-        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, holderBalance))));
-        if (!MerkleProof.verify(merkleProof, pool.merkleRoot, leaf)) revert InvalidMerkleProof();
+        if (pool.useMerkleProof) {
+            // Merkle mode: 30-day claim period, verify proof
+            if (block.timestamp > pool.triggerTimestamp + CLAIM_PERIOD) revert ClaimPeriodExpired();
+            if (pool.merkleRoot == bytes32(0)) revert MerkleRootNotSet();
+
+            bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, holderBalance))));
+            if (!MerkleProof.verify(merkleProof, pool.merkleRoot, leaf)) revert InvalidMerkleProof();
+        } else {
+            // Fallback mode: 7-day claim period, verify balanceOf
+            if (block.timestamp > pool.triggerTimestamp + FALLBACK_CLAIM_PERIOD) revert ClaimPeriodExpired();
+            if (ERC20(pool.issuedToken).balanceOf(msg.sender) < holderBalance) {
+                revert InsufficientTokenBalance();
+            }
+        }
 
         amount = _calculateCompensation(pool, holderBalance);
         if (amount == 0) revert ZeroAmount();

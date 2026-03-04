@@ -352,12 +352,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         vm.prank(address(hook));
         triggerOracle.reportCommitmentBreach(poolId);
 
-        // Grace period
-        vm.warp(block.timestamp + 1 hours);
+        // Fallback path: grace + 24h deadline
+        vm.warp(block.timestamp + 1 hours + 24 hours);
 
-        // Execute trigger
-        vm.prank(guardian);
-        triggerOracle.executeTrigger(poolId, bytes32(0));
+        // Execute trigger (permissionless)
+        triggerOracle.executeTrigger(poolId);
 
         // Verify trigger activated
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);
@@ -413,9 +412,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
         vm.prank(address(hook));
         triggerOracle.reportCommitmentBreach(poolId);
 
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(guardian);
-        triggerOracle.executeTrigger(poolId, bytes32(0));
+        // Fallback path: grace + 24h deadline
+        vm.warp(block.timestamp + 1 hours + 24 hours);
+        triggerOracle.executeTrigger(poolId);
 
         // 6. Verify final state
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);

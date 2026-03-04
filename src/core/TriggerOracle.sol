@@ -19,6 +19,8 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     uint256 internal constant MAX_TRACKER_ENTRIES = 50;
     uint40 internal constant MAX_PAUSE_DURATION = 7 days;
     uint40 internal constant MIN_LP_AGE = 1 hours;
+    uint40 internal constant MERKLE_ROOT_CHALLENGE_PERIOD = 1 hours;
+    uint40 internal constant GUARDIAN_SUBMISSION_DEADLINE = 24 hours;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -76,10 +78,20 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @dev poolId hash => initial total supply snapshot at pool creation
     mapping(bytes32 => uint256) internal _initialTotalSupply;
 
+    /// @dev poolId hash => pending Merkle root submitted by guardian
+    mapping(bytes32 => bytes32) internal _pendingMerkleRoots;
+
+    /// @dev poolId hash => timestamp when Merkle root was submitted
+    mapping(bytes32 => uint40) internal _merkleRootSubmittedAt;
+
+    /// @dev poolId hash => issued token address (for fallback balanceOf claims)
+    mapping(bytes32 => address) internal _poolIssuedTokens;
+
     // ─── Events ───────────────────────────────────────────────────────
 
     event TriggerPending(PoolId indexed poolId, TriggerType indexed triggerType, uint40 executeAfter);
-    event TriggerExecuted(PoolId indexed poolId, TriggerType indexed triggerType);
+    event TriggerExecuted(PoolId indexed poolId, TriggerType indexed triggerType, bool withMerkleRoot);
+    event MerkleRootSubmitted(PoolId indexed poolId, bytes32 merkleRoot);
     event Paused(address indexed by);
     event Unpaused(address indexed by);
     event IssuerRegistered(PoolId indexed poolId, address indexed issuer);
@@ -96,6 +108,10 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     error NoPendingTrigger();
     error GracePeriodNotElapsed();
     error ZeroAddress();
+    error MerkleRootAlreadySubmitted();
+    error MerkleRootChallengeNotElapsed();
+    error WaitingForMerkleRoot();
+    error ZeroMerkleRoot();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -235,10 +251,26 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     //  TRIGGER EXECUTION (after grace period)
     // ═══════════════════════════════════════════════════════════════════
 
-    /// @notice Execute a pending trigger after the grace period has elapsed.
+    /// @notice Submit a Merkle root for a pending trigger (guardian data role).
     /// @param poolId Pool identifier
-    /// @param merkleRoot Merkle root of (holder, balance) snapshot for insurance claims
-    function executeTrigger(PoolId poolId, bytes32 merkleRoot) external onlyGuardian nonReentrant whenNotPaused {
+    /// @param merkleRoot Merkle root of (holder, balance) snapshot
+    function submitMerkleRoot(PoolId poolId, bytes32 merkleRoot) external onlyGuardian {
+        if (merkleRoot == bytes32(0)) revert ZeroMerkleRoot();
+        bytes32 key = _key(poolId);
+        PendingTrigger storage pending = _pendingTriggers[key];
+        if (pending.detectedAt == 0) revert NoPendingTrigger();
+        if (_pendingMerkleRoots[key] != bytes32(0)) revert MerkleRootAlreadySubmitted();
+
+        _pendingMerkleRoots[key] = merkleRoot;
+        _merkleRootSubmittedAt[key] = uint40(block.timestamp);
+
+        emit MerkleRootSubmitted(poolId, merkleRoot);
+    }
+
+    /// @notice Execute a pending trigger after grace period and either challenge period or deadline.
+    /// @dev Permissionless. Path A: root submitted + challenge elapsed. Path B: no root + 24h deadline elapsed.
+    /// @param poolId Pool identifier
+    function executeTrigger(PoolId poolId) external nonReentrant whenNotPaused {
         bytes32 key = _key(poolId);
         PendingTrigger storage pending = _pendingTriggers[key];
         if (pending.detectedAt == 0) revert NoPendingTrigger();
@@ -247,6 +279,36 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         PoolTriggerState storage state = _poolStates[key];
         if (state.isTriggered) revert AlreadyTriggered();
 
+        bytes32 merkleRoot = _pendingMerkleRoots[key];
+        bool withMerkleRoot;
+
+        if (merkleRoot != bytes32(0)) {
+            // Path A: Merkle root submitted — require challenge period elapsed
+            uint40 submittedAt = _merkleRootSubmittedAt[key];
+            if (block.timestamp < submittedAt + MERKLE_ROOT_CHALLENGE_PERIOD) {
+                revert MerkleRootChallengeNotElapsed();
+            }
+            withMerkleRoot = true;
+        } else {
+            // Path B: No Merkle root — require 24h deadline elapsed after grace
+            if (block.timestamp < pending.detectedAt + GRACE_PERIOD + GUARDIAN_SUBMISSION_DEADLINE) {
+                revert WaitingForMerkleRoot();
+            }
+            withMerkleRoot = false;
+        }
+
+        _executeTriggerInternal(poolId, key, merkleRoot, withMerkleRoot);
+    }
+
+    function _executeTriggerInternal(
+        PoolId poolId,
+        bytes32 key,
+        bytes32 merkleRoot,
+        bool withMerkleRoot
+    ) internal {
+        PendingTrigger storage pending = _pendingTriggers[key];
+        PoolTriggerState storage state = _poolStates[key];
+
         TriggerType triggerType = pending.triggerType;
         uint256 totalEligibleSupply = pending.totalEligibleSupply;
 
@@ -254,8 +316,10 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         state.isTriggered = true;
         state.triggerType = triggerType;
 
-        // Clear pending
+        // Clear pending state
         delete _pendingTriggers[key];
+        delete _pendingMerkleRoots[key];
+        delete _merkleRootSubmittedAt[key];
 
         // Propagate to EscrowVault
         address issuer = _poolIssuers[key];
@@ -270,7 +334,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         // Propagate to InsurancePool
         if (totalEligibleSupply > 0) {
             try IInsurancePool(INSURANCE_POOL).executePayout(
-                poolId, uint8(triggerType), totalEligibleSupply, merkleRoot
+                poolId, uint8(triggerType), totalEligibleSupply, merkleRoot, _poolIssuedTokens[key]
             ) {} catch {
                 emit ExternalCallFailed("InsurancePool.executePayout", poolId);
             }
@@ -288,7 +352,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         }
 
         emit TriggerDetected(poolId, triggerType, "");
-        emit TriggerExecuted(poolId, triggerType);
+        emit TriggerExecuted(poolId, triggerType, withMerkleRoot);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -308,11 +372,13 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @param poolId Pool identifier
     /// @param issuer Issuer address
     /// @param totalSupply Initial total supply snapshot for dump detection denominator
-    function registerIssuer(PoolId poolId, address issuer, uint256 totalSupply) external onlyHook {
+    /// @param issuedToken Address of the issued token (for fallback balanceOf claims)
+    function registerIssuer(PoolId poolId, address issuer, uint256 totalSupply, address issuedToken) external onlyHook {
         if (issuer == address(0)) revert ZeroAddress();
         bytes32 key = _key(poolId);
         _poolIssuers[key] = issuer;
         _initialTotalSupply[key] = totalSupply;
+        _poolIssuedTokens[key] = issuedToken;
 
         emit IssuerRegistered(poolId, issuer);
     }
@@ -360,6 +426,13 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         exists = pending.detectedAt != 0;
         triggerType = pending.triggerType;
         executeAfter = pending.detectedAt + GRACE_PERIOD;
+    }
+
+    /// @notice Get the pending Merkle root and submission timestamp for a pool.
+    function getPendingMerkleRoot(PoolId poolId) external view returns (bytes32 merkleRoot, uint40 submittedAt) {
+        bytes32 key = _key(poolId);
+        merkleRoot = _pendingMerkleRoots[key];
+        submittedAt = _merkleRootSubmittedAt[key];
     }
 
     /// @notice Get the registered issuer for a pool.
