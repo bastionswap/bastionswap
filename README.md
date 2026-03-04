@@ -132,11 +132,13 @@ Deployment output is written to `deployments/{chainId}.json`.
 
 | Contract | Address |
 |---|---|
-| BastionHook | _TBD after deployment_ |
-| EscrowVault | _TBD after deployment_ |
-| InsurancePool | _TBD after deployment_ |
-| TriggerOracle | _TBD after deployment_ |
-| ReputationEngine | _TBD after deployment_ |
+| BastionHook | `0x243bD148C9DFeE05584182d420f319e234D80AC0` |
+| EscrowVault | `0xC36E784E1dff616bDae4EAc7B310F0934FaF04a4` |
+| InsurancePool | `0xB98E0Fb673e5a0C6e15F1D0a9f36E7dA954A0D5E` |
+| TriggerOracle | `0xD2BD10D3f2e3a057F0040663B1EEbf4d1874fEAB` |
+| ReputationEngine | `0x78dA752e9dBD73a9b0C0F5ddD15e854D2B879524` |
+
+> **Note**: These addresses were generated via local anvil fork simulation (deployer nonce 16271). Actual on-chain addresses will differ when deployed to Base Sepolia.
 
 ### External Dependencies
 
