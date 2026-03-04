@@ -21,8 +21,15 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={inter.className}>
         <Providers>
-          <Header />
-          <main className="mx-auto max-w-7xl px-4 py-8">{children}</main>
+          <div className="flex min-h-screen flex-col">
+            <Header />
+            <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:py-8">
+              {children}
+            </main>
+            <footer className="border-t border-subtle py-6 text-center text-xs text-gray-600">
+              BastionSwap — Protected swaps on Uniswap V4
+            </footer>
+          </div>
         </Providers>
       </body>
     </html>

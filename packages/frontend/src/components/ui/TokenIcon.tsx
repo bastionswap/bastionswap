@@ -7,18 +7,19 @@ interface TokenIconProps {
 }
 
 export function TokenIcon({ address, size = 32, className = "" }: TokenIconProps) {
-  // Generate a deterministic color from the address
   const hash = address.slice(2, 8);
   const hue = parseInt(hash, 16) % 360;
+  const satHash = parseInt(address.slice(8, 10), 16);
+  const sat = 45 + (satHash % 25);
 
   return (
     <div
-      className={`rounded-full flex items-center justify-center text-white font-bold ${className}`}
+      className={`rounded-full flex items-center justify-center text-white font-bold ring-2 ring-white/10 ${className}`}
       style={{
         width: size,
         height: size,
-        backgroundColor: `hsl(${hue}, 60%, 40%)`,
-        fontSize: size * 0.4,
+        background: `linear-gradient(135deg, hsl(${hue}, ${sat}%, 35%), hsl(${(hue + 40) % 360}, ${sat}%, 25%))`,
+        fontSize: size * 0.35,
       }}
     >
       {address.slice(2, 4).toUpperCase()}

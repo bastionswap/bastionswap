@@ -64,7 +64,7 @@ export default function CreatePoolPage() {
               className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium ${
                 step >= s
                   ? "bg-bastion-500 text-white"
-                  : "bg-gray-800 text-gray-500"
+                  : "bg-surface-light text-gray-500"
               }`}
             >
               {s}
@@ -72,7 +72,7 @@ export default function CreatePoolPage() {
             {s < 4 && (
               <div
                 className={`h-0.5 w-8 ${
-                  step > s ? "bg-bastion-500" : "bg-gray-800"
+                  step > s ? "bg-bastion-500" : "bg-surface-light"
                 }`}
               />
             )}
@@ -93,12 +93,12 @@ export default function CreatePoolPage() {
             value={tokenAddress}
             onChange={(e) => setTokenAddress(e.target.value)}
             placeholder="0x..."
-            className="w-full rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-white placeholder-gray-500 focus:border-bastion-500 focus:outline-none"
+            className="input-base"
           />
           <button
             onClick={() => setStep(2)}
             disabled={!/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)}
-            className="mt-4 w-full rounded-xl bg-bastion-500 py-3 font-semibold text-white hover:bg-bastion-600 disabled:opacity-40 transition-colors"
+            className="btn-primary mt-4 w-full py-3"
           >
             Continue
           </button>
@@ -117,7 +117,7 @@ export default function CreatePoolPage() {
                 value={tokenAmount}
                 onChange={(e) => setTokenAmount(e.target.value)}
                 placeholder="0"
-                className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-white placeholder-gray-500 focus:border-bastion-500 focus:outline-none"
+                className="input-base mt-1"
               />
             </div>
             <div>
@@ -127,21 +127,21 @@ export default function CreatePoolPage() {
                 value={ethAmount}
                 onChange={(e) => setEthAmount(e.target.value)}
                 placeholder="0"
-                className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-white placeholder-gray-500 focus:border-bastion-500 focus:outline-none"
+                className="input-base mt-1"
               />
             </div>
           </div>
           <div className="mt-4 flex gap-3">
             <button
               onClick={() => setStep(1)}
-              className="flex-1 rounded-xl border border-gray-700 py-3 font-semibold text-gray-300 hover:border-gray-600 transition-colors"
+              className="btn-secondary flex-1 py-3"
             >
               Back
             </button>
             <button
               onClick={() => setStep(3)}
               disabled={!ethAmount || !tokenAmount}
-              className="flex-1 rounded-xl bg-bastion-500 py-3 font-semibold text-white hover:bg-bastion-600 disabled:opacity-40 transition-colors"
+              className="btn-primary flex-1 py-3 disabled:opacity-40"
             >
               Continue
             </button>
@@ -232,13 +232,13 @@ export default function CreatePoolPage() {
           <div className="mt-4 flex gap-3">
             <button
               onClick={() => setStep(2)}
-              className="flex-1 rounded-xl border border-gray-700 py-3 font-semibold text-gray-300 hover:border-gray-600 transition-colors"
+              className="btn-secondary flex-1 py-3"
             >
               Back
             </button>
             <button
               onClick={() => setStep(4)}
-              className="flex-1 rounded-xl bg-bastion-500 py-3 font-semibold text-white hover:bg-bastion-600 transition-colors"
+              className="btn-primary flex-1 py-3"
             >
               Review
             </button>
@@ -266,7 +266,7 @@ export default function CreatePoolPage() {
               <span className="text-gray-400">Token Liquidity</span>
               <span>{tokenAmount}</span>
             </div>
-            <hr className="border-gray-800" />
+            <hr className="border-subtle" />
             <div className="flex justify-between">
               <span className="text-gray-400">Daily Withdraw Limit</span>
               <span>{formatBps(commitment.dailyWithdrawLimit)}</span>
@@ -300,13 +300,13 @@ export default function CreatePoolPage() {
             <button
               onClick={() => setStep(3)}
               disabled={isWriting || isConfirming}
-              className="flex-1 rounded-xl border border-gray-700 py-3 font-semibold text-gray-300 hover:border-gray-600 disabled:opacity-40 transition-colors"
+              className="btn-secondary flex-1 py-3 disabled:opacity-40"
             >
               Back
             </button>
             <button
               disabled={isWriting || isConfirming || isSuccess}
-              className="flex-1 rounded-xl bg-bastion-500 py-3 font-semibold text-white hover:bg-bastion-600 disabled:opacity-40 transition-colors"
+              className="btn-primary flex-1 py-3 disabled:opacity-40"
             >
               {isWriting ? (
                 <span className="flex items-center justify-center gap-2">

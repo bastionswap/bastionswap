@@ -21,9 +21,7 @@ export function SwapCard() {
   const [tokenOut, setTokenOut] = useState<Token | null>(null);
   const [amountIn, setAmountIn] = useState("");
   const [slippage, setSlippage] = useState("0.5");
-  const [showTokenSelect, setShowTokenSelect] = useState<
-    "in" | "out" | null
-  >(null);
+  const [showTokenSelect, setShowTokenSelect] = useState<"in" | "out" | null>(null);
   const [showSlippage, setShowSlippage] = useState(false);
   const { isWriting, isConfirming, isSuccess, error } = useExecuteSwap();
 
@@ -35,33 +33,33 @@ export function SwapCard() {
 
   return (
     <>
-      <Card className="mx-auto max-w-md">
+      <Card className="mx-auto max-w-[440px]">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Swap</h2>
           <button
             onClick={() => setShowSlippage(!showSlippage)}
-            className="rounded-lg p-2 text-gray-400 hover:bg-gray-800 hover:text-white"
+            className="rounded-lg p-2 text-gray-500 hover:bg-surface-light hover:text-white transition-colors"
             title="Settings"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </button>
         </div>
 
         {showSlippage && (
-          <div className="mb-4 rounded-xl bg-gray-800 p-3">
-            <p className="mb-2 text-xs text-gray-400">Slippage Tolerance</p>
+          <div className="mb-4 rounded-xl bg-surface-light p-3">
+            <p className="mb-2 text-xs text-gray-500">Slippage Tolerance</p>
             <div className="flex gap-2">
               {["0.5", "1.0", "2.0"].map((val) => (
                 <button
                   key={val}
                   onClick={() => setSlippage(val)}
-                  className={`rounded-lg px-3 py-1.5 text-sm ${
+                  className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
                     slippage === val
                       ? "bg-bastion-500 text-white"
-                      : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                      : "bg-surface-lighter text-gray-300 hover:bg-surface-lighter/80"
                   }`}
                 >
                   {val}%
@@ -72,16 +70,16 @@ export function SwapCard() {
                 value={!["0.5", "1.0", "2.0"].includes(slippage) ? slippage : ""}
                 onChange={(e) => setSlippage(e.target.value)}
                 placeholder="Custom"
-                className="w-20 rounded-lg bg-gray-700 px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none"
+                className="w-20 rounded-lg bg-surface-lighter px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none"
               />
             </div>
           </div>
         )}
 
         {/* Token In */}
-        <div className="rounded-xl bg-gray-800 p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-gray-400">You pay</span>
+        <div className="rounded-xl bg-surface-light p-4">
+          <div className="mb-2">
+            <span className="text-sm text-gray-500">You pay</span>
           </div>
           <div className="flex items-center gap-3">
             <input
@@ -89,11 +87,15 @@ export function SwapCard() {
               value={amountIn}
               onChange={(e) => setAmountIn(e.target.value)}
               placeholder="0"
-              className="flex-1 bg-transparent text-2xl font-medium text-white placeholder-gray-600 focus:outline-none"
+              className="flex-1 bg-transparent text-2xl font-medium text-white placeholder-gray-600 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             />
             <button
               onClick={() => setShowTokenSelect("in")}
-              className="flex items-center gap-2 rounded-full bg-gray-700 px-3 py-2 text-sm font-medium hover:bg-gray-600 transition-colors"
+              className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+                tokenIn
+                  ? "bg-surface-lighter hover:bg-surface-lighter/80"
+                  : "bg-bastion-500 text-white hover:bg-bastion-400"
+              }`}
             >
               {tokenIn ? (
                 <>
@@ -101,7 +103,7 @@ export function SwapCard() {
                   {tokenIn.symbol}
                 </>
               ) : (
-                "Select"
+                "Select token"
               )}
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -110,11 +112,11 @@ export function SwapCard() {
           </div>
         </div>
 
-        {/* Swap Direction Button */}
+        {/* Swap Direction */}
         <div className="flex justify-center -my-2 relative z-10">
           <button
             onClick={swapDirection}
-            className="rounded-xl border-4 border-gray-900 bg-gray-800 p-2 hover:bg-gray-700 transition-colors"
+            className="rounded-xl border-4 border-body bg-surface-light p-2 hover:bg-surface-lighter transition-colors"
           >
             <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
@@ -123,9 +125,9 @@ export function SwapCard() {
         </div>
 
         {/* Token Out */}
-        <div className="rounded-xl bg-gray-800 p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-gray-400">You receive</span>
+        <div className="rounded-xl bg-surface-light p-4">
+          <div className="mb-2">
+            <span className="text-sm text-gray-500">You receive</span>
           </div>
           <div className="flex items-center gap-3">
             <input
@@ -136,7 +138,11 @@ export function SwapCard() {
             />
             <button
               onClick={() => setShowTokenSelect("out")}
-              className="flex items-center gap-2 rounded-full bg-gray-700 px-3 py-2 text-sm font-medium hover:bg-gray-600 transition-colors"
+              className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+                tokenOut
+                  ? "bg-surface-lighter hover:bg-surface-lighter/80"
+                  : "bg-bastion-500 text-white hover:bg-bastion-400"
+              }`}
             >
               {tokenOut ? (
                 <>
@@ -144,7 +150,7 @@ export function SwapCard() {
                   {tokenOut.symbol}
                 </>
               ) : (
-                "Select"
+                "Select token"
               )}
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -168,32 +174,23 @@ export function SwapCard() {
           {!isConnected ? (
             <ConnectKitButton.Custom>
               {({ show }) => (
-                <button
-                  onClick={show}
-                  className="w-full rounded-xl bg-bastion-500 py-4 text-lg font-semibold text-white hover:bg-bastion-600 transition-colors"
-                >
+                <button onClick={show} className="btn-primary w-full py-4 text-base">
                   Connect Wallet
                 </button>
               )}
             </ConnectKitButton.Custom>
           ) : !tokenIn || !tokenOut ? (
-            <button
-              disabled
-              className="w-full rounded-xl bg-gray-800 py-4 text-lg font-semibold text-gray-500"
-            >
+            <button disabled className="w-full rounded-xl bg-surface-light py-4 text-base font-semibold text-gray-500 cursor-not-allowed">
               Select Tokens
             </button>
           ) : !amountIn || parseFloat(amountIn) <= 0 ? (
-            <button
-              disabled
-              className="w-full rounded-xl bg-gray-800 py-4 text-lg font-semibold text-gray-500"
-            >
+            <button disabled className="w-full rounded-xl bg-surface-light py-4 text-base font-semibold text-gray-500 cursor-not-allowed">
               Enter Amount
             </button>
           ) : (
             <button
               disabled={isWriting || isConfirming}
-              className="w-full rounded-xl bg-bastion-500 py-4 text-lg font-semibold text-white hover:bg-bastion-600 disabled:opacity-50 transition-colors"
+              className="btn-primary w-full py-4 text-base"
             >
               {isWriting
                 ? "Confirming..."

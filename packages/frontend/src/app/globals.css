@@ -2,6 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-gray-950 text-white antialiased;
+@layer base {
+  body {
+    @apply bg-body text-gray-100 antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-700 rounded-full;
+  }
+}
+
+@layer components {
+  .skeleton {
+    @apply relative overflow-hidden rounded-lg bg-surface-light;
+    background: linear-gradient(
+      90deg,
+      theme("colors.surface.DEFAULT") 25%,
+      theme("colors.surface.light") 50%,
+      theme("colors.surface.DEFAULT") 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  .glass-card {
+    @apply rounded-2xl border border-subtle bg-surface/80 backdrop-blur-sm;
+  }
+
+  .btn-primary {
+    @apply rounded-xl bg-bastion-500 px-6 py-3 font-semibold text-white
+           hover:bg-bastion-400 active:bg-bastion-600
+           disabled:opacity-40 disabled:cursor-not-allowed
+           transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply rounded-xl border border-subtle px-6 py-3 font-semibold text-gray-300
+           hover:border-gray-600 hover:text-white hover:bg-surface-light
+           transition-all duration-200;
+  }
+
+  .btn-success {
+    @apply rounded-xl bg-emerald-600 px-6 py-3 font-semibold text-white
+           hover:bg-emerald-500 active:bg-emerald-700
+           disabled:opacity-40 disabled:cursor-not-allowed
+           transition-all duration-200;
+  }
+
+  .input-base {
+    @apply w-full rounded-xl border border-subtle bg-surface px-4 py-3
+           text-white placeholder-gray-500
+           focus:border-bastion-500 focus:outline-none focus:ring-1 focus:ring-bastion-500/30
+           transition-colors;
+  }
 }
