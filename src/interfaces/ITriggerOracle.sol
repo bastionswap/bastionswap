@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.26;
+pragma solidity =0.8.26;
 
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
@@ -23,8 +23,8 @@ interface ITriggerOracle {
         NONE,
         RUG_PULL,
         ISSUER_DUMP,
-        HONEYPOT, // v0.2: 탈중앙화 감시자 네트워크에서 지원 예정
-        HIDDEN_TAX, // v0.2: 탈중앙화 감시자 네트워크에서 지원 예정
+        HONEYPOT, // v0.2: decentralized watcher network
+        HIDDEN_TAX, // v0.2: decentralized watcher network
         SLOW_RUG,
         COMMITMENT_BREACH
     }

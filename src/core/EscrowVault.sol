@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.26;
+pragma solidity =0.8.26;
 
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 import {IReputationEngine} from "../interfaces/IReputationEngine.sol";

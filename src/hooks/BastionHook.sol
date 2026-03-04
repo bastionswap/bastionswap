@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.26;
+pragma solidity =0.8.26;
 
 import {BaseTestHooks} from "@uniswap/v4-core/src/test/BaseTestHooks.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -93,6 +93,7 @@ contract BastionHook is BaseTestHooks {
 
     // ─── Hook Permission Flags ────────────────────────────────────────
 
+    /// @notice Returns the hook permission flags for Uniswap V4.
     function getHookPermissions() public pure returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: false,
