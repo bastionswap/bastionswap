@@ -59,7 +59,7 @@ interface IEscrowVault {
     /// @param escrowId Escrow identifier
     /// @param triggerType Type of trigger that caused the redistribution
     /// @param redistributedAmount Total amount redistributed to holders
-    event Redistributed(uint256 indexed escrowId, uint8 triggerType, uint256 redistributedAmount);
+    event Redistributed(uint256 indexed escrowId, uint8 indexed triggerType, uint256 redistributedAmount);
 
     /// @notice Emitted when an issuer updates their commitment to stricter values.
     /// @param escrowId Escrow identifier

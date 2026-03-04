@@ -17,6 +17,11 @@ contract MockERC20 is ERC20 {
     }
 }
 
+contract MockReputationEngine {
+    function recordEvent(address, uint8, bytes calldata) external {}
+    function getScore(address) external pure returns (uint256) { return 500; }
+}
+
 // ─── Test Contract ────────────────────────────────────────────────────────────
 
 contract EscrowVaultTest is Test {
@@ -39,7 +44,8 @@ contract EscrowVaultTest is Test {
         insurancePool = makeAddr("insurancePool");
         issuer = makeAddr("issuer");
 
-        vault = new EscrowVault(hook, oracle, insurancePool);
+        MockReputationEngine mockReputation = new MockReputationEngine();
+        vault = new EscrowVault(hook, oracle, insurancePool, address(mockReputation));
         token = new MockERC20();
 
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
@@ -245,6 +251,7 @@ contract EscrowVaultTest is Test {
 
         vm.warp(block.timestamp + 7 days);
 
+        vm.prank(issuer);
         uint256 released = vault.releaseVested(escrowId);
         assertEq(released, 10 ether);
         assertEq(token.balanceOf(issuer), 10 ether);
@@ -268,11 +275,13 @@ contract EscrowVaultTest is Test {
 
         // Release at 7 days
         vm.warp(block.timestamp + 7 days);
+        vm.prank(issuer);
         vault.releaseVested(escrowId);
         assertEq(token.balanceOf(issuer), 10 ether);
 
         // Release at 30 days (should release an additional 20 ether)
         vm.warp(block.timestamp + 23 days);
+        vm.prank(issuer);
         uint256 released = vault.releaseVested(escrowId);
         assertEq(released, 20 ether);
         assertEq(token.balanceOf(issuer), 30 ether);
@@ -282,7 +291,19 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         // Before any vesting
+        vm.prank(issuer);
         vm.expectRevert(EscrowVault.NothingToRelease.selector);
+        vault.releaseVested(defaultEscrowId);
+    }
+
+    function test_releaseVested_byNonIssuer_reverts() public {
+        _createDefaultEscrow();
+
+        vm.warp(block.timestamp + 7 days);
+
+        address nonIssuer = makeAddr("nonIssuer");
+        vm.prank(nonIssuer);
+        vm.expectRevert(EscrowVault.OnlyIssuer.selector);
         vault.releaseVested(defaultEscrowId);
     }
 
@@ -295,11 +316,13 @@ contract EscrowVaultTest is Test {
         vm.prank(oracle);
         vault.triggerRedistribution(defaultEscrowId, 1);
 
+        vm.prank(issuer);
         vm.expectRevert(EscrowVault.EscrowTriggered.selector);
         vault.releaseVested(defaultEscrowId);
     }
 
     function test_releaseVested_revertsNotFound() public {
+        vm.prank(issuer);
         vm.expectRevert(EscrowVault.EscrowNotFound.selector);
         vault.releaseVested(999);
     }
@@ -324,6 +347,7 @@ contract EscrowVaultTest is Test {
         vm.warp(block.timestamp + 7 days);
 
         // 10% of 33 = 3.3 => should round down to 3
+        vm.prank(issuer);
         uint256 released = vault.releaseVested(escrowId);
         assertEq(released, 3);
     }
@@ -339,6 +363,7 @@ contract EscrowVaultTest is Test {
         vm.warp(block.timestamp + 7 days);
 
         // 10 ether vested, but daily limit is 5 ether
+        vm.prank(issuer);
         uint256 released = vault.releaseVested(defaultEscrowId);
         assertEq(released, 5 ether);
     }
@@ -349,9 +374,11 @@ contract EscrowVaultTest is Test {
         vm.warp(block.timestamp + 7 days);
 
         // First release: 5 ether (daily max)
+        vm.prank(issuer);
         vault.releaseVested(defaultEscrowId);
 
         // Second release same day: should revert
+        vm.prank(issuer);
         vm.expectRevert(EscrowVault.DailyLimitExceeded.selector);
         vault.releaseVested(defaultEscrowId);
     }
@@ -362,11 +389,13 @@ contract EscrowVaultTest is Test {
         vm.warp(block.timestamp + 7 days);
 
         // First day: release 5 ether
+        vm.prank(issuer);
         vault.releaseVested(defaultEscrowId);
         assertEq(token.balanceOf(issuer), 5 ether);
 
         // Next day: can release another 5 ether
         vm.warp(block.timestamp + 1 days);
+        vm.prank(issuer);
         vault.releaseVested(defaultEscrowId);
         assertEq(token.balanceOf(issuer), 10 ether);
     }
@@ -400,6 +429,7 @@ contract EscrowVaultTest is Test {
 
         // Release 10 ether at 7 days
         vm.warp(block.timestamp + 7 days);
+        vm.prank(issuer);
         vault.releaseVested(escrowId);
 
         // Trigger - should redistribute remaining 90 ether
@@ -627,6 +657,7 @@ contract EscrowVaultTest is Test {
         );
 
         vm.warp(block.timestamp + 7 days);
+        vm.prank(issuer);
         vault.releaseVested(escrowId);
 
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);

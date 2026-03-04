@@ -59,7 +59,7 @@ contract Deploy is Script {
         require(address(factory) == a.factory, "Factory address mismatch");
 
         // 2. Deploy EscrowVault (nonce N+1)
-        EscrowVault escrowVault = new EscrowVault(a.hook, a.trigger, a.insurance);
+        EscrowVault escrowVault = new EscrowVault(a.hook, a.trigger, a.insurance, a.reputation);
         require(address(escrowVault) == a.escrow, "EscrowVault address mismatch");
 
         // 3. Deploy InsurancePool (nonce N+2)
@@ -67,7 +67,7 @@ contract Deploy is Script {
         require(address(insurancePool) == a.insurance, "InsurancePool address mismatch");
 
         // 4. Deploy TriggerOracle (nonce N+3)
-        TriggerOracle triggerOracle = new TriggerOracle(a.hook, a.escrow, a.insurance, guardian);
+        TriggerOracle triggerOracle = new TriggerOracle(a.hook, a.escrow, a.insurance, guardian, a.reputation);
         require(address(triggerOracle) == a.trigger, "TriggerOracle address mismatch");
 
         // 5. Deploy ReputationEngine (nonce N+4)
@@ -110,7 +110,7 @@ contract Deploy is Script {
         // Build BastionHook creation bytecode with constructor args
         a.hookCreationCode = abi.encodePacked(
             type(BastionHook).creationCode,
-            abi.encode(poolManager, a.escrow, a.insurance, a.trigger)
+            abi.encode(poolManager, a.escrow, a.insurance, a.trigger, a.reputation)
         );
 
         // Mine CREATE2 salt for hook flag matching

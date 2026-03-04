@@ -23,8 +23,8 @@ interface ITriggerOracle {
         NONE,
         RUG_PULL,
         ISSUER_DUMP,
-        HONEYPOT,
-        HIDDEN_TAX,
+        HONEYPOT, // v0.2: 탈중앙화 감시자 네트워크에서 지원 예정
+        HIDDEN_TAX, // v0.2: 탈중앙화 감시자 네트워크에서 지원 예정
         SLOW_RUG,
         COMMITMENT_BREACH
     }

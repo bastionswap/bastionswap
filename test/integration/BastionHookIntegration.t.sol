@@ -22,6 +22,12 @@ import {InsurancePool} from "../../src/core/InsurancePool.sol";
 import {TriggerOracle} from "../../src/core/TriggerOracle.sol";
 import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../../src/interfaces/ITriggerOracle.sol";
+import {IReputationEngine} from "../../src/interfaces/IReputationEngine.sol";
+
+contract MockReputationEngine {
+    function recordEvent(address, uint8, bytes calldata) external {}
+    function getScore(address) external pure returns (uint256) { return 500; }
+}
 
 contract BastionHookIntegrationTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
@@ -61,6 +67,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         address hookAddr = address(flags);
 
+        // Deploy mock before nonce computation to avoid nonce mismatch
+        MockReputationEngine mockReputation = new MockReputationEngine();
+        address reputationAddr = address(mockReputation);
+
         // Pre-compute addresses to resolve circular dependency
         // Deploy order: escrowVault (nonce N), insurancePool (N+1), triggerOracle (N+2)
         uint64 nonce = vm.getNonce(address(this));
@@ -68,13 +78,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
         address insuranceAddr = vm.computeCreateAddress(address(this), nonce + 1);
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
-        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr);
+        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance);
-        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian);
+        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
 
         // Deploy hook implementation and etch it at the correct address
         BastionHook impl =
-            new BastionHook(manager, IEscrowVault(address(escrowVault)), insurancePool, triggerOracle);
+            new BastionHook(manager, IEscrowVault(address(escrowVault)), insurancePool, triggerOracle, IReputationEngine(reputationAddr));
         vm.etch(hookAddr, address(impl).code);
 
         // After etch, the code is at hookAddr but storage is empty.
@@ -88,7 +98,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // Use deployCodeTo pattern instead:
         bytes memory creationCode = type(BastionHook).creationCode;
         bytes memory constructorArgs =
-            abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle));
+            abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr);
         bytes memory bytecode = abi.encodePacked(creationCode, constructorArgs);
 
         address deployed;
@@ -317,6 +327,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         // Release vested
         uint256 balanceBefore = issuedToken.balanceOf(issuerAddr);
+        vm.prank(issuerAddr);
         escrowVault.releaseVested(escrowId);
         uint256 balanceAfter = issuedToken.balanceOf(issuerAddr);
 
@@ -334,6 +345,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         // Warp to 7 days, release partial
         vm.warp(block.timestamp + 7 days);
+        vm.prank(issuerAddr);
         escrowVault.releaseVested(escrowId);
 
         uint256 issuedBalBefore = issuedToken.balanceOf(address(escrowVault));
@@ -346,7 +358,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         vm.warp(block.timestamp + 1 hours);
 
         // Execute trigger
-        triggerOracle.executeTrigger(poolId);
+        triggerOracle.executeTrigger(poolId, bytes32(0));
 
         // Verify trigger activated
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);
@@ -394,6 +406,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertEq(vested, 30 ether); // 30%
 
         uint256 balBefore = issuedToken.balanceOf(issuerAddr);
+        vm.prank(issuerAddr);
         escrowVault.releaseVested(escrowId);
         assertEq(issuedToken.balanceOf(issuerAddr) - balBefore, 30 ether); // 30% vested at 30 days
 
@@ -402,7 +415,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         triggerOracle.reportCommitmentBreach(poolId);
 
         vm.warp(block.timestamp + 1 hours);
-        triggerOracle.executeTrigger(poolId);
+        triggerOracle.executeTrigger(poolId, bytes32(0));
 
         // 6. Verify final state
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);

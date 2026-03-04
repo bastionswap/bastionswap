@@ -21,6 +21,12 @@ import {TriggerOracle} from "../../src/core/TriggerOracle.sol";
 import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {IInsurancePool} from "../../src/interfaces/IInsurancePool.sol";
 import {ITriggerOracle} from "../../src/interfaces/ITriggerOracle.sol";
+import {IReputationEngine} from "../../src/interfaces/IReputationEngine.sol";
+
+contract MockReputationEngine {
+    function recordEvent(address, uint8, bytes calldata) external {}
+    function getScore(address) external pure returns (uint256) { return 500; }
+}
 
 /// @title E2E Scenario Tests for BastionSwap Protocol
 /// @notice Validates the protocol's core value proposition through three full lifecycle scenarios:
@@ -70,19 +76,23 @@ contract E2E_ScenariosTest is Test, Deployers {
         );
         address hookAddr = address(flags);
 
+        // Deploy mock before nonce computation to avoid nonce mismatch
+        MockReputationEngine mockReputation = new MockReputationEngine();
+        address reputationAddr = address(mockReputation);
+
         uint64 nonce = vm.getNonce(address(this));
         address escrowAddr = vm.computeCreateAddress(address(this), nonce);
         address insuranceAddr = vm.computeCreateAddress(address(this), nonce + 1);
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
-        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr);
+        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance);
-        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian);
+        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
 
         {
             bytes memory bytecode = abi.encodePacked(
                 type(BastionHook).creationCode,
-                abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle))
+                abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr)
             );
             address deployed;
             assembly {
@@ -131,6 +141,16 @@ contract E2E_ScenariosTest is Test, Deployers {
             baseToken.approve(address(swapRouter), type(uint256).max);
             vm.stopPrank();
         }
+    }
+
+    // ─── Merkle Helpers ────────────────────────────────────────────────
+
+    function _computeLeaf(address account, uint256 balance) internal pure returns (bytes32) {
+        return keccak256(bytes.concat(keccak256(abi.encode(account, balance))));
+    }
+
+    function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
@@ -268,6 +288,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         vm.warp(block.timestamp + 6 days);
         assertEq(escrowVault.calculateVestedAmount(_escrowId), 0);
 
+        vm.prank(issuerAddr);
         vm.expectRevert(abi.encodeWithSelector(EscrowVault.NothingToRelease.selector));
         escrowVault.releaseVested(_escrowId);
         console.log("  Before 7d: release blocked");
@@ -279,6 +300,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         uint256 bal = issuedToken.balanceOf(issuerAddr);
         uint256 g = gasleft();
+        vm.prank(issuerAddr);
         escrowVault.releaseVested(_escrowId);
         console.log("Gas: releaseVested (10%)", g - gasleft());
 
@@ -287,6 +309,7 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario1_excessBlocked() internal {
+        vm.prank(issuerAddr);
         vm.expectRevert(abi.encodeWithSelector(EscrowVault.NothingToRelease.selector));
         escrowVault.releaseVested(_escrowId);
         console.log("  Excess release blocked");
@@ -315,7 +338,7 @@ contract E2E_ScenariosTest is Test, Deployers {
     function _scenario1_executeTrigger() internal {
         // Cannot execute before grace period
         vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
-        triggerOracle.executeTrigger(_poolId);
+        triggerOracle.executeTrigger(_poolId, bytes32(0));
 
         (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
         vm.warp(executeAfter);
@@ -327,7 +350,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         emit IEscrowVault.Redistributed(_escrowId, uint8(ITriggerOracle.TriggerType.RUG_PULL), expectedRedist);
 
         uint256 g = gasleft();
-        triggerOracle.executeTrigger(_poolId);
+        triggerOracle.executeTrigger(_poolId, bytes32(0));
         console.log("Gas: executeTrigger", g - gasleft());
 
         // Verify trigger state
@@ -344,6 +367,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("  Redistributed tokens:", redistributed);
 
         // Further release blocked
+        vm.prank(issuerAddr);
         vm.expectRevert(abi.encodeWithSelector(EscrowVault.EscrowTriggered.selector));
         escrowVault.releaseVested(_escrowId);
     }
@@ -352,16 +376,23 @@ contract E2E_ScenariosTest is Test, Deployers {
         // RUG_PULL doesn't auto-trigger insurance payout (totalEligibleSupply=0).
         // Manually trigger for E2E verification.
         uint256 totalSupply = issuedToken.totalSupply();
+        uint256 t1Bal = issuedToken.balanceOf(trader1);
+
+        // Build Merkle tree with trader1's balance
+        bytes32 leaf1 = _computeLeaf(trader1, t1Bal);
+        // Use a dummy second leaf to build a proper tree
+        bytes32 leaf2 = _computeLeaf(address(0xdead), 0);
+        bytes32 merkleRoot = _hashPair(leaf1, leaf2);
+
         vm.prank(address(triggerOracle));
-        insurancePool.executePayout(_poolId, uint8(ITriggerOracle.TriggerType.RUG_PULL), totalSupply);
+        insurancePool.executePayout(_poolId, uint8(ITriggerOracle.TriggerType.RUG_PULL), totalSupply, merkleRoot);
 
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
         assertTrue(ps.isTriggered);
         assertGt(ps.balance, 0);
         console.log("  Insurance ETH for claims:", ps.balance);
 
-        // Trader1 claims
-        uint256 t1Bal = issuedToken.balanceOf(trader1);
+        // Trader1 claims with Merkle proof
         uint256 comp = insurancePool.calculateCompensation(_poolId, t1Bal);
         assertGt(comp, 0);
 
@@ -370,9 +401,12 @@ contract E2E_ScenariosTest is Test, Deployers {
         vm.expectEmit(true, true, false, true, address(insurancePool));
         emit IInsurancePool.CompensationClaimed(_poolId, trader1, comp);
 
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = leaf2;
+
         vm.prank(trader1);
         uint256 g = gasleft();
-        insurancePool.claimCompensation(_poolId, t1Bal);
+        insurancePool.claimCompensation(_poolId, t1Bal, proof);
         console.log("Gas: claimCompensation", g - gasleft());
 
         assertEq(trader1.balance - ethBefore, comp);
@@ -382,7 +416,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         // Duplicate claim blocked
         vm.prank(trader1);
         vm.expectRevert(abi.encodeWithSelector(InsurancePool.AlreadyClaimed.selector));
-        insurancePool.claimCompensation(_poolId, t1Bal);
+        insurancePool.claimCompensation(_poolId, t1Bal, proof);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -415,6 +449,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         // First release: capped at daily limit (5 ether)
         uint256 bal = issuedToken.balanceOf(issuerAddr);
         uint256 g = gasleft();
+        vm.prank(issuerAddr);
         escrowVault.releaseVested(_escrowId);
         console.log("Gas: releaseVested (daily-limited)", g - gasleft());
 
@@ -423,6 +458,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("  Day 7 released (daily limit):", released);
 
         // Same-day second release blocked
+        vm.prank(issuerAddr);
         vm.expectRevert(abi.encodeWithSelector(EscrowVault.DailyLimitExceeded.selector));
         escrowVault.releaseVested(_escrowId);
         console.log("  Same-day excess blocked by daily limit");
@@ -430,6 +466,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         // Next day: remaining 5 ether from 10% tranche
         vm.warp(block.timestamp + 1 days);
         bal = issuedToken.balanceOf(issuerAddr);
+        vm.prank(issuerAddr);
         escrowVault.releaseVested(_escrowId);
         assertEq(issuedToken.balanceOf(issuerAddr) - bal, 5 ether);
         console.log("  Day 8 released: 5 ether");
@@ -439,6 +476,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         assertEq(escrowVault.calculateVestedAmount(_escrowId), 30 ether, "30% at 30d");
 
         bal = issuedToken.balanceOf(issuerAddr);
+        vm.prank(issuerAddr);
         escrowVault.releaseVested(_escrowId);
         assertEq(issuedToken.balanceOf(issuerAddr) - bal, 5 ether, "daily limit on day 30");
     }
@@ -456,6 +494,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         while (remaining > 0) {
             uint256 g = gasleft();
+            vm.prank(issuerAddr);
             uint256 rel = escrowVault.releaseVested(_escrowId);
             if (dayCount == 0) console.log("Gas: releaseVested (day 90)", g - gasleft());
             remaining -= rel;
@@ -566,13 +605,24 @@ contract E2E_ScenariosTest is Test, Deployers {
     function _scenario3_executeTrigger() internal {
         // Grace period: cannot execute early
         vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
-        triggerOracle.executeTrigger(_poolId);
+        triggerOracle.executeTrigger(_poolId, bytes32(0));
 
         (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
         vm.warp(executeAfter);
 
         uint256 insuranceTokensBefore = issuedToken.balanceOf(address(insurancePool));
         uint256 insuranceETHBefore = address(insurancePool).balance;
+
+        // Build Merkle tree for trader1 and trader2 balances
+        uint256 t1Bal = issuedToken.balanceOf(trader1);
+        uint256 t2Bal = issuedToken.balanceOf(trader2);
+        bytes32 leaf1 = _computeLeaf(trader1, t1Bal);
+        bytes32 leaf2 = _computeLeaf(trader2, t2Bal);
+        _scenario3MerkleRoot = _hashPair(leaf1, leaf2);
+        _scenario3Leaf1 = leaf1;
+        _scenario3Leaf2 = leaf2;
+        _scenario3T1Bal = t1Bal;
+        _scenario3T2Bal = t2Bal;
 
         // Expect both Redistributed and PayoutExecuted events
         vm.expectEmit(true, false, false, true, address(escrowVault));
@@ -584,7 +634,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         );
 
         uint256 g = gasleft();
-        triggerOracle.executeTrigger(_poolId);
+        triggerOracle.executeTrigger(_poolId, _scenario3MerkleRoot);
         console.log("Gas: executeTrigger (ISSUER_DUMP)", g - gasleft());
 
         // Verify trigger state
@@ -606,14 +656,21 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("  Insurance payout (ETH):", ps.balance);
 
         // Escrow release blocked
+        vm.prank(issuerAddr);
         vm.expectRevert(abi.encodeWithSelector(EscrowVault.EscrowTriggered.selector));
         escrowVault.releaseVested(_escrowId);
     }
 
+    // Scenario 3 merkle state (set during _scenario3_executeTrigger, used in _scenario3_claims)
+    bytes32 internal _scenario3MerkleRoot;
+    bytes32 internal _scenario3Leaf1;
+    bytes32 internal _scenario3Leaf2;
+    uint256 internal _scenario3T1Bal;
+    uint256 internal _scenario3T2Bal;
+
     function _scenario3_claims() internal {
-        // Trader1 claims
-        uint256 t1Bal = issuedToken.balanceOf(trader1);
-        uint256 comp1 = insurancePool.calculateCompensation(_poolId, t1Bal);
+        // Trader1 claims with Merkle proof
+        uint256 comp1 = insurancePool.calculateCompensation(_poolId, _scenario3T1Bal);
         assertGt(comp1, 0);
 
         uint256 ethBefore = trader1.balance;
@@ -621,23 +678,28 @@ contract E2E_ScenariosTest is Test, Deployers {
         vm.expectEmit(true, true, false, true, address(insurancePool));
         emit IInsurancePool.CompensationClaimed(_poolId, trader1, comp1);
 
+        bytes32[] memory proof1 = new bytes32[](1);
+        proof1[0] = _scenario3Leaf2;
+
         vm.prank(trader1);
         uint256 g = gasleft();
-        insurancePool.claimCompensation(_poolId, t1Bal);
+        insurancePool.claimCompensation(_poolId, _scenario3T1Bal, proof1);
         console.log("Gas: claimCompensation (trader1)", g - gasleft());
 
         assertEq(trader1.balance - ethBefore, comp1);
         console.log("  Trader1 claimed:", comp1);
 
-        // Trader2 claims
-        uint256 t2Bal = issuedToken.balanceOf(trader2);
-        uint256 comp2 = insurancePool.calculateCompensation(_poolId, t2Bal);
+        // Trader2 claims with Merkle proof
+        uint256 comp2 = insurancePool.calculateCompensation(_poolId, _scenario3T2Bal);
         assertGt(comp2, 0);
 
         ethBefore = trader2.balance;
+        bytes32[] memory proof2 = new bytes32[](1);
+        proof2[0] = _scenario3Leaf1;
+
         vm.prank(trader2);
         g = gasleft();
-        insurancePool.claimCompensation(_poolId, t2Bal);
+        insurancePool.claimCompensation(_poolId, _scenario3T2Bal, proof2);
         console.log("Gas: claimCompensation (trader2)", g - gasleft());
 
         assertEq(trader2.balance - ethBefore, comp2);
@@ -650,15 +712,16 @@ contract E2E_ScenariosTest is Test, Deployers {
         // Duplicate blocked
         vm.prank(trader1);
         vm.expectRevert(abi.encodeWithSelector(InsurancePool.AlreadyClaimed.selector));
-        insurancePool.claimCompensation(_poolId, t1Bal);
+        insurancePool.claimCompensation(_poolId, _scenario3T1Bal, proof1);
     }
 
     function _scenario3_claimExpiry() internal {
         vm.warp(block.timestamp + 31 days);
 
+        bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(InsurancePool.ClaimPeriodExpired.selector));
-        insurancePool.claimCompensation(_poolId, 1000 ether);
+        insurancePool.claimCompensation(_poolId, 1000 ether, emptyProof);
         console.log("  Claim after 30d window correctly blocked");
     }
 }

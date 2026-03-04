@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {IInsurancePool} from "../interfaces/IInsurancePool.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 /// @title InsurancePool
 /// @notice Per-token isolated insurance pool funded by a portion of buy-side swap fees.
@@ -30,6 +31,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint8 triggerType;
         uint256 totalEligibleSupply;
         uint256 payoutBalance; // balance snapshot at trigger time for claims
+        bytes32 merkleRoot; // Merkle root of (holder, balance) snapshot at trigger time
+        uint256 totalClaimed; // cumulative claimed amount (safety check)
         mapping(address => bool) claimed;
     }
 
@@ -54,6 +57,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error FeeRateTooHigh();
     error InsufficientPoolBalance();
     error TransferFailed();
+    error InvalidMerkleProof();
+    error MerkleRootNotSet();
+    error ExceedsPoolBalance();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -94,7 +100,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     }
 
     /// @inheritdoc IInsurancePool
-    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply)
+    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32 merkleRoot)
         external
         onlyTriggerOracle
         nonReentrant
@@ -111,12 +117,13 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         pool.triggerType = triggerType;
         pool.totalEligibleSupply = totalEligibleSupply;
         pool.payoutBalance = totalPayout;
+        pool.merkleRoot = merkleRoot;
 
         emit PayoutExecuted(poolId, triggerType, totalPayout);
     }
 
     /// @inheritdoc IInsurancePool
-    function claimCompensation(PoolId poolId, uint256 holderBalance)
+    function claimCompensation(PoolId poolId, uint256 holderBalance, bytes32[] calldata merkleProof)
         external
         nonReentrant
         returns (uint256 amount)
@@ -126,12 +133,21 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (pool.claimed[msg.sender]) revert AlreadyClaimed();
         if (block.timestamp > pool.triggerTimestamp + CLAIM_PERIOD) revert ClaimPeriodExpired();
         if (holderBalance == 0) revert ZeroAmount();
+        if (pool.merkleRoot == bytes32(0)) revert MerkleRootNotSet();
+
+        // Verify Merkle proof (double hashing to prevent second preimage attack)
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, holderBalance))));
+        if (!MerkleProof.verify(merkleProof, pool.merkleRoot, leaf)) revert InvalidMerkleProof();
 
         amount = _calculateCompensation(pool, holderBalance);
         if (amount == 0) revert ZeroAmount();
 
+        // Safety check: totalClaimed must not exceed pool balance
+        if (pool.totalClaimed + amount > pool.payoutBalance) revert ExceedsPoolBalance();
+
         // CEI: mark claimed before transfer
         pool.claimed[msg.sender] = true;
+        pool.totalClaimed += amount;
         pool.balance -= amount;
 
         (bool success,) = msg.sender.call{value: amount}("");

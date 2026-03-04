@@ -13,6 +13,7 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
+import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
 import {InsurancePool} from "../core/InsurancePool.sol";
 import {ITriggerOracle} from "../interfaces/ITriggerOracle.sol";
 import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
@@ -34,6 +35,7 @@ contract BastionHook is BaseTestHooks {
     IEscrowVault public immutable escrowVault;
     InsurancePool public immutable insurancePool;
     TriggerOracle public immutable triggerOracle;
+    IReputationEngine public immutable reputationEngine;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -61,6 +63,7 @@ contract BastionHook is BaseTestHooks {
     event InsuranceFeeDeposited(PoolId indexed poolId, uint256 amount);
     event IssuerSaleReported(PoolId indexed poolId, address indexed issuer, uint256 amount);
     event LPRemovalReported(PoolId indexed poolId, uint256 amount, uint256 totalLP);
+    event ExternalCallFailed(string target, PoolId indexed poolId);
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -75,12 +78,14 @@ contract BastionHook is BaseTestHooks {
         IPoolManager _poolManager,
         IEscrowVault _escrowVault,
         InsurancePool _insurancePool,
-        TriggerOracle _triggerOracle
+        TriggerOracle _triggerOracle,
+        IReputationEngine _reputationEngine
     ) {
         poolManager = _poolManager;
         escrowVault = _escrowVault;
         insurancePool = _insurancePool;
         triggerOracle = _triggerOracle;
+        reputationEngine = _reputationEngine;
     }
 
     // ─── Hook Permission Flags ────────────────────────────────────────
@@ -150,7 +155,9 @@ contract BastionHook is BaseTestHooks {
 
             // Report LP removal to TriggerOracle (for all LPs, but especially issuers)
             if (_issuers[poolId] != address(0) && totalLP > 0) {
-                try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {}
+                try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
+                    emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
+                }
             }
 
             // Update tracked liquidity
@@ -258,6 +265,15 @@ contract BastionHook is BaseTestHooks {
         triggerOracle.registerIssuer(poolId, issuer);
         triggerOracle.setTriggerConfig(poolId, triggerConfig);
 
+        // Record pool creation in reputation engine
+        try reputationEngine.recordEvent(
+            issuer,
+            IReputationEngine.EventType.POOL_CREATED,
+            abi.encode(token, amount, commitment)
+        ) {} catch {
+            emit ExternalCallFailed("ReputationEngine.recordEvent", poolId);
+        }
+
         emit IssuerRegistered(poolId, issuer, token);
         emit EscrowCreated(poolId, escrowId, issuer);
     }
@@ -342,7 +358,9 @@ contract BastionHook is BaseTestHooks {
         uint256 totalSupply = ERC20(issuedToken).totalSupply();
         if (totalSupply == 0) return;
 
-        try triggerOracle.reportIssuerSale(poolId, issuer, soldAmount, totalSupply) {} catch {}
+        try triggerOracle.reportIssuerSale(poolId, issuer, soldAmount, totalSupply) {} catch {
+            emit ExternalCallFailed("TriggerOracle.reportIssuerSale", poolId);
+        }
 
         emit IssuerSaleReported(poolId, issuer, soldAmount);
     }

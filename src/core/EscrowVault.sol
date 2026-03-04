@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
+import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
@@ -22,6 +23,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     address public immutable BASTION_HOOK;
     address public immutable TRIGGER_ORACLE;
     address public immutable INSURANCE_POOL;
+    IReputationEngine public immutable REPUTATION_ENGINE;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -78,10 +80,15 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     // ─── Constructor ──────────────────────────────────────────────────
 
-    constructor(address bastionHook, address triggerOracle, address insurancePool) {
+    // ─── Events (contract-level) ─────────────────────────────────────
+
+    event ExternalCallFailed(string target, uint256 indexed escrowId);
+
+    constructor(address bastionHook, address triggerOracle, address insurancePool, address reputationEngine) {
         BASTION_HOOK = bastionHook;
         TRIGGER_ORACLE = triggerOracle;
         INSURANCE_POOL = insurancePool;
+        REPUTATION_ENGINE = IReputationEngine(reputationEngine);
     }
 
     // ─── External Functions ───────────────────────────────────────────
@@ -129,6 +136,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     function releaseVested(uint256 escrowId) external nonReentrant returns (uint256 releasedAmount) {
         Escrow storage escrow = _escrows[escrowId];
         if (escrow.createdAt == 0) revert EscrowNotFound();
+        if (msg.sender != escrow.issuer) revert OnlyIssuer();
         if (escrow.isTriggered) revert EscrowTriggered();
 
         uint256 totalVested = _calculateVestedAmount(escrow, _vestingSchedules[escrowId]);
@@ -156,6 +164,18 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         ERC20(escrow.token).safeTransfer(escrow.issuer, releasedAmount);
 
         emit VestedReleased(escrowId, releasedAmount);
+
+        // Record escrow completion in reputation engine when fully vested
+        if (escrow.releasedAmount == escrow.totalAmount) {
+            uint256 durationDays = (block.timestamp - escrow.createdAt) / 1 days;
+            try REPUTATION_ENGINE.recordEvent(
+                escrow.issuer,
+                IReputationEngine.EventType.ESCROW_COMPLETED,
+                abi.encode(escrow.totalAmount, durationDays)
+            ) {} catch {
+                emit ExternalCallFailed("ReputationEngine.recordEvent", escrowId);
+            }
+        }
     }
 
     /// @inheritdoc IEscrowVault

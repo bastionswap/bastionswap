@@ -33,7 +33,7 @@ interface IInsurancePool {
     /// @param poolId Uniswap V4 pool identifier
     /// @param triggerType Type of trigger that caused the payout
     /// @param totalPayout Total amount earmarked for distribution
-    event PayoutExecuted(PoolId indexed poolId, uint8 triggerType, uint256 totalPayout);
+    event PayoutExecuted(PoolId indexed poolId, uint8 indexed triggerType, uint256 totalPayout);
 
     /// @notice Emitted when an individual holder claims their compensation.
     /// @param poolId Uniswap V4 pool identifier
@@ -64,17 +64,22 @@ interface IInsurancePool {
     /// @param poolId Uniswap V4 pool identifier
     /// @param triggerType The type of trigger event that occurred
     /// @param totalEligibleSupply Total token supply eligible for pro-rata claims
+    /// @param merkleRoot Merkle root of (holder, balance) snapshot at trigger time
     /// @return totalPayout Total amount earmarked for distribution
-    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply)
+    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32 merkleRoot)
         external
         returns (uint256 totalPayout);
 
     /// @notice Allows a holder to claim their pro-rata compensation after a payout.
     /// @dev Reverts if not triggered, already claimed, or claim period expired.
+    ///      Holder is msg.sender. Balance is verified via Merkle proof.
     /// @param poolId Uniswap V4 pool identifier
     /// @param holderBalance Holder's token balance at trigger snapshot
+    /// @param merkleProof Merkle proof for (msg.sender, holderBalance) leaf
     /// @return amount Amount of compensation transferred to the holder
-    function claimCompensation(PoolId poolId, uint256 holderBalance) external returns (uint256 amount);
+    function claimCompensation(PoolId poolId, uint256 holderBalance, bytes32[] calldata merkleProof)
+        external
+        returns (uint256 amount);
 
     /// @notice Calculates the compensation amount for a given holder balance.
     /// @param poolId Uniswap V4 pool identifier

@@ -7,6 +7,13 @@ import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
+// ─── Mock ReputationEngine ────────────────────────────────────────────────────
+
+contract MockReputationEngine {
+    function recordEvent(address, uint8, bytes calldata) external {}
+    function getScore(address) external pure returns (uint256) { return 500; }
+}
+
 // ─── Mock Token ───────────────────────────────────────────────────────────────
 
 contract MockERC20 is ERC20 {
@@ -27,6 +34,7 @@ contract EscrowVaultHandler is Test {
     uint256 public escrowId;
     uint256 public totalAmount;
     address public oracle;
+    address public issuer;
 
     // Ghost variables for invariant verification
     uint256 public ghost_lastVestedAmount;
@@ -37,12 +45,13 @@ contract EscrowVaultHandler is Test {
     // Track monotonicity violations
     bool public ghost_monotonicityViolated;
 
-    constructor(EscrowVault _vault, MockERC20 _token, uint256 _escrowId, uint256 _totalAmount, address _oracle) {
+    constructor(EscrowVault _vault, MockERC20 _token, uint256 _escrowId, uint256 _totalAmount, address _oracle, address _issuer) {
         vault = _vault;
         token = _token;
         escrowId = _escrowId;
         totalAmount = _totalAmount;
         oracle = _oracle;
+        issuer = _issuer;
 
         ghost_lastTimestamp = block.timestamp;
         ghost_lastVestedAmount = 0;
@@ -64,6 +73,7 @@ contract EscrowVaultHandler is Test {
     function release() external {
         if (ghost_triggered) return;
 
+        vm.prank(issuer);
         try vault.releaseVested(escrowId) returns (uint256 amt) {
             ghost_totalReleased += amt;
         } catch {}
@@ -102,7 +112,7 @@ contract EscrowVaultInvariantTest is Test {
         insurancePool = makeAddr("insurancePool");
         issuer = makeAddr("issuer");
 
-        vault = new EscrowVault(hook, oracle, insurancePool);
+        vault = new EscrowVault(hook, oracle, insurancePool, address(new MockReputationEngine()));
         token = new MockERC20();
 
         PoolId poolId = PoolId.wrap(bytes32(uint256(1)));
@@ -127,7 +137,7 @@ contract EscrowVaultInvariantTest is Test {
         vm.prank(hook);
         vault.createEscrow(poolId, issuer, address(token), ESCROW_AMOUNT, schedule, commitment);
 
-        handler = new EscrowVaultHandler(vault, token, escrowId, ESCROW_AMOUNT, oracle);
+        handler = new EscrowVaultHandler(vault, token, escrowId, ESCROW_AMOUNT, oracle, issuer);
 
         // Only target the handler
         targetContract(address(handler));
@@ -157,6 +167,7 @@ contract EscrowVaultInvariantTest is Test {
     function invariant_releaseRevertsAfterTrigger() public {
         if (!handler.ghost_triggered()) return;
 
+        vm.prank(issuer);
         vm.expectRevert(EscrowVault.EscrowTriggered.selector);
         vault.releaseVested(escrowId);
     }
@@ -199,7 +210,7 @@ contract EscrowVaultInvariantWithLockTest is Test {
         insurancePool = makeAddr("insurancePool");
         issuer = makeAddr("issuer");
 
-        vault = new EscrowVault(hook, oracle, insurancePool);
+        vault = new EscrowVault(hook, oracle, insurancePool, address(new MockReputationEngine()));
         token = new MockERC20();
 
         PoolId poolId = PoolId.wrap(bytes32(uint256(2)));
@@ -223,7 +234,7 @@ contract EscrowVaultInvariantWithLockTest is Test {
         vm.prank(hook);
         vault.createEscrow(poolId, issuer, address(token), ESCROW_AMOUNT, schedule, commitment);
 
-        handler = new EscrowVaultHandler(vault, token, escrowId, ESCROW_AMOUNT, oracle);
+        handler = new EscrowVaultHandler(vault, token, escrowId, ESCROW_AMOUNT, oracle, issuer);
         targetContract(address(handler));
     }
 
@@ -262,7 +273,7 @@ contract EscrowVaultFuzzTest is Test {
         insurancePool = makeAddr("insurancePool");
         issuer = makeAddr("issuer");
 
-        vault = new EscrowVault(hook, oracle, insurancePool);
+        vault = new EscrowVault(hook, oracle, insurancePool, address(new MockReputationEngine()));
         token = new MockERC20();
     }
 
@@ -445,6 +456,7 @@ contract EscrowVaultFuzzTest is Test {
         vm.warp(block.timestamp + elapsed);
 
         // Try to release (may revert if nothing vested)
+        vm.prank(issuer);
         try vault.releaseVested(escrowId) {} catch {}
 
         uint256 vested = vault.calculateVestedAmount(escrowId);
@@ -470,6 +482,7 @@ contract EscrowVaultFuzzTest is Test {
         vault.triggerRedistribution(escrowId, 1);
 
         // Release must revert
+        vm.prank(issuer);
         vm.expectRevert(EscrowVault.EscrowTriggered.selector);
         vault.releaseVested(escrowId);
     }
@@ -577,6 +590,7 @@ contract EscrowVaultFuzzTest is Test {
         uint256 escrowId = _createEscrow(poolId, amount, schedule);
 
         vm.warp(block.timestamp + elapsed);
+        vm.prank(issuer);
         try vault.releaseVested(escrowId) {} catch {}
 
         uint256 vested = vault.calculateVestedAmount(escrowId);

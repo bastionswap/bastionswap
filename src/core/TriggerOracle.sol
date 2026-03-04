@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {ITriggerOracle} from "../interfaces/ITriggerOracle.sol";
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 import {IInsurancePool} from "../interfaces/IInsurancePool.sol";
+import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -23,6 +24,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     address public immutable ESCROW_VAULT;
     address public immutable INSURANCE_POOL;
     address public immutable GUARDIAN;
+    IReputationEngine public immutable REPUTATION_ENGINE;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -73,6 +75,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     event Paused(address indexed by);
     event Unpaused(address indexed by);
     event IssuerRegistered(PoolId indexed poolId, address indexed issuer);
+    event ExternalCallFailed(string target, PoolId indexed poolId);
 
     // ─── Errors ───────────────────────────────────────────────────────
 
@@ -83,8 +86,6 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     error IsPaused();
     error NoPendingTrigger();
     error GracePeriodNotElapsed();
-    error TriggerThresholdNotMet();
-    error InvalidProof();
     error ZeroAddress();
 
     // ─── Modifiers ────────────────────────────────────────────────────
@@ -106,11 +107,18 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     // ─── Constructor ──────────────────────────────────────────────────
 
-    constructor(address bastionHook, address escrowVault, address insurancePool, address guardian) {
+    constructor(
+        address bastionHook,
+        address escrowVault,
+        address insurancePool,
+        address guardian,
+        address reputationEngine
+    ) {
         BASTION_HOOK = bastionHook;
         ESCROW_VAULT = escrowVault;
         INSURANCE_POOL = insurancePool;
         GUARDIAN = guardian;
+        REPUTATION_ENGINE = IReputationEngine(reputationEngine);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -193,64 +201,13 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  OFF-CHAIN BOT PROOF SUBMISSION
-    // ═══════════════════════════════════════════════════════════════════
-
-    /// @notice Submit proof that a token has honeypot behavior.
-    /// @param poolId Pool identifier
-    /// @param proof Encoded proof data (e.g. failed transfer tx hash + Merkle proof)
-    function submitHoneypotProof(PoolId poolId, bytes calldata proof)
-        external
-        whenNotPaused
-    {
-        if (proof.length == 0) revert InvalidProof();
-
-        bytes32 key = _key(poolId);
-        PoolTriggerState storage state = _poolStates[key];
-        if (state.isTriggered) return;
-        if (!state.configSet) revert ConfigNotSet();
-
-        // Proof validation: decode and verify minimally
-        // In production, this would verify a Merkle proof against a trusted root.
-        // For now, we require non-empty proof and trust the bot's submission.
-        // Future: verify against a Merkle root posted by a trusted sequencer.
-
-        _initPendingTrigger(poolId, key, TriggerType.HONEYPOT, 0);
-    }
-
-    /// @notice Submit proof of hidden tax exceeding threshold.
-    /// @param poolId Pool identifier
-    /// @param expectedOutput Expected swap output amount
-    /// @param actualOutput Actual swap output received
-    /// @param proof Additional proof data
-    function submitHiddenTaxProof(
-        PoolId poolId,
-        uint256 expectedOutput,
-        uint256 actualOutput,
-        bytes calldata proof
-    ) external whenNotPaused {
-        if (proof.length == 0) revert InvalidProof();
-        if (actualOutput >= expectedOutput) revert TriggerThresholdNotMet();
-
-        bytes32 key = _key(poolId);
-        PoolTriggerState storage state = _poolStates[key];
-        if (state.isTriggered) return;
-        if (!state.configSet) revert ConfigNotSet();
-
-        // Check if deviation exceeds threshold
-        uint256 deviation = ((expectedOutput - actualOutput) * BPS_BASE) / expectedOutput;
-        if (deviation < state.config.taxDeviationThreshold) revert TriggerThresholdNotMet();
-
-        _initPendingTrigger(poolId, key, TriggerType.HIDDEN_TAX, 0);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
     //  TRIGGER EXECUTION (after grace period)
     // ═══════════════════════════════════════════════════════════════════
 
     /// @notice Execute a pending trigger after the grace period has elapsed.
     /// @param poolId Pool identifier
-    function executeTrigger(PoolId poolId) external nonReentrant whenNotPaused {
+    /// @param merkleRoot Merkle root of (holder, balance) snapshot for insurance claims
+    function executeTrigger(PoolId poolId, bytes32 merkleRoot) external nonReentrant whenNotPaused {
         bytes32 key = _key(poolId);
         PendingTrigger storage pending = _pendingTriggers[key];
         if (pending.detectedAt == 0) revert NoPendingTrigger();
@@ -274,13 +231,29 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         if (issuer != address(0)) {
             uint256 escrowId = _computeEscrowId(poolId, issuer);
             try IEscrowVault(ESCROW_VAULT).triggerRedistribution(escrowId, uint8(triggerType)) {}
-            catch {}
+            catch {
+                emit ExternalCallFailed("EscrowVault.triggerRedistribution", poolId);
+            }
         }
 
         // Propagate to InsurancePool
         if (totalEligibleSupply > 0) {
-            try IInsurancePool(INSURANCE_POOL).executePayout(poolId, uint8(triggerType), totalEligibleSupply) {}
-            catch {}
+            try IInsurancePool(INSURANCE_POOL).executePayout(
+                poolId, uint8(triggerType), totalEligibleSupply, merkleRoot
+            ) {} catch {
+                emit ExternalCallFailed("InsurancePool.executePayout", poolId);
+            }
+        }
+
+        // Record trigger in reputation engine
+        if (issuer != address(0)) {
+            try REPUTATION_ENGINE.recordEvent(
+                issuer,
+                IReputationEngine.EventType.TRIGGER_FIRED,
+                abi.encode(uint8(triggerType))
+            ) {} catch {
+                emit ExternalCallFailed("ReputationEngine.recordEvent", poolId);
+            }
         }
 
         emit TriggerDetected(poolId, triggerType, "");

@@ -27,7 +27,7 @@ contract MockInsurancePool {
     uint256 public lastTotalSupply;
     bool public payoutCalled;
 
-    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply)
+    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32)
         external
         returns (uint256)
     {
@@ -37,6 +37,11 @@ contract MockInsurancePool {
         payoutCalled = true;
         return 10 ether;
     }
+}
+
+contract MockReputationEngine {
+    function recordEvent(address, uint8, bytes calldata) external {}
+    function getScore(address) external pure returns (uint256) { return 500; }
 }
 
 // ─── Test Contract ────────────────────────────────────────────────────────────
@@ -65,7 +70,8 @@ contract TriggerOracleTest is Test {
         escrowVault = new MockEscrowVault();
         insurancePool = new MockInsurancePool();
 
-        oracle = new TriggerOracle(hook, address(escrowVault), address(insurancePool), guardian);
+        MockReputationEngine reputationEngine = new MockReputationEngine();
+        oracle = new TriggerOracle(hook, address(escrowVault), address(insurancePool), guardian, address(reputationEngine));
 
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
 
@@ -99,7 +105,7 @@ contract TriggerOracleTest is Test {
 
     function _executeAfterGrace() internal {
         vm.warp(block.timestamp + 1 hours);
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -237,66 +243,6 @@ contract TriggerOracleTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  HONEYPOT PROOF TESTS
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_submitHoneypotProof_triggers() public {
-        vm.prank(bot);
-        oracle.submitHoneypotProof(defaultPoolId, hex"deadbeef");
-
-        (bool exists, ITriggerOracle.TriggerType triggerType,) = oracle.getPendingTrigger(defaultPoolId);
-        assertTrue(exists);
-        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.HONEYPOT));
-    }
-
-    function test_submitHoneypotProof_revertsEmptyProof() public {
-        vm.prank(bot);
-        vm.expectRevert(TriggerOracle.InvalidProof.selector);
-        oracle.submitHoneypotProof(defaultPoolId, "");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  HIDDEN TAX PROOF TESTS
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_submitHiddenTaxProof_triggers() public {
-        // Expected 100, got 90 => 10% deviation > 5% threshold
-        vm.prank(bot);
-        oracle.submitHiddenTaxProof(defaultPoolId, 100 ether, 90 ether, hex"cafe");
-
-        (bool exists, ITriggerOracle.TriggerType triggerType,) = oracle.getPendingTrigger(defaultPoolId);
-        assertTrue(exists);
-        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.HIDDEN_TAX));
-    }
-
-    function test_submitHiddenTaxProof_belowThreshold() public {
-        // Expected 100, got 97 => 3% deviation < 5% threshold
-        vm.prank(bot);
-        vm.expectRevert(TriggerOracle.TriggerThresholdNotMet.selector);
-        oracle.submitHiddenTaxProof(defaultPoolId, 100 ether, 97 ether, hex"cafe");
-    }
-
-    function test_submitHiddenTaxProof_noDeviation() public {
-        // Expected 100, got 100 => 0% deviation
-        vm.prank(bot);
-        vm.expectRevert(TriggerOracle.TriggerThresholdNotMet.selector);
-        oracle.submitHiddenTaxProof(defaultPoolId, 100 ether, 100 ether, hex"cafe");
-    }
-
-    function test_submitHiddenTaxProof_actualMoreThanExpected() public {
-        // actual > expected => revert (no hidden tax)
-        vm.prank(bot);
-        vm.expectRevert(TriggerOracle.TriggerThresholdNotMet.selector);
-        oracle.submitHiddenTaxProof(defaultPoolId, 100 ether, 110 ether, hex"cafe");
-    }
-
-    function test_submitHiddenTaxProof_revertsEmptyProof() public {
-        vm.prank(bot);
-        vm.expectRevert(TriggerOracle.InvalidProof.selector);
-        oracle.submitHiddenTaxProof(defaultPoolId, 100 ether, 90 ether, "");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
     //  24H SLIDING WINDOW TESTS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -361,7 +307,7 @@ contract TriggerOracleTest is Test {
 
         // Try to execute immediately
         vm.expectRevert(TriggerOracle.GracePeriodNotElapsed.selector);
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
     function test_gracePeriod_canExecuteAfterElapsed() public {
@@ -369,7 +315,7 @@ contract TriggerOracleTest is Test {
         oracle.reportCommitmentBreach(defaultPoolId);
 
         vm.warp(block.timestamp + 1 hours);
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
 
         ITriggerOracle.TriggerResult memory result = oracle.checkTrigger(defaultPoolId);
         assertTrue(result.triggered);
@@ -385,11 +331,11 @@ contract TriggerOracleTest is Test {
         // Exactly at grace period boundary (1 hour - 1 second) => should fail
         vm.warp(startTime + 1 hours - 1);
         vm.expectRevert(TriggerOracle.GracePeriodNotElapsed.selector);
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
 
         // Exactly at 1 hour => should succeed
         vm.warp(startTime + 1 hours);
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
 
         assertTrue(oracle.checkTrigger(defaultPoolId).triggered);
     }
@@ -455,12 +401,12 @@ contract TriggerOracleTest is Test {
             defaultPoolId, ITriggerOracle.TriggerType.COMMITMENT_BREACH, ""
         );
 
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
     function test_executeTrigger_revertsNoPending() public {
         vm.expectRevert(TriggerOracle.NoPendingTrigger.selector);
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -474,7 +420,7 @@ contract TriggerOracleTest is Test {
 
         // Trying to execute again should revert (no pending)
         vm.expectRevert(TriggerOracle.NoPendingTrigger.selector);
-        oracle.executeTrigger(defaultPoolId);
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
     function test_duplicateTrigger_reportIgnoredAfterTriggered() public {
@@ -527,16 +473,7 @@ contract TriggerOracleTest is Test {
 
         vm.warp(block.timestamp + 1 hours);
         vm.expectRevert(TriggerOracle.IsPaused.selector);
-        oracle.executeTrigger(defaultPoolId);
-    }
-
-    function test_pause_blocksProofSubmission() public {
-        vm.prank(guardian);
-        oracle.pause();
-
-        vm.prank(bot);
-        vm.expectRevert(TriggerOracle.IsPaused.selector);
-        oracle.submitHoneypotProof(defaultPoolId, hex"deadbeef");
+        oracle.executeTrigger(defaultPoolId, bytes32(0));
     }
 
     function test_unpause_resumesOperation() public {
