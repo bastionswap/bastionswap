@@ -23,7 +23,7 @@ interface IEscrowVault {
 
     /// @notice Defines a single step in a vesting schedule.
     /// @param timeOffset Seconds after escrow creation when this tranche unlocks
-    /// @param basisPoints Percentage (basis points, max 10_000) of total escrowed amount released
+    /// @param basisPoints Cumulative percentage (basis points, max 10_000) of total escrowed amount released
     struct VestingStep {
         uint40 timeOffset;
         uint16 basisPoints;
@@ -61,19 +61,28 @@ interface IEscrowVault {
     /// @param redistributedAmount Total amount redistributed to holders
     event Redistributed(uint256 indexed escrowId, uint8 triggerType, uint256 redistributedAmount);
 
+    /// @notice Emitted when an issuer updates their commitment to stricter values.
+    /// @param escrowId Escrow identifier
+    /// @param newCommitment The updated commitment parameters
+    event CommitmentSet(uint256 indexed escrowId, IssuerCommitment newCommitment);
+
     // ─── Functions ────────────────────────────────────────────────────
 
     /// @notice Creates a new escrow position for an issuer's LP funds.
     /// @param poolId Uniswap V4 pool identifier
     /// @param issuer Address of the token issuer whose LP is being escrowed
-    /// @param amount Total amount of LP tokens to lock
+    /// @param token Address of the ERC20 token to escrow
+    /// @param amount Total amount of tokens to lock
     /// @param vestingSchedule Ordered array of vesting steps defining the release schedule
+    /// @param commitment Issuer's up-front commitment parameters
     /// @return escrowId Unique identifier for the newly created escrow
     function createEscrow(
         PoolId poolId,
         address issuer,
+        address token,
         uint256 amount,
-        VestingStep[] calldata vestingSchedule
+        VestingStep[] calldata vestingSchedule,
+        IssuerCommitment calldata commitment
     ) external returns (uint256 escrowId);
 
     /// @notice Releases all currently vested funds to the issuer.
@@ -83,13 +92,23 @@ interface IEscrowVault {
     function releaseVested(uint256 escrowId) external returns (uint256 releasedAmount);
 
     /// @notice Redistributes remaining escrowed funds to token holders after a trigger event.
-    /// @dev Can only be called by an authorized trigger source (e.g. BastionHook or TriggerOracle).
+    /// @dev Can only be called by the TriggerOracle.
     /// @param escrowId Identifier of the escrow position
     /// @param triggerType The type of trigger event that occurred
     /// @return redistributedAmount Total amount redistributed
     function triggerRedistribution(uint256 escrowId, uint8 triggerType)
         external
         returns (uint256 redistributedAmount);
+
+    /// @notice Calculates the total amount vested so far for an escrow.
+    /// @param escrowId Identifier of the escrow position
+    /// @return vestedAmount Cumulative amount vested (before subtracting released)
+    function calculateVestedAmount(uint256 escrowId) external view returns (uint256 vestedAmount);
+
+    /// @notice Updates the issuer's commitment to stricter values only.
+    /// @param escrowId Identifier of the escrow position
+    /// @param newCommitment The new commitment values (must be stricter than current)
+    function setCommitment(uint256 escrowId, IssuerCommitment calldata newCommitment) external;
 
     /// @notice Returns the current status of an escrow position.
     /// @param escrowId Identifier of the escrow position
