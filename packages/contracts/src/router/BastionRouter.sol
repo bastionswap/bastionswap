@@ -9,6 +9,7 @@ import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/Pool
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -47,6 +48,7 @@ contract BastionRouter is IUnlockCallback {
     error OnlyPoolManager();
     error OnlyHook();
     error HookAlreadySet();
+    error HookNotSet();
     error InsufficientOutput(uint256 amountOut, uint256 minAmountOut);
     error ExcessiveInput(uint256 amountIn, uint256 maxAmountIn);
 
@@ -76,9 +78,66 @@ contract BastionRouter is IUnlockCallback {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Create a pool with initial liquidity and BastionHook registration in one tx.
-    /// @param params Pool creation parameters including key, price, amounts, and hookData.
-    function createPool(CreatePoolParams calldata params) external payable {
-        poolManager.unlock(abi.encode(ACTION_CREATE_POOL, msg.sender, params));
+    /// @param token The issued token address
+    /// @param baseToken The base token address (address(0) for native ETH)
+    /// @param fee Pool fee in hundredths of a bip (e.g. 3000 = 0.3%)
+    /// @param tokenAmount Max amount of issued token for initial LP
+    /// @param sqrtPriceX96 Initial sqrt price
+    /// @param hookData Encoded issuer registration data
+    function createPool(
+        address token,
+        address baseToken,
+        uint24 fee,
+        uint256 tokenAmount,
+        uint160 sqrtPriceX96,
+        bytes calldata hookData
+    ) external payable returns (PoolId poolId) {
+        if (bastionHook == address(0)) revert HookNotSet();
+
+        // Base token amount: ETH from msg.value, ERC20 from sender balance
+        uint256 baseAmount = baseToken == address(0)
+            ? msg.value
+            : IERC20Minimal(baseToken).balanceOf(msg.sender);
+
+        // Sort currencies — address(0) is always smallest
+        Currency currency0;
+        Currency currency1;
+        uint256 amount0Max;
+        uint256 amount1Max;
+
+        if (uint160(baseToken) < uint160(token)) {
+            currency0 = Currency.wrap(baseToken);
+            currency1 = Currency.wrap(token);
+            amount0Max = baseAmount;
+            amount1Max = tokenAmount;
+        } else {
+            currency0 = Currency.wrap(token);
+            currency1 = Currency.wrap(baseToken);
+            amount0Max = tokenAmount;
+            amount1Max = baseAmount;
+        }
+
+        PoolKey memory key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: fee,
+            tickSpacing: 60,
+            hooks: IHooks(bastionHook)
+        });
+
+        poolId = key.toId();
+
+        poolManager.unlock(abi.encode(
+            ACTION_CREATE_POOL, msg.sender,
+            CreatePoolParams({
+                key: key,
+                sqrtPriceX96: sqrtPriceX96,
+                amount0Max: amount0Max,
+                amount1Max: amount1Max,
+                hookData: hookData
+            })
+        ));
+
         _refundETH();
     }
 

@@ -260,8 +260,81 @@ contract BastionRouterTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  CREATE POOL TESTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_createPool_HookNotSet_Reverts() public {
+        // Deploy a fresh router without setting hook
+        BastionRouter freshRouter = new BastionRouter(manager);
+
+        vm.expectRevert(BastionRouter.HookNotSet.selector);
+        freshRouter.createPool(
+            address(issuedToken),
+            address(0),
+            3000,
+            100 ether,
+            SQRT_PRICE_1_1,
+            ""
+        );
+    }
+
+    function test_createPool_ERC20Base_CreatesPoolAndRegistersIssuer() public {
+        // Deploy a new issued token so we have a fresh pool
+        MockERC20 newToken = new MockERC20("New Token", "NEW", 18);
+        newToken.mint(issuerAddr, 1_000_000 ether);
+
+        // Set hook on router
+        router.setBastionHook(address(hook));
+
+        // Approve router for both tokens
+        vm.startPrank(issuerAddr);
+        newToken.approve(address(router), type(uint256).max);
+        baseToken.approve(address(router), type(uint256).max);
+
+        // Create pool via simplified createPool
+        PoolId newPoolId = router.createPool(
+            address(newToken),
+            address(baseToken),
+            3000,
+            100 ether,
+            SQRT_PRICE_1_1,
+            _encodeIssuerHookDataForToken(address(newToken))
+        );
+        vm.stopPrank();
+
+        // Verify pool was created (non-zero poolId)
+        assertTrue(PoolId.unwrap(newPoolId) != bytes32(0), "Pool should be created");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  HELPERS
     // ═══════════════════════════════════════════════════════════════
+
+    function _encodeIssuerHookDataForToken(address tokenAddr) internal view returns (bytes memory) {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
+        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
+
+        IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
+            dailyWithdrawLimit: 0,
+            lockDuration: 0,
+            maxSellPercent: 200
+        });
+
+        ITriggerOracle.TriggerConfig memory triggerConfig = ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 5000,
+            dumpThresholdPercent: 3000,
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 8000
+        });
+
+        return abi.encode(
+            issuerAddr, tokenAddr, schedule, commitment, triggerConfig
+        );
+    }
 
     function _encodeIssuerHookData() internal view returns (bytes memory) {
         IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);

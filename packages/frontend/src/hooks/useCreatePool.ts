@@ -150,7 +150,6 @@ export function useCreateBastionPool() {
         ],
       );
 
-      const hookAddr = contracts.BastionHook as `0x${string}`;
       const zeroAddr = "0x0000000000000000000000000000000000000000" as `0x${string}`;
 
       writeCreatePool({
@@ -158,19 +157,12 @@ export function useCreateBastionPool() {
         abi: BastionRouterABI,
         functionName: "createPool",
         args: [
-          {
-            key: {
-              currency0: zeroAddr,
-              currency1: input.tokenAddress,
-              fee: 3000,
-              tickSpacing: 60,
-              hooks: hookAddr,
-            },
-            sqrtPriceX96,
-            amount0Max: ethWei,
-            amount1Max: tokenWei,
-            hookData,
-          },
+          input.tokenAddress,
+          zeroAddr,
+          3000,
+          tokenWei,
+          sqrtPriceX96,
+          hookData,
         ],
         value: ethWei,
       });
