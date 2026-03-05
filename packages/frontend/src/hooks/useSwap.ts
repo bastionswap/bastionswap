@@ -261,6 +261,25 @@ export interface QuoteParams {
   amountIn: bigint;
 }
 
+// Dummy account for quoting — we override its balance/allowance via eth_call stateOverride
+const QUOTE_ACCOUNT = "0x0000000000000000000000000000000000000001" as const;
+const MAX_UINT256 = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" as `0x${string}`;
+
+function computeStorageSlots(account: `0x${string}`, spender: `0x${string}`) {
+  // Solmate ERC20 layout: balanceOf at slot 3, allowance at slot 4
+  // balanceOf[account] = keccak256(abi.encode(account, 3))
+  // allowance[account][spender] = keccak256(abi.encode(spender, keccak256(abi.encode(account, 4))))
+  const { keccak256: k, encodeAbiParameters } = require("viem") as typeof import("viem");
+  const addrUint = [{ type: "address" as const }, { type: "uint256" as const }] as const;
+  const balSlot = k(encodeAbiParameters(addrUint, [account, 3n]));
+  const innerSlot = k(encodeAbiParameters(addrUint, [account, 4n]));
+  const allowSlot = k(encodeAbiParameters(
+    [{ type: "address" as const }, { type: "bytes32" as const }],
+    [spender, innerSlot],
+  ));
+  return { balSlot, allowSlot };
+}
+
 export function useSwapQuote(params: QuoteParams | null) {
   const publicClient = usePublicClient();
 
@@ -274,6 +293,9 @@ export function useSwapQuote(params: QuoteParams | null) {
     ],
     queryFn: async () => {
       if (!publicClient || !params || !contracts || params.amountIn <= 0n) return null;
+
+      const inputToken = params.zeroForOne ? params.currency0 : params.currency1;
+      const routerAddr = contracts.BastionRouter as `0x${string}`;
 
       const data = encodeFunctionData({
         abi: BastionRouterABI,
@@ -293,21 +315,32 @@ export function useSwapQuote(params: QuoteParams | null) {
         ],
       });
 
+      const { balSlot, allowSlot } = computeStorageSlots(QUOTE_ACCOUNT, routerAddr);
+
       try {
+        // Try with state overrides (sets infinite balance + allowance for dummy account)
         const result = await publicClient.call({
-          to: contracts.BastionRouter as `0x${string}`,
+          to: routerAddr,
           data,
+          account: QUOTE_ACCOUNT,
+          stateOverride: [
+            {
+              address: inputToken,
+              stateDiff: [
+                { slot: balSlot, value: MAX_UINT256 },
+                { slot: allowSlot, value: MAX_UINT256 },
+              ],
+            },
+          ],
         });
 
         if (!result.data) return null;
 
-        const decoded = decodeFunctionResult({
+        return decodeFunctionResult({
           abi: BastionRouterABI,
           functionName: "swapExactInput",
           data: result.data,
-        });
-
-        return decoded as bigint;
+        }) as bigint;
       } catch {
         return null;
       }
