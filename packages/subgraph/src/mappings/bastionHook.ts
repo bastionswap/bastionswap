@@ -18,15 +18,19 @@ let ZERO_BD = BigDecimal.fromString("0");
 
 export function handleIssuerRegistered(event: IssuerRegistered): void {
   let poolId = event.params.poolId.toHexString();
-  let pool = new Pool(poolId);
+  let pool = Pool.load(poolId);
+  if (pool == null) {
+    // Initialize event hasn't fired yet — create new entity
+    pool = new Pool(poolId);
+    pool.token0 = event.params.issuedToken; // placeholder — updated by Initialize
+    pool.token1 = event.params.issuedToken; // placeholder — updated by Initialize
+    pool.createdAt = event.block.timestamp;
+    pool.createdTx = event.transaction.hash;
+  }
 
-  pool.token0 = event.params.issuedToken; // issued token is one side
-  pool.token1 = event.params.issuedToken; // will be updated when more info is available
   pool.hook = event.address;
   pool.isBastion = true;
   pool.issuedToken = event.params.issuedToken;
-  pool.createdAt = event.block.timestamp;
-  pool.createdTx = event.transaction.hash;
 
   let issuer = getOrCreateIssuer(
     event.params.issuer.toHexString(),

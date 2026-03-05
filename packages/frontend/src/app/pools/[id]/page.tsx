@@ -8,6 +8,8 @@ import Link from "next/link";
 import { usePool } from "@/hooks/usePools";
 import { useTokenInfo, useTokenBalance } from "@/hooks/useTokenInfo";
 import { useEstimatedCompensation } from "@/hooks/useInsurance";
+import { usePoolInfo } from "@/hooks/usePoolInfo";
+import { useVestingEndTime } from "@/hooks/useEscrow";
 import { formatUnits } from "viem";
 import { LoadingSpinner, SkeletonCard } from "@/components/ui/LoadingSpinner";
 import { Badge } from "@/components/ui/Badge";
@@ -243,6 +245,12 @@ export default function PoolDetailPage() {
   const token1Info = useTokenInfo(pool?.token1 as `0x${string}` | undefined);
   const issuedTokenInfo = useTokenInfo(pool?.issuedToken as `0x${string}` | undefined);
 
+  // On-chain pool info (liquidity)
+  const { totalLiquidity } = usePoolInfo(pool?.isBastion ? poolId as `0x${string}` : undefined);
+
+  // Vesting end time (on-chain fallback when subgraph data is missing)
+  const { data: vestingEndTime } = useVestingEndTime(pool?.isBastion ? poolId as `0x${string}` : undefined);
+
   // Holder balance & estimated compensation for claim
   const { balance: holderBalance } = useTokenBalance(
     pool?.issuedToken as `0x${string}` | undefined,
@@ -369,6 +377,17 @@ export default function PoolDetailPage() {
         </div>
       </div>
 
+      {/* Liquidity stat */}
+      {pool.isBastion && totalLiquidity !== undefined && (
+        <div className="mb-6 rounded-xl bg-surface-light px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-gray-400">Pool Liquidity</span>
+          <span className="text-sm font-semibold">
+            {parseFloat(formatUnits(totalLiquidity, 18)).toFixed(4)}{" "}
+            <span className="text-xs text-gray-500 font-normal">LP</span>
+          </span>
+        </div>
+      )}
+
       {pool.isBastion ? (
         <>
           {/* Trigger status banner */}
@@ -389,6 +408,7 @@ export default function PoolDetailPage() {
               <EscrowStatus
                 escrow={pool.escrow}
                 tokenLabel={issuedTokenLabel}
+                vestingEndTime={vestingEndTime ? Number(vestingEndTime) : undefined}
               />
             )}
             {pool.insurancePool && (

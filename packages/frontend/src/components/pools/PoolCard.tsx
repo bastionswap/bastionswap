@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/Badge";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { shortenAddress } from "@/lib/formatters";
 import { useTokenInfo } from "@/hooks/useTokenInfo";
+import { usePoolInfo } from "@/hooks/usePoolInfo";
+import { formatUnits } from "viem";
 import type { SubgraphPool } from "@/hooks/usePools";
 
 interface PoolCardProps {
@@ -19,6 +21,7 @@ export function PoolCard({ pool }: PoolCardProps) {
   const token0Info = useTokenInfo(pool.token0 as `0x${string}`);
   const token1Info = useTokenInfo(pool.token1 as `0x${string}`);
   const issuedInfo = useTokenInfo(pool.issuedToken as `0x${string}` | undefined);
+  const { totalLiquidity } = usePoolInfo(pool.isBastion ? pool.id as `0x${string}` : undefined);
 
   const token0Label = token0Info.displayName;
   const token1Label = token1Info.displayName;
@@ -56,8 +59,13 @@ export function PoolCard({ pool }: PoolCardProps) {
       </div>
 
       {pool.isBastion && (
-        <div className="mt-4 grid grid-cols-3 gap-3">
+        <div className="mt-4 grid grid-cols-4 gap-3">
           {[
+            {
+              label: "Liquidity",
+              value: totalLiquidity ? parseFloat(formatUnits(totalLiquidity, 18)).toFixed(2) : "—",
+              sub: "LP",
+            },
             {
               label: "Escrow Locked",
               value: pool.escrow ? `${parseFloat(pool.escrow.totalLocked).toFixed(2)}` : "—",

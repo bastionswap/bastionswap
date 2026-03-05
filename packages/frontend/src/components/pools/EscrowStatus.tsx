@@ -24,6 +24,7 @@ interface EscrowStatusProps {
     }[];
   };
   tokenLabel?: string;
+  vestingEndTime?: number;
 }
 
 function CircleProgress({
@@ -234,7 +235,7 @@ function HorizontalTimeline({
   );
 }
 
-export function EscrowStatus({ escrow, tokenLabel = "tokens" }: EscrowStatusProps) {
+export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: EscrowStatusProps) {
   const total = parseFloat(escrow.totalLocked);
   const released = parseFloat(escrow.released);
   const remaining = parseFloat(escrow.remaining);
@@ -332,6 +333,16 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens" }: EscrowStatusProp
               </div>
               <Countdown targetTs={parseInt(nextMilestone.timestamp)} />
             </div>
+          ) : vestingEndTime && vestingEndTime > 0 ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-500">Full Vesting</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {formatDate(vestingEndTime)}
+                </p>
+              </div>
+              <Countdown targetTs={vestingEndTime} />
+            </div>
           ) : (
             <p className="text-xs text-gray-500 text-center">No vesting schedule</p>
           )}
@@ -361,6 +372,19 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens" }: EscrowStatusProp
                 <span className="text-gray-600">
                   ({Math.round(lockDuration / 86400)}d from creation)
                 </span>
+              </span>
+            </div>
+          )}
+          {vestingEndTime && vestingEndTime > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Vesting End</span>
+              <span className="text-gray-400">
+                {formatDate(vestingEndTime)}{" "}
+                {createdAt > 0 && (
+                  <span className="text-gray-600">
+                    ({Math.round((vestingEndTime - createdAt) / 86400)}d from creation)
+                  </span>
+                )}
               </span>
             </div>
           )}

@@ -15,6 +15,16 @@ export function useEscrowStatus(escrowId: bigint | undefined) {
   });
 }
 
+export function useVestingEndTime(poolId: `0x${string}` | undefined) {
+  return useReadContract({
+    address: contracts?.EscrowVault as `0x${string}`,
+    abi: EscrowVaultABI,
+    functionName: "getVestingEndTime",
+    args: poolId ? [poolId] : undefined,
+    query: { enabled: !!poolId },
+  });
+}
+
 export function useVestingProgress(escrow: {
   totalLocked: string;
   released: string;
