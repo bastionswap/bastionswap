@@ -251,16 +251,18 @@ export function SwapCard() {
             )}
           </div>
           <div className="flex items-center gap-3">
-            <input
-              type="number"
-              value={amountIn}
-              onChange={(e) => setAmountIn(e.target.value)}
-              placeholder="0"
-              className="flex-1 bg-transparent text-3xl font-semibold text-gray-900 placeholder-gray-300 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            />
+            <div className="flex-1 min-w-0">
+              <input
+                type="number"
+                value={amountIn}
+                onChange={(e) => setAmountIn(e.target.value)}
+                placeholder="0"
+                className="w-full bg-transparent text-3xl font-semibold text-gray-900 placeholder-gray-300 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+            </div>
             <button
               onClick={() => setShowTokenSelect("in")}
-              className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
                 tokenIn
                   ? "bg-white border border-gray-200 text-gray-700 hover:border-gray-300 shadow-sm"
                   : "bg-bastion-600 text-white hover:bg-bastion-700"
@@ -299,7 +301,7 @@ export function SwapCard() {
             <span className="text-sm font-medium text-gray-500">You receive</span>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex-1 relative">
+            <div className="flex-1 min-w-0 relative">
               <input
                 type="number"
                 placeholder="0"
@@ -315,7 +317,7 @@ export function SwapCard() {
             </div>
             <button
               onClick={() => setShowTokenSelect("out")}
-              className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
                 tokenOut
                   ? "bg-white border border-gray-200 text-gray-700 hover:border-gray-300 shadow-sm"
                   : "bg-bastion-600 text-white hover:bg-bastion-700"
