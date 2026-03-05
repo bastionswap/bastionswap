@@ -92,7 +92,7 @@ function getStepLabel(poolStep: CreatePoolStep): string {
   switch (poolStep) {
     case "approving-hook":
     case "confirming-hook-approval":
-      return "Approve Escrow Tokens (1/3)";
+      return "Approve Escrow (1/3)";
     case "approving-router":
     case "confirming-router-approval":
       return "Approve LP Tokens (2/3)";
@@ -116,14 +116,20 @@ function isStepConfirming(poolStep: CreatePoolStep): boolean {
   ].includes(poolStep);
 }
 
-function formatTokenAmount(amount: string, bps: number): string {
-  const num = parseFloat(amount);
-  if (!num || isNaN(num)) return "0";
-  const result = (num * bps) / 10000;
-  if (result >= 1000000) return `${(result / 1000000).toFixed(1)}M`;
-  if (result >= 1000) return `${(result / 1000).toFixed(1)}K`;
-  if (result % 1 === 0) return result.toString();
-  return result.toFixed(2);
+function formatCompact(n: number): string {
+  if (n === 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1) return n.toFixed(2);
+  return n.toFixed(4);
+}
+
+function formatLPAtBps(tokenAmount: string, ethAmount: string, bps: number): string {
+  const tokenNum = parseFloat(tokenAmount) || 0;
+  const ethNum = parseFloat(ethAmount) || 0;
+  const tokenPart = (tokenNum * bps) / 10000;
+  const ethPart = (ethNum * bps) / 10000;
+  return `${formatCompact(tokenPart)} tokens + ${formatCompact(ethPart)} ETH`;
 }
 
 export default function CreatePoolPage() {
@@ -347,13 +353,15 @@ export default function CreatePoolPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-emerald-800">Escrow Protection</p>
-                  {tokenAmount && parseFloat(tokenAmount) > 0 ? (
+                  {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 ? (
                     <p className="text-sm text-emerald-700 mt-1">
-                      Your {tokenAmount} tokens will be automatically held in escrow and released according to the vesting schedule. This protects token buyers and cannot be disabled.
+                      Your liquidity position ({tokenAmount} tokens + {ethAmount} ETH) will be held in escrow.
+                      You can withdraw your LP according to the vesting schedule below.
+                      This protects token buyers and cannot be disabled.
                     </p>
                   ) : (
                     <p className="text-sm text-emerald-600/70 mt-1">
-                      Enter token amount to see escrow details
+                      Enter token and ETH amounts to see escrow details
                     </p>
                   )}
                 </div>
@@ -361,9 +369,9 @@ export default function CreatePoolPage() {
             </div>
 
             {/* Vesting Schedule Preview */}
-            {tokenAmount && parseFloat(tokenAmount) > 0 && (
+            {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
               <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Vesting Schedule</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">LP Vesting Schedule</p>
                 <div className="space-y-2.5">
                   {activeMilestones.map((m, i) => (
                     <div key={i} className="flex items-center gap-3">
@@ -374,8 +382,8 @@ export default function CreatePoolPage() {
                       <span className="text-sm font-medium text-gray-900 tabular-nums">
                         {m.bps / 100}%
                       </span>
-                      <span className="text-sm text-gray-500 tabular-nums w-28 text-right">
-                        ({formatTokenAmount(tokenAmount, m.bps)} tokens)
+                      <span className="text-sm text-gray-500 tabular-nums text-right">
+                        ({formatLPAtBps(tokenAmount, ethAmount, m.bps)})
                       </span>
                     </div>
                   ))}
@@ -384,7 +392,7 @@ export default function CreatePoolPage() {
                   <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                   </svg>
-                  You can customize this in the next step
+                  You can customize this in the next step. Actual amounts may differ due to AMM price changes.
                 </p>
               </div>
             )}
@@ -421,7 +429,7 @@ export default function CreatePoolPage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">Vesting Schedule</h2>
-                  <p className="text-sm text-gray-500">Define how escrowed tokens unlock over time</p>
+                  <p className="text-sm text-gray-500">Define how escrowed LP unlocks over time</p>
                 </div>
               </div>
             </div>
@@ -547,9 +555,9 @@ export default function CreatePoolPage() {
                     <span className="text-gray-500">Day {m.days}</span>
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-gray-900 tabular-nums">{m.bps / 100}% unlocked</span>
-                      {tokenAmount && parseFloat(tokenAmount) > 0 && (
+                      {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
                         <span className="text-gray-400 tabular-nums text-xs">
-                          ({formatTokenAmount(tokenAmount, m.bps)} tokens)
+                          ({formatLPAtBps(tokenAmount, ethAmount, m.bps)})
                         </span>
                       )}
                     </div>
@@ -770,8 +778,8 @@ export default function CreatePoolPage() {
               <span className="text-gray-900 font-medium">{tokenAmount} tokens + {ethAmount} ETH</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Escrow</span>
-              <span className="text-gray-900 font-medium">{tokenAmount} tokens (automatic)</span>
+              <span className="text-gray-500">Escrowed LP</span>
+              <span className="text-gray-900 font-medium">{tokenAmount} tokens + {ethAmount} ETH</span>
             </div>
             <hr className="border-gray-200" />
             <div className="flex justify-between">
@@ -803,8 +811,8 @@ export default function CreatePoolPage() {
           {/* Escrow Disclosure */}
           <div className="mt-4 rounded-xl bg-bastion-50 border border-bastion-200 p-4">
             <p className="text-sm text-bastion-800">
-              By creating this pool, your <span className="font-semibold">{tokenAmount} tokens</span> will be held in escrow.
-              You can withdraw according to the vesting schedule:
+              By creating this pool, your full LP position (<span className="font-semibold">{tokenAmount} tokens + {ethAmount} ETH</span>) will be held in escrow.
+              You can withdraw LP according to the vesting schedule:
             </p>
             <div className="mt-3 space-y-1.5">
               {activeMilestones.map((m, i) => (
@@ -813,16 +821,17 @@ export default function CreatePoolPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                   <span className="text-bastion-700">
-                    Day {m.days}: up to {m.bps / 100}%
-                    {tokenAmount && parseFloat(tokenAmount) > 0 && (
-                      <span className="text-bastion-500"> ({formatTokenAmount(tokenAmount, m.bps)} tokens)</span>
+                    Day {m.days}: up to {m.bps / 100}% LP
+                    {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
+                      <span className="text-bastion-500"> ({formatLPAtBps(tokenAmount, ethAmount, m.bps)})</span>
                     )}
                   </span>
                 </div>
               ))}
             </div>
             <p className="mt-3 text-xs text-bastion-600/70">
-              If a rug pull is detected, remaining escrow funds will be redistributed to token holders.
+              If a rug pull is detected, remaining escrowed LP will be redistributed to token holders.
+              Actual amounts at withdrawal may differ due to AMM price changes.
             </p>
           </div>
 
