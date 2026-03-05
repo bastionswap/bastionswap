@@ -1,6 +1,7 @@
 {
   "name": "bastionswap",
   "private": true,
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "build:contracts": "pnpm --filter @bastionswap/contracts build",
     "test:contracts": "pnpm --filter @bastionswap/contracts test",
