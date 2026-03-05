@@ -137,6 +137,15 @@ export function SwapCard() {
 
   const { data: quotedOut, isLoading: isQuoteLoading } = useSwapQuote(quoteParams);
 
+  // Spot price quote: use a tiny amount to determine the current exchange rate
+  const SPOT_AMOUNT = parseUnits("0.001", 18); // small reference amount
+  const spotParams = useMemo(() => {
+    if (!poolKey) return null;
+    return { ...poolKey, amountIn: SPOT_AMOUNT };
+  }, [poolKey]);
+
+  const { data: spotQuotedOut } = useSwapQuote(spotParams);
+
   // Queries must be loaded before allowing swap
   const queriesLoading = !tokenInIsNative && tokenIn && address && (allowance === undefined || tokenInBalance === undefined);
   const insufficientBalance = tokenInBalance !== undefined && parsedAmountIn > 0n && parsedAmountIn > tokenInBalance;
@@ -149,12 +158,17 @@ export function SwapCard() {
     ? (quotedOut * BigInt(10000 - slippageBps)) / 10000n
     : 0n;
 
-  // Price impact: compare quoted output vs naive 1:1
+  // Price impact: compare effective price vs spot price from a tiny trade
   const priceImpact = useMemo(() => {
-    if (!quotedOut || parsedAmountIn <= 0n) return 0;
-    const ratio = Number(quotedOut) / Number(parsedAmountIn);
-    return (1 - ratio) * 100; // percentage loss vs 1:1
-  }, [quotedOut, parsedAmountIn]);
+    if (!quotedOut || !spotQuotedOut || parsedAmountIn <= 0n || spotQuotedOut <= 0n) return 0;
+    // Spot rate: spotQuotedOut / SPOT_AMOUNT
+    // Effective rate: quotedOut / parsedAmountIn
+    // Price impact = 1 - (effectiveRate / spotRate)
+    const spotRate = Number(spotQuotedOut) / Number(SPOT_AMOUNT);
+    const effectiveRate = Number(quotedOut) / Number(parsedAmountIn);
+    const impact = (1 - effectiveRate / spotRate) * 100;
+    return Math.max(impact, 0); // clamp to 0 if slightly negative due to rounding
+  }, [quotedOut, spotQuotedOut, parsedAmountIn]);
 
   const handleApprove = () => {
     if (!tokenIn || !routerAddr) return;
