@@ -75,7 +75,7 @@ export default function HomePage() {
 
   const statItems = [
     { label: "Bastion Pools", value: stats?.totalBastionPools ?? "—" },
-    { label: "Escrow Locked", value: stats ? `${parseFloat(stats.totalEscrowLocked).toFixed(2)} ETH` : "—" },
+    { label: "Escrow Locked", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 2 })} tokens` : "—" },
     { label: "Insurance Available", value: stats ? `${parseFloat(stats.totalInsuranceBalance).toFixed(2)} ETH` : "—" },
     { label: "Compensation Paid", value: stats ? `${parseFloat(stats.totalCompensationPaid).toFixed(2)} ETH` : "—" },
   ];
