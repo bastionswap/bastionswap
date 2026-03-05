@@ -6,9 +6,11 @@ import {
   useWaitForTransactionReceipt,
   useReadContract,
   useBalance,
+  usePublicClient,
 } from "wagmi";
+import { useQuery } from "@tanstack/react-query";
 import { baseSepolia } from "wagmi/chains";
-import { parseUnits, formatUnits } from "viem";
+import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionResult } from "viem";
 import { getContracts } from "@/config/contracts";
 import { BastionRouterABI } from "@/config/abis";
 
@@ -247,29 +249,71 @@ export function useFaucet(faucetAddress: `0x${string}` | undefined, account: `0x
   };
 }
 
-// ─── Quote (placeholder) ──────────────────────────────────
+// ─── Quote (on-chain simulation) ──────────────────────────────────
 
-export function useSwapQuote(
-  _tokenIn: string | undefined,
-  _tokenOut: string | undefined,
-  _amountIn: string
-) {
-  const [debouncedAmount, setDebouncedAmount] = useState(_amountIn);
+export interface QuoteParams {
+  currency0: `0x${string}`;
+  currency1: `0x${string}`;
+  fee: number;
+  tickSpacing: number;
+  hooks: `0x${string}`;
+  zeroForOne: boolean;
+  amountIn: bigint;
+}
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedAmount(_amountIn), 500);
-    return () => clearTimeout(timer);
-  }, [_amountIn]);
+export function useSwapQuote(params: QuoteParams | null) {
+  const publicClient = usePublicClient();
 
-  // Without an on-chain quoter, we estimate 1:1 for same-decimal tokens
-  // This is a rough approximation — real production would use a Quoter contract
-  const amount = debouncedAmount && parseFloat(debouncedAmount) > 0
-    ? debouncedAmount
-    : "0";
+  return useQuery({
+    queryKey: [
+      "swapQuote",
+      params?.currency0,
+      params?.currency1,
+      params?.zeroForOne,
+      params?.amountIn?.toString(),
+    ],
+    queryFn: async () => {
+      if (!publicClient || !params || !contracts || params.amountIn <= 0n) return null;
 
-  return {
-    data: amount !== "0" ? amount : undefined,
-    isLoading: false,
-    error: null,
-  };
+      const data = encodeFunctionData({
+        abi: BastionRouterABI,
+        functionName: "swapExactInput",
+        args: [
+          {
+            currency0: params.currency0,
+            currency1: params.currency1,
+            fee: params.fee,
+            tickSpacing: params.tickSpacing,
+            hooks: params.hooks,
+          },
+          params.zeroForOne,
+          params.amountIn,
+          0n, // minAmountOut = 0 for quote
+          BigInt(Math.floor(Date.now() / 1000) + 3600),
+        ],
+      });
+
+      try {
+        const result = await publicClient.call({
+          to: contracts.BastionRouter as `0x${string}`,
+          data,
+        });
+
+        if (!result.data) return null;
+
+        const decoded = decodeFunctionResult({
+          abi: BastionRouterABI,
+          functionName: "swapExactInput",
+          data: result.data,
+        });
+
+        return decoded as bigint;
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!publicClient && !!params && params.amountIn > 0n,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  });
 }

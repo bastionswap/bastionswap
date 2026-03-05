@@ -16,6 +16,7 @@ import {
   useTokenBalance,
   useApprove,
   useFaucet,
+  useSwapQuote,
   FAUCETS,
 } from "@/hooks/useSwap";
 import { getContracts } from "@/config/contracts";
@@ -128,27 +129,40 @@ export function SwapCard() {
     }
   }, [amountIn]);
 
+  // On-chain swap quote
+  const quoteParams = useMemo(() => {
+    if (!poolKey || parsedAmountIn <= 0n) return null;
+    return { ...poolKey, amountIn: parsedAmountIn };
+  }, [poolKey, parsedAmountIn]);
+
+  const { data: quotedOut, isLoading: isQuoteLoading } = useSwapQuote(quoteParams);
+
+  // Queries must be loaded before allowing swap
+  const queriesLoading = !tokenInIsNative && tokenIn && address && (allowance === undefined || tokenInBalance === undefined);
   const insufficientBalance = tokenInBalance !== undefined && parsedAmountIn > 0n && parsedAmountIn > tokenInBalance;
-  const needsApproval = !tokenInIsNative && allowance !== undefined && parsedAmountIn > 0n && allowance < parsedAmountIn;
+  const needsApproval = !tokenInIsNative && parsedAmountIn > 0n
+    && (allowance !== undefined ? allowance < parsedAmountIn : !isApproveSuccess);
 
   const slippageBps = Math.floor(parseFloat(slippage || "1") * 100);
-  // Account for pool fee (0.3% = 30 bps) + insurance fee before applying slippage
-  const POOL_FEE_BPS = 30;
-  const estimatedOutBn = parsedAmountIn > 0n
-    ? (parsedAmountIn * BigInt(10000 - POOL_FEE_BPS - INSURANCE_FEE_BPS)) / 10000n
+  // Use real on-chain quote for minAmountOut
+  const minAmountOut = quotedOut && quotedOut > 0n
+    ? (quotedOut * BigInt(10000 - slippageBps)) / 10000n
     : 0n;
-  const minAmountOut = estimatedOutBn > 0n
-    ? (estimatedOutBn * BigInt(10000 - slippageBps)) / 10000n
-    : 0n;
+
+  // Price impact: compare quoted output vs naive 1:1
+  const priceImpact = useMemo(() => {
+    if (!quotedOut || parsedAmountIn <= 0n) return 0;
+    const ratio = Number(quotedOut) / Number(parsedAmountIn);
+    return (1 - ratio) * 100; // percentage loss vs 1:1
+  }, [quotedOut, parsedAmountIn]);
 
   const handleApprove = () => {
     if (!tokenIn || !routerAddr) return;
-    // Approve max to avoid repeated approvals
     approve(tokenIn.address as `0x${string}`, routerAddr, parsedAmountIn * 10n);
   };
 
   const handleSwap = () => {
-    if (!poolKey || parsedAmountIn <= 0n) return;
+    if (!poolKey || parsedAmountIn <= 0n || !quotedOut) return;
 
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200); // 20 min
 
@@ -168,9 +182,9 @@ export function SwapCard() {
     return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
   };
 
-  // Approximate output (1:1 for same-decimal demo tokens, minus pool fee + insurance fee)
-  const estimatedOut = estimatedOutBn > 0n
-    ? parseFloat(formatUnits(estimatedOutBn, 18))
+  // Real estimated output from on-chain quote
+  const estimatedOut = quotedOut && quotedOut > 0n
+    ? parseFloat(formatUnits(quotedOut, 18))
     : 0;
 
   return (
@@ -285,13 +299,20 @@ export function SwapCard() {
             <span className="text-sm text-gray-500">You receive</span>
           </div>
           <div className="flex items-center gap-3">
-            <input
-              type="number"
-              placeholder="0"
-              value={estimatedOut > 0 ? estimatedOut.toFixed(4) : ""}
-              readOnly
-              className="flex-1 bg-transparent text-2xl font-medium text-white placeholder-gray-600 focus:outline-none"
-            />
+            <div className="flex-1 relative">
+              <input
+                type="number"
+                placeholder="0"
+                value={estimatedOut > 0 ? estimatedOut.toFixed(4) : ""}
+                readOnly
+                className="w-full bg-transparent text-2xl font-medium text-white placeholder-gray-600 focus:outline-none"
+              />
+              {isQuoteLoading && parsedAmountIn > 0n && tokenIn && tokenOut && (
+                <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                  <LoadingSpinner size="sm" />
+                </div>
+              )}
+            </div>
             <button
               onClick={() => setShowTokenSelect("out")}
               className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
@@ -327,13 +348,29 @@ export function SwapCard() {
           </div>
         )}
 
+        {/* Price impact warning */}
+        {tokenIn && tokenOut && priceImpact > 5 && (
+          <div className={`mt-3 rounded-xl px-3 py-2 border ${
+            priceImpact > 15
+              ? "bg-red-500/10 border-red-500/20"
+              : "bg-amber-500/10 border-amber-500/20"
+          }`}>
+            <span className={`text-xs font-medium ${priceImpact > 15 ? "text-red-400" : "text-amber-400"}`}>
+              Price Impact: {priceImpact.toFixed(2)}%
+              {priceImpact > 15 && " — Consider reducing swap amount"}
+            </span>
+          </div>
+        )}
+
         {/* Swap Details (collapsible) */}
-        {tokenIn && tokenOut && parsedAmountIn > 0n && (
+        {tokenIn && tokenOut && parsedAmountIn > 0n && quotedOut && quotedOut > 0n && (
           <button
             onClick={() => setShowDetails(!showDetails)}
             className="mt-3 flex w-full items-center justify-between px-1 text-xs text-gray-500 hover:text-gray-400 transition-colors"
           >
-            <span>1 {tokenIn.symbol} = ~1 {tokenOut.symbol}</span>
+            <span>
+              1 {tokenIn.symbol} ≈ {(Number(quotedOut) / Number(parsedAmountIn)).toFixed(4)} {tokenOut.symbol}
+            </span>
             <svg
               className={`h-4 w-4 transition-transform ${showDetails ? "rotate-180" : ""}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -346,13 +383,21 @@ export function SwapCard() {
         {showDetails && tokenIn && tokenOut && parsedAmountIn > 0n && (
           <div className="mt-2 rounded-xl bg-surface-light p-3 space-y-2 text-xs">
             <div className="flex justify-between">
-              <span className="text-gray-500">Insurance Fee</span>
-              <span className="text-gray-400">{(INSURANCE_FEE_BPS / 100).toFixed(0)}% (goes to Insurance Pool)</span>
+              <span className="text-gray-500">Expected Output</span>
+              <span className="text-gray-400">
+                {quotedOut ? parseFloat(formatUnits(quotedOut, 18)).toFixed(4) : "—"} {tokenOut.symbol}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Minimum Received</span>
               <span className="text-gray-400">
-                {parseFloat(formatUnits(minAmountOut, 18)).toFixed(4)} {tokenOut.symbol}
+                {minAmountOut > 0n ? parseFloat(formatUnits(minAmountOut, 18)).toFixed(4) : "—"} {tokenOut.symbol}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Price Impact</span>
+              <span className={priceImpact > 5 ? "text-amber-400" : "text-gray-400"}>
+                {priceImpact > 0.01 ? `${priceImpact.toFixed(2)}%` : "<0.01%"}
               </span>
             </div>
             <div className="flex justify-between">
@@ -384,6 +429,11 @@ export function SwapCard() {
             <button disabled className="w-full rounded-xl bg-surface-light py-4 text-base font-semibold text-gray-500 cursor-not-allowed">
               Enter Amount
             </button>
+          ) : queriesLoading ? (
+            <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2 opacity-60">
+              <LoadingSpinner size="sm" />
+              Loading...
+            </button>
           ) : insufficientBalance ? (
             <button disabled className="w-full rounded-xl bg-red-500/10 border border-red-500/20 py-4 text-base font-semibold text-red-400 cursor-not-allowed">
               Insufficient {tokenIn.symbol} Balance
@@ -402,6 +452,15 @@ export function SwapCard() {
               ) : (
                 `Approve ${tokenIn.symbol}`
               )}
+            </button>
+          ) : isQuoteLoading ? (
+            <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2 opacity-60">
+              <LoadingSpinner size="sm" />
+              Fetching price...
+            </button>
+          ) : !quotedOut || quotedOut <= 0n ? (
+            <button disabled className="w-full rounded-xl bg-red-500/10 border border-red-500/20 py-4 text-base font-semibold text-red-400 cursor-not-allowed">
+              Insufficient Liquidity
             </button>
           ) : isWriting || isConfirming ? (
             <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2">
