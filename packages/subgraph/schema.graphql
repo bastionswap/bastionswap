@@ -5,7 +5,10 @@ type Pool @entity {
   hook: Bytes! # hook contract address
   fee: Int
   tickSpacing: Int
-  totalLiquidity: BigDecimal
+  sqrtPriceX96: BigInt
+  liquidity: BigInt
+  reserve0: BigDecimal
+  reserve1: BigDecimal
   isBastion: Boolean!
   issuer: Issuer # issuer (Bastion pools only)
   issuedToken: Bytes # issued token address

@@ -16,6 +16,8 @@ const BASTION_POOLS_QUERY = gql`
       hook
       isBastion
       issuedToken
+      reserve0
+      reserve1
       issuer {
         id
         reputationScore
@@ -48,6 +50,8 @@ const ALL_POOLS_QUERY = gql`
       hook
       isBastion
       issuedToken
+      reserve0
+      reserve1
       issuer {
         id
         reputationScore
@@ -80,6 +84,8 @@ const POOL_DETAIL_QUERY = gql`
       hook
       isBastion
       issuedToken
+      reserve0
+      reserve1
       issuer {
         id
         reputationScore
@@ -144,6 +150,8 @@ export interface SubgraphPool {
   hook: string;
   isBastion: boolean;
   issuedToken: string | null;
+  reserve0: string | null;
+  reserve1: string | null;
   issuer: {
     id: string;
     reputationScore: string;

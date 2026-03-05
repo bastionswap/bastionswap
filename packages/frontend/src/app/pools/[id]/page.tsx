@@ -8,7 +8,6 @@ import Link from "next/link";
 import { usePool } from "@/hooks/usePools";
 import { useTokenInfo, useTokenBalance } from "@/hooks/useTokenInfo";
 import { useEstimatedCompensation } from "@/hooks/useInsurance";
-import { usePoolInfo } from "@/hooks/usePoolInfo";
 import { useVestingEndTime } from "@/hooks/useEscrow";
 import { formatUnits } from "viem";
 import { LoadingSpinner, SkeletonCard } from "@/components/ui/LoadingSpinner";
@@ -245,9 +244,6 @@ export default function PoolDetailPage() {
   const token1Info = useTokenInfo(pool?.token1 as `0x${string}` | undefined);
   const issuedTokenInfo = useTokenInfo(pool?.issuedToken as `0x${string}` | undefined);
 
-  // On-chain pool info (liquidity)
-  const { totalLiquidity } = usePoolInfo(pool?.isBastion ? poolId as `0x${string}` : undefined);
-
   // Vesting end time (on-chain fallback when subgraph data is missing)
   const { data: vestingEndTime } = useVestingEndTime(pool?.isBastion ? poolId as `0x${string}` : undefined);
 
@@ -377,13 +373,16 @@ export default function PoolDetailPage() {
         </div>
       </div>
 
-      {/* Liquidity stat */}
-      {pool.isBastion && totalLiquidity !== undefined && (
+      {/* Pool Reserves */}
+      {pool.isBastion && (pool.reserve0 || pool.reserve1) && (
         <div className="mb-6 rounded-xl bg-surface-light px-4 py-3 flex items-center justify-between">
-          <span className="text-sm text-gray-400">Pool Liquidity</span>
+          <span className="text-sm text-gray-400">Pool Reserves</span>
           <span className="text-sm font-semibold">
-            {parseFloat(formatUnits(totalLiquidity, 18)).toFixed(4)}{" "}
-            <span className="text-xs text-gray-500 font-normal">LP</span>
+            {(parseFloat(pool.reserve0 || "0") / Math.pow(10, token0Info.decimals ?? 18)).toLocaleString(undefined, { maximumFractionDigits: 4 })}{" "}
+            <span className="text-xs text-gray-500 font-normal">{token0Label}</span>
+            {" / "}
+            {(parseFloat(pool.reserve1 || "0") / Math.pow(10, token1Info.decimals ?? 18)).toLocaleString(undefined, { maximumFractionDigits: 4 })}{" "}
+            <span className="text-xs text-gray-500 font-normal">{token1Label}</span>
           </span>
         </div>
       )}

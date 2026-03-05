@@ -6,8 +6,6 @@ import { Badge } from "@/components/ui/Badge";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { shortenAddress } from "@/lib/formatters";
 import { useTokenInfo } from "@/hooks/useTokenInfo";
-import { usePoolInfo } from "@/hooks/usePoolInfo";
-import { formatUnits } from "viem";
 import type { SubgraphPool } from "@/hooks/usePools";
 
 interface PoolCardProps {
@@ -21,11 +19,21 @@ export function PoolCard({ pool }: PoolCardProps) {
   const token0Info = useTokenInfo(pool.token0 as `0x${string}`);
   const token1Info = useTokenInfo(pool.token1 as `0x${string}`);
   const issuedInfo = useTokenInfo(pool.issuedToken as `0x${string}` | undefined);
-  const { totalLiquidity } = usePoolInfo(pool.isBastion ? pool.id as `0x${string}` : undefined);
 
   const token0Label = token0Info.displayName;
   const token1Label = token1Info.displayName;
   const issuedLabel = issuedInfo.symbol || (pool.issuedToken ? shortenAddress(pool.issuedToken, 3) : "tokens");
+
+  const formatReserve = (val: string | null, tokenDecimals: number | null): string => {
+    if (!val || parseFloat(val) === 0) return "0";
+    let n = parseFloat(val);
+    // Subgraph stores raw amounts; divide by 10^decimals for human-readable
+    if (tokenDecimals) n = n / Math.pow(10, tokenDecimals);
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
+    if (n >= 1) return n.toFixed(2);
+    return n.toFixed(4);
+  };
 
   return (
     <Card
@@ -62,9 +70,13 @@ export function PoolCard({ pool }: PoolCardProps) {
         <div className="mt-4 grid grid-cols-4 gap-3">
           {[
             {
-              label: "Liquidity",
-              value: totalLiquidity ? parseFloat(formatUnits(totalLiquidity, 18)).toFixed(2) : "—",
-              sub: "LP",
+              label: "Reserves",
+              value: pool.reserve0 || pool.reserve1
+                ? `${formatReserve(pool.reserve0, token0Info.decimals)} / ${formatReserve(pool.reserve1, token1Info.decimals)}`
+                : "—",
+              sub: pool.reserve0 || pool.reserve1
+                ? `${token0Info.symbol || "T0"} / ${token1Info.symbol || "T1"}`
+                : "",
             },
             {
               label: "Escrow Locked",
