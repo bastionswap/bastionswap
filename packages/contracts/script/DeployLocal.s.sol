@@ -184,7 +184,7 @@ contract DeployLocal is Script {
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 500,
-            lockDuration: 0,
+            lockDuration: 90 days,
             maxSellPercent: 300
         });
 

@@ -36,23 +36,28 @@ const DEFAULT_MILESTONES = [
 
 function computeStrictnessLevel(
   milestones: { timestamp: string; basisPoints: number }[],
-  createdAt: number
+  createdAt: number,
+  lockDuration: number
 ): "stricter" | "default" | "looser" | null {
   if (!milestones || milestones.length === 0 || createdAt === 0) return null;
 
   const sorted = milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
-  const lastTs = parseInt(sorted[sorted.length - 1].timestamp);
-  const totalDuration = lastTs - createdAt;
+  // Convert to timeOffsets (vesting-only, excluding lock period)
+  const vestingStart = createdAt + lockDuration;
+  const offsets = sorted.map((m) => ({
+    timeOffset: parseInt(m.timestamp) - vestingStart,
+    bps: m.basisPoints,
+  }));
+  const lastOffset = offsets[offsets.length - 1].timeOffset;
 
-  // Total duration must be >= 90 days
-  if (totalDuration < 90 * 86400) return "looser";
+  // Vesting duration (excluding lock) must be >= 90 days
+  if (lastOffset < 90 * 86400) return "looser";
 
-  // Check at each default milestone time point
-  const getBpsAtTime = (timeOffset: number): number => {
-    const targetTs = createdAt + timeOffset;
+  // Check at each default milestone time point (offset-based)
+  const getBpsAtOffset = (offset: number): number => {
     let bps = 0;
-    for (const m of sorted) {
-      if (parseInt(m.timestamp) <= targetTs) bps = m.basisPoints;
+    for (const o of offsets) {
+      if (o.timeOffset <= offset) bps = o.bps;
       else break;
     }
     return bps;
@@ -61,12 +66,12 @@ function computeStrictnessLevel(
   let allSame = true;
 
   for (const def of DEFAULT_MILESTONES) {
-    const customBps = getBpsAtTime(def.time);
+    const customBps = getBpsAtOffset(def.time);
     if (customBps > def.bps) return "looser";
     if (customBps !== def.bps) allSame = false;
   }
 
-  if (allSame && totalDuration === 90 * 86400) return "default";
+  if (allSame && lastOffset === 90 * 86400) return "default";
   return "stricter";
 }
 
@@ -428,8 +433,8 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: 
   const allVested = sortedMilestones && sortedMilestones.length > 0 && !nextMilestone;
 
   const vestingStrictness = useMemo(
-    () => sortedMilestones ? computeStrictnessLevel(sortedMilestones, createdAt) : null,
-    [sortedMilestones, createdAt]
+    () => sortedMilestones ? computeStrictnessLevel(sortedMilestones, createdAt, lockDuration) : null,
+    [sortedMilestones, createdAt, lockDuration]
   );
 
   return (
@@ -550,14 +555,16 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: 
         <div className="border-t border-subtle px-6 py-4">
           <VestingChart
             milestones={sortedMilestones.map((m) => ({
-              days: Math.round((parseInt(m.timestamp) - createdAt) / 86400),
+              days: Math.round((parseInt(m.timestamp) - createdAt - lockDuration) / 86400),
               bps: m.basisPoints,
             }))}
+            lockDays={Math.round(lockDuration / 86400)}
             defaultMilestones={[
               { days: 7, bps: 1000 },
               { days: 30, bps: 3000 },
               { days: 90, bps: 10000 },
             ]}
+            defaultLockDays={90}
             label="This pool"
             height={160}
           />

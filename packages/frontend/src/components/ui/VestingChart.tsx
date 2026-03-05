@@ -6,10 +6,14 @@ interface Milestone {
 }
 
 interface VestingChartProps {
-  /** Current vesting schedule milestones */
+  /** Current vesting schedule milestones (timeOffset in days, NOT including lockDays) */
   milestones: Milestone[];
   /** Optional default schedule to overlay as comparison (dashed line) */
   defaultMilestones?: Milestone[];
+  /** Lock duration in days (cliff before vesting starts). Milestones shift right by this amount. */
+  lockDays?: number;
+  /** Lock duration for default schedule in days */
+  defaultLockDays?: number;
   /** Chart height in px */
   height?: number;
   /** Label for the current schedule */
@@ -26,6 +30,7 @@ const PAD_BOTTOM = 32;
 
 function buildStepPath(
   milestones: Milestone[],
+  lockDays: number,
   maxDays: number,
   chartW: number,
   chartH: number,
@@ -38,26 +43,38 @@ function buildStepPath(
   // Start at origin (day 0, 0%)
   let path = `M ${toX(0)} ${toY(0)}`;
 
+  // Flat at 0% through lock period
+  if (lockDays > 0) {
+    path += ` H ${toX(lockDays)}`;
+  }
+
   for (const m of milestones) {
+    const actualDay = lockDays + m.days;
     // Horizontal to the milestone day at previous bps level
-    const prevY = path.match(/[\d.]+$/); // last Y
-    path += ` H ${toX(m.days)}`;
+    path += ` H ${toX(actualDay)}`;
     // Vertical jump to new bps level
     path += ` V ${toY(m.bps)}`;
   }
 
   // Extend horizontally to the end if last milestone doesn't reach maxDays
   const lastM = milestones[milestones.length - 1];
-  if (lastM.days < maxDays) {
+  if (lockDays + lastM.days < maxDays) {
     path += ` H ${toX(maxDays)}`;
   }
 
   return path;
 }
 
+/** Get the actual day positions of milestones (lock + timeOffset) */
+function getMilestoneDots(milestones: Milestone[], lockDays: number) {
+  return milestones.map((m) => ({ day: lockDays + m.days, bps: m.bps }));
+}
+
 export function VestingChart({
   milestones,
   defaultMilestones,
+  lockDays = 0,
+  defaultLockDays = 0,
   height = 180,
   label = "Custom",
   defaultLabel = "Default (90d)",
@@ -68,8 +85,8 @@ export function VestingChart({
 
   // Determine max days for the x-axis
   const allDays = [
-    ...milestones.map((m) => m.days),
-    ...(defaultMilestones?.map((m) => m.days) ?? []),
+    ...milestones.map((m) => lockDays + m.days),
+    ...(defaultMilestones?.map((m) => defaultLockDays + m.days) ?? []),
   ];
   const rawMax = Math.max(...allDays, 7);
   // Round up to a nice number
@@ -100,9 +117,9 @@ export function VestingChart({
     }
   }
 
-  const currentPath = buildStepPath(milestones, maxDays, chartW, chartH);
+  const currentPath = buildStepPath(milestones, lockDays, maxDays, chartW, chartH);
   const defaultPath = defaultMilestones
-    ? buildStepPath(defaultMilestones, maxDays, chartW, chartH)
+    ? buildStepPath(defaultMilestones, defaultLockDays, maxDays, chartW, chartH)
     : "";
 
   // Fill area under current schedule
@@ -110,7 +127,11 @@ export function VestingChart({
     ? `${currentPath} V ${toY(0)} H ${toX(0)} Z`
     : "";
 
+  const currentDots = getMilestoneDots(milestones, lockDays);
+  const defaultDots = defaultMilestones ? getMilestoneDots(defaultMilestones, defaultLockDays) : [];
+
   const showLegend = !!defaultMilestones && defaultMilestones.length > 0;
+  const showLock = lockDays > 0;
 
   return (
     <div className="w-full">
@@ -131,6 +152,45 @@ export function VestingChart({
             strokeWidth={0.5}
           />
         ))}
+
+        {/* Lock period shading */}
+        {showLock && (
+          <rect
+            x={toX(0)}
+            y={PAD_TOP}
+            width={toX(lockDays) - toX(0)}
+            height={chartH}
+            fill="#f59e0b"
+            opacity={0.08}
+          />
+        )}
+
+        {/* Lock period boundary line */}
+        {showLock && (
+          <line
+            x1={toX(lockDays)}
+            x2={toX(lockDays)}
+            y1={PAD_TOP}
+            y2={PAD_TOP + chartH}
+            stroke="#f59e0b"
+            strokeWidth={1}
+            strokeDasharray="3 2"
+          />
+        )}
+
+        {/* Lock label */}
+        {showLock && lockDays / maxDays > 0.08 && (
+          <text
+            x={(toX(0) + toX(lockDays)) / 2}
+            y={PAD_TOP + 12}
+            textAnchor="middle"
+            className="fill-amber-500"
+            fontSize={8}
+            fontWeight={600}
+          >
+            LOCK
+          </text>
+        )}
 
         {/* Y-axis labels */}
         {yTicks.map((bps) => (
@@ -191,10 +251,10 @@ export function VestingChart({
         )}
 
         {/* Milestone dots on current schedule */}
-        {milestones.map((m, i) => (
+        {currentDots.map((m, i) => (
           <circle
             key={i}
-            cx={toX(m.days)}
+            cx={toX(m.day)}
             cy={toY(m.bps)}
             r={3.5}
             fill="white"
@@ -204,10 +264,10 @@ export function VestingChart({
         ))}
 
         {/* Default milestone dots */}
-        {defaultMilestones?.map((m, i) => (
+        {defaultDots.map((m, i) => (
           <circle
             key={`d-${i}`}
-            cx={toX(m.days)}
+            cx={toX(m.day)}
             cy={toY(m.bps)}
             r={2.5}
             fill="white"
@@ -226,16 +286,24 @@ export function VestingChart({
       </svg>
 
       {/* Legend */}
-      {showLegend && (
-        <div className="flex items-center justify-center gap-5 mt-1">
+      {(showLegend || showLock) && (
+        <div className="flex items-center justify-center gap-5 mt-1 flex-wrap">
           <div className="flex items-center gap-1.5">
             <div className="h-0.5 w-5 bg-violet-700 rounded" />
             <span className="text-[11px] text-gray-600">{label}</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-0.5 w-5 bg-gray-400 rounded" style={{ backgroundImage: "repeating-linear-gradient(90deg, #9ca3af 0, #9ca3af 4px, transparent 4px, transparent 7px)" }} />
-            <span className="text-[11px] text-gray-400">{defaultLabel}</span>
-          </div>
+          {showLegend && (
+            <div className="flex items-center gap-1.5">
+              <div className="h-0.5 w-5 rounded" style={{ backgroundImage: "repeating-linear-gradient(90deg, #9ca3af 0, #9ca3af 4px, transparent 4px, transparent 7px)" }} />
+              <span className="text-[11px] text-gray-400">{defaultLabel}</span>
+            </div>
+          )}
+          {showLock && (
+            <div className="flex items-center gap-1.5">
+              <div className="h-3 w-5 rounded-sm bg-amber-500/20 border border-amber-400/40" />
+              <span className="text-[11px] text-amber-600">Lock ({lockDays}d)</span>
+            </div>
+          )}
         </div>
       )}
     </div>

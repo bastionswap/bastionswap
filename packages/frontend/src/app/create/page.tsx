@@ -445,7 +445,9 @@ export default function CreatePoolPage() {
             <div className="rounded-xl bg-gray-50 p-4 mb-4">
               <VestingChart
                 milestones={activeMilestones}
+                lockDays={Math.round(commitment.lockDuration / 86400)}
                 defaultMilestones={vestingMode !== "standard" ? VESTING_PRESETS.standard : undefined}
+                defaultLockDays={Math.round(DEFAULT_COMMITMENT.lockDuration / 86400)}
                 label={vestingMode === "custom" ? "Custom" : vestingMode.charAt(0).toUpperCase() + vestingMode.slice(1)}
                 height={160}
               />

@@ -55,13 +55,13 @@ contract ReputationEngineTest is Test {
         uint256 amount,
         IEscrowVault.IssuerCommitment memory c,
         uint256 escrowId,
-        uint8 vestingLevel
+        uint256 vestingScore
     ) internal {
-        // Mock the getVestingStrictnessLevel call on escrowVault
+        // Mock the getVestingStrictnessScore call on escrowVault
         vm.mockCall(
             escrowVault,
-            abi.encodeWithSelector(IEscrowVault.getVestingStrictnessLevel.selector, escrowId),
-            abi.encode(vestingLevel)
+            abi.encodeWithSelector(IEscrowVault.getVestingStrictnessScore.selector, escrowId),
+            abi.encode(vestingScore)
         );
         vm.prank(hook);
         engine.recordEvent(

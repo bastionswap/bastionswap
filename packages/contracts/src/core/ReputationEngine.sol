@@ -161,9 +161,8 @@ contract ReputationEngine is IReputationEngine {
         // Add commitment strictness score (base from commitment params)
         profile.commitmentScore += _calcSingleCommitmentStrictness(commitment);
 
-        // Add vesting schedule strictness bonus
-        uint8 vestingLevel = IEscrowVault(ESCROW_VAULT).getVestingStrictnessLevel(escrowId);
-        uint256 vestingBonus = vestingLevel == 2 ? 200 : vestingLevel == 1 ? 100 : 0;
+        // Add proportional vesting schedule strictness bonus (0..200)
+        uint256 vestingBonus = IEscrowVault(ESCROW_VAULT).getVestingStrictnessScore(escrowId);
         profile.commitmentScore += vestingBonus;
 
         profile.commitmentCount++;

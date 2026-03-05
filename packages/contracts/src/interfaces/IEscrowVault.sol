@@ -146,4 +146,12 @@ interface IEscrowVault {
     /// @return createdAt Timestamp when the escrow was created
     /// @return commitment The issuer's commitment parameters
     function getEscrowInfo(uint256 escrowId) external view returns (uint40 createdAt, IssuerCommitment memory commitment);
+
+    /// @notice Returns a proportional strictness score (0..200) for reputation scoring.
+    /// @dev Measures how much stricter the custom schedule is compared to default.
+    ///      At each default milestone, computes (defaultBps - customBps)/defaultBps.
+    ///      Also includes duration bonus for schedules longer than 90 days.
+    /// @param escrowId Identifier of the escrow position
+    /// @return score 0 = default or looser, up to 200 = maximum strictness
+    function getVestingStrictnessScore(uint256 escrowId) external view returns (uint256 score);
 }

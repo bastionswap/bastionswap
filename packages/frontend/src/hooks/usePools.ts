@@ -448,7 +448,7 @@ function useLocalPoolOnChain() {
                 vestingSchedule: vestingSteps
                   ? vestingSteps.map((s, i) => ({
                       id: `${escrowId}-${i}`,
-                      timestamp: (escrowCreatedAt + Number(s.timeOffset)).toString(),
+                      timestamp: (escrowCreatedAt + (escrowCommitment ? Number(escrowCommitment.lockDuration) : 0) + Number(s.timeOffset)).toString(),
                       basisPoints: Number(s.basisPoints),
                     }))
                   : undefined,

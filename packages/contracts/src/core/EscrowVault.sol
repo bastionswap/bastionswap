@@ -403,28 +403,66 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     /// @dev Returns 2 = stricter, 1 = same as default, 0 = looser
     function _getStrictnessLevel(uint256 escrowId) internal view returns (uint8) {
+        uint256 score = _getStrictnessScore(escrowId);
+        if (score == 0) {
+            // Check if it's exactly default or looser
+            VestingStep[] storage schedule = _vestingSchedules[escrowId];
+            if (schedule.length == 0) return 0;
+            uint40 totalDuration = schedule[schedule.length - 1].timeOffset;
+            if (totalDuration < DEFAULT_STEP3_TIME) return 0;
+            uint16 bps1 = _bpsAtTime(schedule, DEFAULT_STEP1_TIME);
+            uint16 bps2 = _bpsAtTime(schedule, DEFAULT_STEP2_TIME);
+            uint16 bps3 = _bpsAtTime(schedule, DEFAULT_STEP3_TIME);
+            if (bps1 > DEFAULT_STEP1_BPS || bps2 > DEFAULT_STEP2_BPS || bps3 > DEFAULT_STEP3_BPS) {
+                return 0; // looser
+            }
+            return 1; // same as default
+        }
+        return 2; // stricter
+    }
+
+    /// @dev Proportional strictness score (0..200).
+    ///      Measures how much stricter the custom schedule is compared to default.
+    ///      Score 0 = default or looser, 200 = maximum strictness.
+    function _getStrictnessScore(uint256 escrowId) internal view returns (uint256) {
         VestingStep[] storage schedule = _vestingSchedules[escrowId];
         if (schedule.length == 0) return 0;
 
-        // Total duration must be >= default (90 days)
         uint40 totalDuration = schedule[schedule.length - 1].timeOffset;
         if (totalDuration < DEFAULT_STEP3_TIME) return 0;
 
-        // Check at each default milestone: custom bps must be <= default bps
         uint16 bps1 = _bpsAtTime(schedule, DEFAULT_STEP1_TIME);
         uint16 bps2 = _bpsAtTime(schedule, DEFAULT_STEP2_TIME);
         uint16 bps3 = _bpsAtTime(schedule, DEFAULT_STEP3_TIME);
 
+        // If any milestone is looser than default, score is 0
         if (bps1 > DEFAULT_STEP1_BPS || bps2 > DEFAULT_STEP2_BPS || bps3 > DEFAULT_STEP3_BPS) {
-            return 0; // looser
+            return 0;
         }
 
-        // Check if exactly same as default
-        if (bps1 == DEFAULT_STEP1_BPS && bps2 == DEFAULT_STEP2_BPS && bps3 == DEFAULT_STEP3_BPS
-            && totalDuration == DEFAULT_STEP3_TIME) {
-            return 1; // same
-        }
+        // How much less was released at each default milestone (0..defaultBps range each)
+        // Normalized to 0..BPS_BASE scale per milestone
+        uint256 saving1 = uint256(DEFAULT_STEP1_BPS - bps1) * BPS_BASE / DEFAULT_STEP1_BPS;
+        uint256 saving2 = uint256(DEFAULT_STEP2_BPS - bps2) * BPS_BASE / DEFAULT_STEP2_BPS;
+        uint256 saving3 = uint256(DEFAULT_STEP3_BPS - bps3) * BPS_BASE / DEFAULT_STEP3_BPS;
 
-        return 2; // stricter
+        // Duration bonus: how much longer than 90d (capped at +90d = 180d total)
+        uint256 extraDuration = totalDuration > DEFAULT_STEP3_TIME
+            ? uint256(totalDuration - DEFAULT_STEP3_TIME)
+            : 0;
+        uint256 durationBonus = extraDuration * BPS_BASE / uint256(DEFAULT_STEP3_TIME);
+        if (durationBonus > BPS_BASE) durationBonus = BPS_BASE;
+
+        // Average of 4 components (each 0..BPS_BASE), scaled to 0..200
+        return ((saving1 + saving2 + saving3 + durationBonus) * 200) / (4 * BPS_BASE);
+    }
+
+    /// @notice Returns a proportional strictness score (0..200) for reputation scoring.
+    /// @param escrowId Identifier of the escrow position
+    /// @return score 0 = default or looser, up to 200 = maximum strictness
+    function getVestingStrictnessScore(uint256 escrowId) external view returns (uint256 score) {
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) revert EscrowNotFound();
+        return _getStrictnessScore(escrowId);
     }
 }
