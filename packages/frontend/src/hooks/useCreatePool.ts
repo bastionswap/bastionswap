@@ -28,7 +28,7 @@ export interface CreatePoolInput {
   tokenAddress: `0x${string}`;
   ethAmount: string;       // in ETH (e.g. "1.5")
   tokenAmount: string;     // in token units (e.g. "1000000")
-  escrowAmount: string;    // in token units
+  // escrowAmount is automatic: equals tokenAmount (full token LP goes to escrow)
   vestingSchedule: { timeOffset: number; basisPoints: number }[];
   commitment: {
     dailyWithdrawLimit: number;
@@ -146,7 +146,7 @@ export function useCreateBastionPool() {
 
       const ethWei = parseEther(input.ethAmount);
       const tokenWei = parseEther(input.tokenAmount);
-      const escrowWei = parseEther(input.escrowAmount);
+      const escrowWei = tokenWei; // Escrow = full token LP amount (automatic)
       const sqrtPriceX96 = computeSqrtPriceX96(ethWei, tokenWei);
 
       const hookData = encodeAbiParameters(
@@ -254,7 +254,7 @@ export function useCreateBastionPool() {
       resetApproveRouter();
       resetCreatePool();
 
-      const escrowWei = parseEther(params.escrowAmount);
+      const escrowWei = parseEther(params.tokenAmount); // Escrow = full token amount
       writeApproveHook({
         address: params.tokenAddress,
         abi: erc20Abi,

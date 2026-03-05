@@ -63,10 +63,8 @@ function computeStrictnessLevel(
   if (last.days < 7) return "invalid";
   if (last.bps !== 10000) return "invalid";
 
-  // Check total duration >= 90 days
   if (last.days < 90) return "looser";
 
-  // Check at each default milestone time point
   const getBpsAtTime = (time: number): number => {
     let bps = 0;
     for (const m of milestones) {
@@ -76,14 +74,12 @@ function computeStrictnessLevel(
     return bps;
   };
 
-  let allSameOrStricter = true;
   let allSame = true;
 
   for (const def of DEFAULT_MILESTONES) {
     const customBps = getBpsAtTime(def.time);
     if (customBps > def.bps) return "looser";
     if (customBps < def.bps) allSame = false;
-    if (customBps !== def.bps) allSameOrStricter = true;
   }
 
   if (allSame && last.days === 90) return "default";
@@ -120,13 +116,22 @@ function isStepConfirming(poolStep: CreatePoolStep): boolean {
   ].includes(poolStep);
 }
 
+function formatTokenAmount(amount: string, bps: number): string {
+  const num = parseFloat(amount);
+  if (!num || isNaN(num)) return "0";
+  const result = (num * bps) / 10000;
+  if (result >= 1000000) return `${(result / 1000000).toFixed(1)}M`;
+  if (result >= 1000) return `${(result / 1000).toFixed(1)}K`;
+  if (result % 1 === 0) return result.toString();
+  return result.toFixed(2);
+}
+
 export default function CreatePoolPage() {
   const { isConnected, address } = useAccount();
   const [step, setStep] = useState<Step>(1);
   const [tokenAddress, setTokenAddress] = useState("");
   const [ethAmount, setEthAmount] = useState("");
   const [tokenAmount, setTokenAmount] = useState("");
-  const [escrowAmount, setEscrowAmount] = useState("");
   const [commitment, setCommitment] = useState(DEFAULT_COMMITMENT);
   const [vestingMode, setVestingMode] = useState<VestingMode>("standard");
   const [customMilestones, setCustomMilestones] = useState<Milestone[]>([
@@ -170,7 +175,6 @@ export default function CreatePoolPage() {
       tokenAddress: tokenAddr,
       ethAmount,
       tokenAmount,
-      escrowAmount,
       vestingSchedule: activeMilestones.map((m) => ({
         timeOffset: m.days * 86400,
         basisPoints: m.bps,
@@ -295,7 +299,7 @@ export default function CreatePoolPage() {
         </Card>
       )}
 
-      {/* Step 2: Liquidity + Escrow */}
+      {/* Step 2: Liquidity */}
       {step === 2 && (
         <Card>
           <div className="flex items-center gap-3 mb-5">
@@ -305,9 +309,9 @@ export default function CreatePoolPage() {
               </svg>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Liquidity & Escrow</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Initial Liquidity</h2>
               <p className="text-sm text-gray-500">
-                Set initial liquidity amounts and escrow protection
+                Set the initial token and ETH amounts for your pool
               </p>
             </div>
           </div>
@@ -332,22 +336,58 @@ export default function CreatePoolPage() {
                 className="input-base text-lg"
               />
             </div>
-            <hr className="border-gray-200" />
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                Escrow Amount (tokens for protection)
-              </label>
-              <p className="text-xs text-gray-400 mb-2">
-                Tokens locked in escrow as a trust signal. Released according to the vesting schedule.
-              </p>
-              <input
-                type="number"
-                value={escrowAmount}
-                onChange={(e) => setEscrowAmount(e.target.value)}
-                placeholder="0"
-                className="input-base text-lg"
-              />
+
+            {/* Escrow Protection Info Card */}
+            <div className="rounded-xl bg-emerald-50/50 border border-emerald-200 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100">
+                  <svg className="h-4.5 w-4.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-emerald-800">Escrow Protection</p>
+                  {tokenAmount && parseFloat(tokenAmount) > 0 ? (
+                    <p className="text-sm text-emerald-700 mt-1">
+                      Your {tokenAmount} tokens will be automatically held in escrow and released according to the vesting schedule. This protects token buyers and cannot be disabled.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-emerald-600/70 mt-1">
+                      Enter token amount to see escrow details
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
+
+            {/* Vesting Schedule Preview */}
+            {tokenAmount && parseFloat(tokenAmount) > 0 && (
+              <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Vesting Schedule</p>
+                <div className="space-y-2.5">
+                  {activeMilestones.map((m, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className="h-2 w-2 rounded-full bg-bastion-500 shrink-0" />
+                        <span className="text-sm text-gray-600">Day {m.days}</span>
+                      </div>
+                      <span className="text-sm font-medium text-gray-900 tabular-nums">
+                        {m.bps / 100}%
+                      </span>
+                      <span className="text-sm text-gray-500 tabular-nums w-28 text-right">
+                        ({formatTokenAmount(tokenAmount, m.bps)} tokens)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-3 flex items-center gap-1">
+                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                  </svg>
+                  You can customize this in the next step
+                </p>
+              </div>
+            )}
           </div>
           <div className="mt-5 flex gap-3">
             <button
@@ -358,7 +398,7 @@ export default function CreatePoolPage() {
             </button>
             <button
               onClick={() => setStep(3)}
-              disabled={!ethAmount || !tokenAmount || !escrowAmount}
+              disabled={!ethAmount || !tokenAmount}
               className="btn-primary flex-1 py-3.5 disabled:opacity-40"
             >
               Continue
@@ -381,7 +421,7 @@ export default function CreatePoolPage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">Vesting Schedule</h2>
-                  <p className="text-sm text-gray-500">Define how tokens unlock over time</p>
+                  <p className="text-sm text-gray-500">Define how escrowed tokens unlock over time</p>
                 </div>
               </div>
             </div>
@@ -505,7 +545,14 @@ export default function CreatePoolPage() {
                 {activeMilestones.map((m, i) => (
                   <div key={i} className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Day {m.days}</span>
-                    <span className="font-medium text-gray-900 tabular-nums">{m.bps / 100}% unlocked</span>
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium text-gray-900 tabular-nums">{m.bps / 100}% unlocked</span>
+                      {tokenAmount && parseFloat(tokenAmount) > 0 && (
+                        <span className="text-gray-400 tabular-nums text-xs">
+                          ({formatTokenAmount(tokenAmount, m.bps)} tokens)
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -657,12 +704,24 @@ export default function CreatePoolPage() {
               </div>
             </div>
 
-            <button
-              onClick={() => setCommitment(DEFAULT_COMMITMENT)}
-              className="mt-4 text-xs text-bastion-600 hover:text-bastion-700 hover:underline transition-colors"
-            >
-              Reset to defaults
-            </button>
+            <div className="mt-5 flex items-center justify-between">
+              <button
+                onClick={() => setCommitment(DEFAULT_COMMITMENT)}
+                className="text-xs text-bastion-600 hover:text-bastion-700 hover:underline transition-colors"
+              >
+                Reset to defaults
+              </button>
+              <button
+                onClick={() => {
+                  setCommitment(DEFAULT_COMMITMENT);
+                  setVestingMode("standard");
+                  setStep(4);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-700 hover:underline transition-colors"
+              >
+                Skip (use defaults)
+              </button>
+            </div>
           </Card>
 
           <div className="flex gap-3">
@@ -698,6 +757,7 @@ export default function CreatePoolPage() {
             </div>
           </div>
 
+          {/* Pool Summary */}
           <div className="rounded-xl bg-gray-50 p-5 space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-500">Token</span>
@@ -706,54 +766,64 @@ export default function CreatePoolPage() {
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">ETH Liquidity</span>
-              <span className="text-gray-900 font-medium">{ethAmount} ETH</span>
+              <span className="text-gray-500">Liquidity</span>
+              <span className="text-gray-900 font-medium">{tokenAmount} tokens + {ethAmount} ETH</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Token Liquidity</span>
-              <span className="text-gray-900 font-medium">{tokenAmount}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Escrow Amount</span>
-              <span className="text-gray-900 font-medium">{escrowAmount} tokens</span>
+              <span className="text-gray-500">Escrow</span>
+              <span className="text-gray-900 font-medium">{tokenAmount} tokens (automatic)</span>
             </div>
             <hr className="border-gray-200" />
             <div className="flex justify-between">
-              <span className="text-gray-500">Vesting Schedule</span>
-              <span className="text-gray-900 font-medium capitalize">{vestingMode}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Vesting Duration</span>
-              <span className="text-gray-900 font-medium">{activeMilestones[activeMilestones.length - 1]?.days ?? 0} days</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-gray-500">Vesting Strictness</span>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                strictness === "stricter" ? "bg-emerald-50 text-emerald-700"
-                : strictness === "default" ? "bg-gray-100 text-gray-600"
-                : strictness === "looser" ? "bg-yellow-50 text-yellow-700"
-                : "bg-red-50 text-red-600"
-              }`}>
-                {strictness === "stricter" ? "Stricter" : strictness === "default" ? "Standard" : strictness === "looser" ? "Below default" : "Invalid"}
+              <span className="text-gray-500">Vesting</span>
+              <span className="text-gray-900 font-medium capitalize">
+                {vestingMode} ({activeMilestones[activeMilestones.length - 1]?.days ?? 0}d)
               </span>
             </div>
-            <hr className="border-gray-200" />
             <div className="flex justify-between">
-              <span className="text-gray-500">Daily Withdraw Limit</span>
-              <span className="text-gray-900 font-medium">{formatBps(commitment.dailyWithdrawLimit)}</span>
+              <span className="text-gray-500">Insurance Fee</span>
+              <span className="text-gray-900 font-medium">1% per buy swap</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Lock Duration</span>
-              <span className="text-gray-900 font-medium">{formatDuration(commitment.lockDuration)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Max Sell / 24h</span>
-              <span className="text-gray-900 font-medium">{formatBps(commitment.maxSellPercent)}</span>
+              <span className="text-gray-500">Commitments</span>
+              <span className="text-gray-900 font-medium">
+                {commitment.dailyWithdrawLimit === DEFAULT_COMMITMENT.dailyWithdrawLimit &&
+                 commitment.lockDuration === DEFAULT_COMMITMENT.lockDuration &&
+                 commitment.maxSellPercent === DEFAULT_COMMITMENT.maxSellPercent
+                  ? "Default"
+                  : "Custom"}
+              </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-gray-500">Protection</span>
               <Badge variant="protected">Bastion Protected</Badge>
             </div>
+          </div>
+
+          {/* Escrow Disclosure */}
+          <div className="mt-4 rounded-xl bg-bastion-50 border border-bastion-200 p-4">
+            <p className="text-sm text-bastion-800">
+              By creating this pool, your <span className="font-semibold">{tokenAmount} tokens</span> will be held in escrow.
+              You can withdraw according to the vesting schedule:
+            </p>
+            <div className="mt-3 space-y-1.5">
+              {activeMilestones.map((m, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  <svg className="h-4 w-4 text-bastion-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="text-bastion-700">
+                    Day {m.days}: up to {m.bps / 100}%
+                    {tokenAmount && parseFloat(tokenAmount) > 0 && (
+                      <span className="text-bastion-500"> ({formatTokenAmount(tokenAmount, m.bps)} tokens)</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-bastion-600/70">
+              If a rug pull is detected, remaining escrow funds will be redistributed to token holders.
+            </p>
           </div>
 
           {error && (
