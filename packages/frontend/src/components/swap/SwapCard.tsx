@@ -132,8 +132,13 @@ export function SwapCard() {
   const needsApproval = !tokenInIsNative && allowance !== undefined && parsedAmountIn > 0n && allowance < parsedAmountIn;
 
   const slippageBps = Math.floor(parseFloat(slippage || "1") * 100);
-  const minAmountOut = parsedAmountIn > 0n
-    ? (parsedAmountIn * BigInt(10000 - slippageBps)) / 10000n
+  // Account for pool fee (0.3% = 30 bps) + insurance fee before applying slippage
+  const POOL_FEE_BPS = 30;
+  const estimatedOutBn = parsedAmountIn > 0n
+    ? (parsedAmountIn * BigInt(10000 - POOL_FEE_BPS - INSURANCE_FEE_BPS)) / 10000n
+    : 0n;
+  const minAmountOut = estimatedOutBn > 0n
+    ? (estimatedOutBn * BigInt(10000 - slippageBps)) / 10000n
     : 0n;
 
   const handleApprove = () => {
@@ -163,9 +168,9 @@ export function SwapCard() {
     return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
   };
 
-  // Approximate output (1:1 for same-decimal demo tokens, minus fee)
-  const estimatedOut = parsedAmountIn > 0n
-    ? parseFloat(formatUnits(parsedAmountIn, 18)) * (1 - INSURANCE_FEE_BPS / 10000)
+  // Approximate output (1:1 for same-decimal demo tokens, minus pool fee + insurance fee)
+  const estimatedOut = estimatedOutBn > 0n
+    ? parseFloat(formatUnits(estimatedOutBn, 18))
     : 0;
 
   return (
