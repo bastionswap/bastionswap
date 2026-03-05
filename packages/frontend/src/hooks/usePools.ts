@@ -513,6 +513,43 @@ export function usePool(id: string) {
   });
 }
 
+const POOL_BY_TOKEN_QUERY = gql`
+  query PoolByToken($token: String!) {
+    pools(
+      where: { token1: $token, isBastion: true }
+      first: 1
+    ) {
+      id
+    }
+  }
+`;
+
+/**
+ * Find an existing Bastion pool by issued token address.
+ * Returns the pool ID if one exists.
+ */
+export function usePoolByToken(tokenAddress: string | undefined) {
+  const chainId = useChainId();
+  const token = tokenAddress?.toLowerCase();
+
+  return useQuery({
+    queryKey: ["poolByToken", token, chainId],
+    queryFn: () =>
+      chainId === 31337
+        ? Promise.resolve({
+            pools:
+              token === LOCAL_POOL.token1.toLowerCase()
+                ? [{ id: LOCAL_POOL.id }]
+                : [],
+          })
+        : graphClient.request<{ pools: { id: string }[] }>(POOL_BY_TOKEN_QUERY, {
+            token,
+          }),
+    select: (data) => data.pools[0]?.id ?? null,
+    enabled: !!token,
+  });
+}
+
 const POOL_BY_TOKENS_QUERY = gql`
   query PoolByTokens($token0: String!, $token1: String!) {
     pools(

@@ -14,6 +14,8 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatBps, formatDuration } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
 import { VestingChart } from "@/components/ui/VestingChart";
+import { usePoolByToken } from "@/hooks/usePools";
+import Link from "next/link";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -164,6 +166,7 @@ export default function CreatePoolPage() {
   const {
     step: poolStep,
     error,
+    isPoolAlreadyExists,
     hash,
     startCreation,
     reset: resetPool,
@@ -172,6 +175,11 @@ export default function CreatePoolPage() {
 
   const chainId = useChainId();
   const contracts = getContracts(chainId);
+
+  // Look up existing pool when PoolAlreadyInitialized error occurs
+  const { data: existingPoolId } = usePoolByToken(
+    isPoolAlreadyExists ? tokenAddress : undefined
+  );
 
   const handleCreatePool = () => {
     if (!contracts || !address) return;
@@ -837,9 +845,28 @@ export default function CreatePoolPage() {
 
           {error && (
             <div className="mt-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
-              <p className="text-sm text-red-600">
-                {error.message.slice(0, 100)}
-              </p>
+              {isPoolAlreadyExists ? (
+                <div>
+                  <p className="text-sm font-medium text-red-700">
+                    A Bastion pool already exists for this token pair.
+                  </p>
+                  {existingPoolId && (
+                    <Link
+                      href={`/pools/${existingPoolId}`}
+                      className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-red-600 hover:text-red-700 underline underline-offset-2"
+                    >
+                      View existing pool
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                    </Link>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-red-600">
+                  {error.message.slice(0, 100)}
+                </p>
+              )}
             </div>
           )}
 

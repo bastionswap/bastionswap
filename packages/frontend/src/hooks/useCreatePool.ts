@@ -243,6 +243,11 @@ export function useCreateBastionPool() {
     }
   }, [approveHookError, approveRouterError, createPoolError]);
 
+  const isPoolAlreadyExists =
+    step === "error" &&
+    error !== null &&
+    /PoolAlreadyInitialized|0x7983c051/.test(error.message);
+
   const startCreation = useCallback(
     (params: CreatePoolInput) => {
       if (!contracts) return;
@@ -277,6 +282,7 @@ export function useCreateBastionPool() {
   return {
     step,
     error,
+    isPoolAlreadyExists,
     hash: createPoolHash,
     startCreation,
     reset,
