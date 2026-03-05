@@ -144,8 +144,8 @@ contract ReputationEngine is IReputationEngine {
     // ─── Event Handlers ──────────────────────────────────────────────
 
     function _handlePoolCreated(address issuer, IssuerProfile storage profile, bytes calldata data) internal {
-        (address token, uint256 amount, IEscrowVault.IssuerCommitment memory commitment) =
-            abi.decode(data, (address, uint256, IEscrowVault.IssuerCommitment));
+        (address token, uint256 amount, IEscrowVault.IssuerCommitment memory commitment, uint256 escrowId) =
+            abi.decode(data, (address, uint256, IEscrowVault.IssuerCommitment, uint256));
 
         profile.poolsCreated++;
 
@@ -158,8 +158,14 @@ contract ReputationEngine is IReputationEngine {
         // Add escrow history weighted value (amount * lockDuration / (1 day * 1e18))
         profile.totalLockedWeighted += (amount * uint256(commitment.lockDuration)) / (1 days * 1e18);
 
-        // Add commitment strictness score
+        // Add commitment strictness score (base from commitment params)
         profile.commitmentScore += _calcSingleCommitmentStrictness(commitment);
+
+        // Add vesting schedule strictness bonus
+        uint8 vestingLevel = IEscrowVault(ESCROW_VAULT).getVestingStrictnessLevel(escrowId);
+        uint256 vestingBonus = vestingLevel == 2 ? 200 : vestingLevel == 1 ? 100 : 0;
+        profile.commitmentScore += vestingBonus;
+
         profile.commitmentCount++;
     }
 

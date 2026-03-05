@@ -17,6 +17,15 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     uint16 internal constant BPS_BASE = 10_000;
     uint256 internal constant MAX_SCHEDULE_LENGTH = 10;
+    uint256 public constant MIN_VESTING_DURATION = 7 days;
+
+    // Default vesting schedule milestones for comparison
+    uint40 private constant DEFAULT_STEP1_TIME = 7 days;
+    uint16 private constant DEFAULT_STEP1_BPS  = 1000;
+    uint40 private constant DEFAULT_STEP2_TIME = 30 days;
+    uint16 private constant DEFAULT_STEP2_BPS  = 3000;
+    uint40 private constant DEFAULT_STEP3_TIME = 90 days;
+    uint16 private constant DEFAULT_STEP3_BPS  = 10_000;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -68,6 +77,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     error NothingToRelease();
     error DailyLimitExceeded();
     error CommitmentNotStricter();
+    error VestingBelowMinDuration();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -319,6 +329,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
             prevBps = schedule[i].basisPoints;
         }
 
+        if (schedule[len - 1].timeOffset < MIN_VESTING_DURATION) revert VestingBelowMinDuration();
         if (schedule[len - 1].basisPoints != BPS_BASE) revert ScheduleFinalBpsNot10000();
     }
 
@@ -344,5 +355,61 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
         // Round down: (totalAmount * vestedBps) / BPS_BASE
         return (escrow.totalAmount * vestedBps) / BPS_BASE;
+    }
+
+    /// @dev Compute the cumulative bps a schedule would have released at a given timeOffset.
+    function _bpsAtTime(VestingStep[] storage schedule, uint40 timeOffset) internal view returns (uint16) {
+        uint16 bps = 0;
+        for (uint256 i; i < schedule.length; ++i) {
+            if (schedule[i].timeOffset <= timeOffset) {
+                bps = schedule[i].basisPoints;
+            } else {
+                break;
+            }
+        }
+        return bps;
+    }
+
+    // ─── Strictness View Functions ────────────────────────────────────
+
+    /// @inheritdoc IEscrowVault
+    function isStricterThanDefault(uint256 escrowId) external view returns (bool) {
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) revert EscrowNotFound();
+        return _getStrictnessLevel(escrowId) >= 1;
+    }
+
+    /// @inheritdoc IEscrowVault
+    function getVestingStrictnessLevel(uint256 escrowId) external view returns (uint8) {
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) revert EscrowNotFound();
+        return _getStrictnessLevel(escrowId);
+    }
+
+    /// @dev Returns 2 = stricter, 1 = same as default, 0 = looser
+    function _getStrictnessLevel(uint256 escrowId) internal view returns (uint8) {
+        VestingStep[] storage schedule = _vestingSchedules[escrowId];
+        if (schedule.length == 0) return 0;
+
+        // Total duration must be >= default (90 days)
+        uint40 totalDuration = schedule[schedule.length - 1].timeOffset;
+        if (totalDuration < DEFAULT_STEP3_TIME) return 0;
+
+        // Check at each default milestone: custom bps must be <= default bps
+        uint16 bps1 = _bpsAtTime(schedule, DEFAULT_STEP1_TIME);
+        uint16 bps2 = _bpsAtTime(schedule, DEFAULT_STEP2_TIME);
+        uint16 bps3 = _bpsAtTime(schedule, DEFAULT_STEP3_TIME);
+
+        if (bps1 > DEFAULT_STEP1_BPS || bps2 > DEFAULT_STEP2_BPS || bps3 > DEFAULT_STEP3_BPS) {
+            return 0; // looser
+        }
+
+        // Check if exactly same as default
+        if (bps1 == DEFAULT_STEP1_BPS && bps2 == DEFAULT_STEP2_BPS && bps3 == DEFAULT_STEP3_BPS
+            && totalDuration == DEFAULT_STEP3_TIME) {
+            return 1; // same
+        }
+
+        return 2; // stricter
     }
 }

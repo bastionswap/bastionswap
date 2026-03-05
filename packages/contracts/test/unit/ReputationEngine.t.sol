@@ -46,9 +46,26 @@ contract ReputationEngineTest is Test {
     function _recordPoolCreated(address _issuer, address token, uint256 amount, IEscrowVault.IssuerCommitment memory c)
         internal
     {
+        _recordPoolCreatedWithEscrow(_issuer, token, amount, c, 0, 0);
+    }
+
+    function _recordPoolCreatedWithEscrow(
+        address _issuer,
+        address token,
+        uint256 amount,
+        IEscrowVault.IssuerCommitment memory c,
+        uint256 escrowId,
+        uint8 vestingLevel
+    ) internal {
+        // Mock the getVestingStrictnessLevel call on escrowVault
+        vm.mockCall(
+            escrowVault,
+            abi.encodeWithSelector(IEscrowVault.getVestingStrictnessLevel.selector, escrowId),
+            abi.encode(vestingLevel)
+        );
         vm.prank(hook);
         engine.recordEvent(
-            _issuer, IReputationEngine.EventType.POOL_CREATED, abi.encode(token, amount, c)
+            _issuer, IReputationEngine.EventType.POOL_CREATED, abi.encode(token, amount, c, escrowId)
         );
     }
 
@@ -312,12 +329,7 @@ contract ReputationEngineTest is Test {
     }
 
     function test_recordEvent_allowsHook() public {
-        vm.prank(hook);
-        engine.recordEvent(
-            issuer,
-            IReputationEngine.EventType.POOL_CREATED,
-            abi.encode(makeAddr("token"), uint256(100 ether), _defaultCommitment())
-        );
+        _recordPoolCreated(issuer, makeAddr("token"), 100 ether, _defaultCommitment());
         // No revert means success
     }
 
@@ -401,12 +413,7 @@ contract ReputationEngineTest is Test {
         vm.expectEmit(true, true, false, false);
         emit IReputationEngine.ReputationUpdated(issuer, IReputationEngine.EventType.POOL_CREATED, 0);
 
-        vm.prank(hook);
-        engine.recordEvent(
-            issuer,
-            IReputationEngine.EventType.POOL_CREATED,
-            abi.encode(makeAddr("tokenA"), uint256(100 ether), _defaultCommitment())
-        );
+        _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
     }
 
     function test_edge_commitmentViolated_actsLikeTrigger() public {

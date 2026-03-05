@@ -26,6 +26,49 @@ interface EscrowStatusProps {
   vestingEndTime?: number;
 }
 
+// Default milestones for strictness comparison
+const DEFAULT_MILESTONES = [
+  { time: 7 * 86400, bps: 1000 },
+  { time: 30 * 86400, bps: 3000 },
+  { time: 90 * 86400, bps: 10000 },
+];
+
+function computeStrictnessLevel(
+  milestones: { timestamp: string; basisPoints: number }[],
+  createdAt: number
+): "stricter" | "default" | "looser" | null {
+  if (!milestones || milestones.length === 0 || createdAt === 0) return null;
+
+  const sorted = milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
+  const lastTs = parseInt(sorted[sorted.length - 1].timestamp);
+  const totalDuration = lastTs - createdAt;
+
+  // Total duration must be >= 90 days
+  if (totalDuration < 90 * 86400) return "looser";
+
+  // Check at each default milestone time point
+  const getBpsAtTime = (timeOffset: number): number => {
+    const targetTs = createdAt + timeOffset;
+    let bps = 0;
+    for (const m of sorted) {
+      if (parseInt(m.timestamp) <= targetTs) bps = m.basisPoints;
+      else break;
+    }
+    return bps;
+  };
+
+  let allSame = true;
+
+  for (const def of DEFAULT_MILESTONES) {
+    const customBps = getBpsAtTime(def.time);
+    if (customBps > def.bps) return "looser";
+    if (customBps !== def.bps) allSame = false;
+  }
+
+  if (allSame && totalDuration === 90 * 86400) return "default";
+  return "stricter";
+}
+
 function formatDate(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString("en-US", {
     month: "short",
@@ -383,6 +426,11 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: 
   );
   const allVested = sortedMilestones && sortedMilestones.length > 0 && !nextMilestone;
 
+  const vestingStrictness = useMemo(
+    () => sortedMilestones ? computeStrictnessLevel(sortedMilestones, createdAt) : null,
+    [sortedMilestones, createdAt]
+  );
+
   return (
     <div className="glass-card p-0 overflow-hidden">
       {/* Header */}
@@ -400,13 +448,26 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: 
             <p className="text-xs text-gray-400">Token lock & vesting</p>
           </div>
         </div>
-        {escrow.isTriggered ? (
-          <Badge variant="triggered">TRIGGERED</Badge>
-        ) : allVested ? (
-          <Badge variant="protected">Fully Vested</Badge>
-        ) : (
-          <Badge variant="protected">Active</Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {!escrow.isTriggered && vestingStrictness && vestingStrictness !== "default" && (
+            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+              vestingStrictness === "stricter"
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-yellow-50 text-yellow-700"
+            }`}>
+              {vestingStrictness === "stricter" ? "Stricter than default" : `${
+                sortedMilestones ? Math.round((parseInt(sortedMilestones[sortedMilestones.length - 1].timestamp) - createdAt) / 86400) : 0
+              }d vesting`}
+            </span>
+          )}
+          {escrow.isTriggered ? (
+            <Badge variant="triggered">TRIGGERED</Badge>
+          ) : allVested ? (
+            <Badge variant="protected">Fully Vested</Badge>
+          ) : (
+            <Badge variant="protected">Active</Badge>
+          )}
+        </div>
       </div>
 
       {/* Triggered warning */}

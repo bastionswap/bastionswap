@@ -20,6 +20,7 @@ interface IssuerInfoProps {
     lockDuration: string;
     maxSellPercent: string;
   } | null;
+  vestingStrictness?: "stricter" | "default" | "looser" | null;
 }
 
 const DEFAULTS = {
@@ -133,7 +134,7 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   );
 }
 
-export function IssuerInfo({ issuer, commitment }: IssuerInfoProps) {
+export function IssuerInfo({ issuer, commitment, vestingStrictness }: IssuerInfoProps) {
   const score = parseInt(issuer.reputationScore);
   const created = issuer.totalEscrowsCreated ?? 0;
   const completed = issuer.totalEscrowsCompleted ?? 0;
@@ -192,6 +193,20 @@ export function IssuerInfo({ issuer, commitment }: IssuerInfoProps) {
         <div className="border-t border-subtle px-6 py-4">
           <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">Commitments</p>
           <div className="space-y-2.5">
+            {vestingStrictness && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-400">Vesting Schedule</span>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  vestingStrictness === "stricter"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : vestingStrictness === "default"
+                      ? "bg-gray-100 text-gray-600"
+                      : "bg-yellow-50 text-yellow-700"
+                }`}>
+                  {vestingStrictness === "stricter" ? "Stricter" : vestingStrictness === "default" ? "Default" : "Below default"}
+                </span>
+              </div>
+            )}
             {[
               {
                 label: "Daily Withdraw Limit",

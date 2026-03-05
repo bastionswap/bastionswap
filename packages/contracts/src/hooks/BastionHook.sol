@@ -329,7 +329,7 @@ contract BastionHook is BaseTestHooks {
         try reputationEngine.recordEvent(
             issuer,
             IReputationEngine.EventType.POOL_CREATED,
-            abi.encode(token, amount, commitment)
+            abi.encode(token, amount, commitment, escrowId)
         ) {} catch {
             emit ExternalCallFailed("ReputationEngine.recordEvent", poolId);
         }

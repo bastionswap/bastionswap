@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract } from "wagmi";
 import { baseSepolia } from "wagmi/chains";
 import Link from "next/link";
@@ -493,6 +493,25 @@ export default function PoolDetailPage() {
               <IssuerInfo
                 issuer={pool.issuer}
                 commitment={pool.escrow?.commitment}
+                vestingStrictness={(() => {
+                  const ms = pool.escrow?.vestingSchedule;
+                  const created = pool.escrow?.createdAt ? parseInt(pool.escrow.createdAt) : 0;
+                  if (!ms || ms.length === 0 || created === 0) return null;
+                  const sorted = ms.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
+                  const lastTs = parseInt(sorted[sorted.length - 1].timestamp);
+                  const dur = lastTs - created;
+                  if (dur < 90 * 86400) return "looser" as const;
+                  const defaults = [{ t: 7*86400, b: 1000 }, { t: 30*86400, b: 3000 }, { t: 90*86400, b: 10000 }];
+                  let allSame = true;
+                  for (const d of defaults) {
+                    let bps = 0;
+                    for (const m of sorted) { if (parseInt(m.timestamp) <= created + d.t) bps = m.basisPoints; else break; }
+                    if (bps > d.b) return "looser" as const;
+                    if (bps !== d.b) allSame = false;
+                  }
+                  if (allSame && dur === 90 * 86400) return "default" as const;
+                  return "stricter" as const;
+                })()}
               />
             )}
           </div>

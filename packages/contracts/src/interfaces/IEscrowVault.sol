@@ -124,4 +124,15 @@ interface IEscrowVault {
     /// @param poolId Uniswap V4 pool identifier
     /// @return endTime Timestamp of the final vesting unlock
     function getVestingEndTime(PoolId poolId) external view returns (uint256 endTime);
+
+    /// @notice Checks if the escrow's vesting schedule is at least as strict as the default.
+    /// @param escrowId Identifier of the escrow position
+    /// @return True if at every default milestone time point, the custom schedule
+    ///         has vested <= the default amount AND total duration >= 90 days
+    function isStricterThanDefault(uint256 escrowId) external view returns (bool);
+
+    /// @notice Returns the strictness level of the escrow's vesting schedule vs default.
+    /// @param escrowId Identifier of the escrow position
+    /// @return level 2 = stricter than default, 1 = same as default, 0 = looser than default
+    function getVestingStrictnessLevel(uint256 escrowId) external view returns (uint8 level);
 }

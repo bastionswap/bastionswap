@@ -766,4 +766,143 @@ contract EscrowVaultTest is Test {
         PoolId unknownPool = PoolId.wrap(bytes32(uint256(999)));
         assertEq(vault.getVestingEndTime(unknownPool), 0);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  CUSTOM VESTING — MINIMUM DURATION TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_CustomVesting_MinDuration_7Days() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](1);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        // Should succeed — exactly 7 days
+    }
+
+    function test_CustomVesting_BelowMinDuration_Reverts() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](1);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 3 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vm.expectRevert(EscrowVault.VestingBelowMinDuration.selector);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+    }
+
+    function test_CustomVesting_1Day_Reverts() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](1);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 1 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vm.expectRevert(EscrowVault.VestingBelowMinDuration.selector);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  CUSTOM VESTING — FREE SCHEDULE TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_CustomVesting_ShorterThanDefault_Allowed() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](2);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 5000});
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 14 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+    }
+
+    function test_CustomVesting_LooserThanDefault_Allowed() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](2);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 5000});
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+    }
+
+    function test_CustomVesting_LongerThanDefault_Allowed() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 14 days, basisPoints: 500});
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 60 days, basisPoints: 2000});
+        schedule[2] = IEscrowVault.VestingStep({timeOffset: 180 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+    }
+
+    function test_CustomVesting_SingleMilestone_Allowed() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](1);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+    }
+
+    function test_CustomVesting_ManyMilestones_Allowed() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](6);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 500});
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 14 days, basisPoints: 1000});
+        schedule[2] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 2000});
+        schedule[3] = IEscrowVault.VestingStep({timeOffset: 60 days, basisPoints: 4000});
+        schedule[4] = IEscrowVault.VestingStep({timeOffset: 120 days, basisPoints: 7000});
+        schedule[5] = IEscrowVault.VestingStep({timeOffset: 180 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  isStricterThanDefault TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_IsStricter_DefaultSchedule_True() public {
+        // Default schedule [7d→10%, 30d→30%, 90d→100%] — same as default, isStricter returns true
+        _createDefaultEscrow();
+        assertTrue(vault.isStricterThanDefault(defaultEscrowId));
+        assertEq(vault.getVestingStrictnessLevel(defaultEscrowId), 1); // same
+    }
+
+    function test_IsStricter_LongerDuration_True() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 14 days, basisPoints: 500});
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 60 days, basisPoints: 2000});
+        schedule[2] = IEscrowVault.VestingStep({timeOffset: 180 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        uint256 escrowId = vault.createEscrow(
+            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment()
+        );
+
+        assertTrue(vault.isStricterThanDefault(escrowId));
+        assertEq(vault.getVestingStrictnessLevel(escrowId), 2); // stricter
+    }
+
+    function test_IsStricter_ShorterDuration_False() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](2);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 5000});
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 14 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        uint256 escrowId = vault.createEscrow(
+            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment()
+        );
+
+        assertFalse(vault.isStricterThanDefault(escrowId));
+        assertEq(vault.getVestingStrictnessLevel(escrowId), 0); // looser (duration < 90d)
+    }
+
+    function test_IsStricter_HigherRatios_False() public {
+        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 5000}); // 50% > 10%
+        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 8000}); // 80% > 30%
+        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
+
+        vm.prank(hook);
+        uint256 escrowId = vault.createEscrow(
+            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment()
+        );
+
+        assertFalse(vault.isStricterThanDefault(escrowId));
+        assertEq(vault.getVestingStrictnessLevel(escrowId), 0); // looser (higher % at early milestones)
+    }
 }

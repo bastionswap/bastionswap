@@ -319,7 +319,11 @@ contract EscrowVaultFuzzTest is Test {
             uint256 stepSeed = uint256(keccak256(abi.encode(seed, i)));
 
             // timeOffset: strictly increasing, 1 hour - 365 days range per step
-            uint40 timeGap = uint40(bound(stepSeed, 1 hours, 90 days));
+            // For the last (or only) step, ensure >= 7 days minimum vesting duration
+            uint40 minGap = (i == len - 1 && prevTime < 7 days)
+                ? uint40(7 days - prevTime)
+                : 1 hours;
+            uint40 timeGap = uint40(bound(stepSeed, minGap, 90 days));
             uint40 timeOffset = prevTime + timeGap;
 
             uint16 bps;
@@ -611,21 +615,22 @@ contract EscrowVaultFuzzTest is Test {
         assertLe(expected, amount, "rounding: exceeds total");
 
         // Verify the contract matches when we construct a 1-step schedule at the bps
+        // Use 7 days minimum to satisfy MIN_VESTING_DURATION
         IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](1);
-        schedule[0] = IEscrowVault.VestingStep({timeOffset: 1 days, basisPoints: 10_000});
+        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 10_000});
 
         // For sub-10000 bps we need a 2-step schedule
         if (bps < 10_000) {
             schedule = new IEscrowVault.VestingStep[](2);
-            schedule[0] = IEscrowVault.VestingStep({timeOffset: 1 days, basisPoints: bps});
-            schedule[1] = IEscrowVault.VestingStep({timeOffset: 2 days, basisPoints: 10_000});
+            schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: bps});
+            schedule[1] = IEscrowVault.VestingStep({timeOffset: 14 days, basisPoints: 10_000});
         }
 
         PoolId poolId = PoolId.wrap(bytes32(uint256(keccak256(abi.encode(amount, bps)))));
         uint256 escrowId = _createEscrow(poolId, amount, schedule);
 
         // Warp to exactly the first step
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(block.timestamp + 7 days);
         uint256 vested = vault.calculateVestedAmount(escrowId);
 
         if (bps == 10_000) {
