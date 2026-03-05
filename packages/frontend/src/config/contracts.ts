@@ -6,6 +6,7 @@ export const CONTRACTS = {
     TriggerOracle: "0x04D369129F5722E8d4a9621F0AE8247BE487Ec82",
     ReputationEngine: "0x0a5a7346c64FC65Ce1AdFA21eA98931bd4A38b4E",
     PoolManager: "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408",
+    BastionRouter: "0x3E5f4e75C04f8e7e692d0b6360752ce639C55033",
   },
 } as const;
 

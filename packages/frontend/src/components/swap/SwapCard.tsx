@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useAccount } from "wagmi";
+import { parseUnits } from "viem";
+import { baseSepolia } from "wagmi/chains";
 import { ConnectKitButton } from "connectkit";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { TokenIcon } from "@/components/ui/TokenIcon";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { TokenSelectModal } from "./TokenSelectModal";
 import { useExecuteSwap } from "@/hooks/useSwap";
+import { getContracts } from "@/config/contracts";
 
 interface Token {
   address: string;
@@ -17,19 +21,61 @@ interface Token {
 
 export function SwapCard() {
   const { isConnected } = useAccount();
+  const contracts = getContracts(baseSepolia.id);
   const [tokenIn, setTokenIn] = useState<Token | null>(null);
   const [tokenOut, setTokenOut] = useState<Token | null>(null);
   const [amountIn, setAmountIn] = useState("");
   const [slippage, setSlippage] = useState("0.5");
   const [showTokenSelect, setShowTokenSelect] = useState<"in" | "out" | null>(null);
   const [showSlippage, setShowSlippage] = useState(false);
-  const { isWriting, isConfirming, isSuccess, error } = useExecuteSwap();
+  const { swap, isWriting, isConfirming, isSuccess, error, reset } = useExecuteSwap();
 
   const swapDirection = () => {
     setTokenIn(tokenOut);
     setTokenOut(tokenIn);
     setAmountIn("");
   };
+
+  // Compute PoolKey parameters
+  const poolKey = useMemo(() => {
+    if (!tokenIn || !tokenOut || !contracts) return null;
+
+    const addrA = tokenIn.address.toLowerCase();
+    const addrB = tokenOut.address.toLowerCase();
+    const [currency0, currency1] =
+      addrA < addrB
+        ? [tokenIn.address, tokenOut.address]
+        : [tokenOut.address, tokenIn.address];
+
+    const zeroForOne = tokenIn.address.toLowerCase() === currency0.toLowerCase();
+
+    return {
+      currency0: currency0 as `0x${string}`,
+      currency1: currency1 as `0x${string}`,
+      fee: 3000,
+      tickSpacing: 60,
+      hooks: contracts.BastionHook as `0x${string}`,
+      zeroForOne,
+    };
+  }, [tokenIn, tokenOut, contracts]);
+
+  const handleSwap = () => {
+    if (!poolKey || !amountIn || parseFloat(amountIn) <= 0) return;
+
+    const parsedAmountIn = parseUnits(amountIn, 18);
+    const slippageBps = Math.floor(parseFloat(slippage) * 100);
+    const minAmountOut = (parsedAmountIn * BigInt(10000 - slippageBps)) / 10000n;
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800); // 30 min
+
+    swap({
+      ...poolKey,
+      amountIn: parsedAmountIn,
+      minAmountOut,
+      deadline,
+    });
+  };
+
+  const canSwap = isConnected && tokenIn && tokenOut && amountIn && parseFloat(amountIn) > 0;
 
   return (
     <>
@@ -164,7 +210,7 @@ export function SwapCard() {
           <div className="mt-3 flex items-center gap-2 px-1">
             <Badge variant="protected">Protected</Badge>
             <span className="text-xs text-gray-500">
-              Bastion pool available for this pair
+              Bastion pool with insurance &amp; escrow protection
             </span>
           </div>
         )}
@@ -187,24 +233,45 @@ export function SwapCard() {
             <button disabled className="w-full rounded-xl bg-surface-light py-4 text-base font-semibold text-gray-500 cursor-not-allowed">
               Enter Amount
             </button>
+          ) : isWriting || isConfirming ? (
+            <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2">
+              <LoadingSpinner size="sm" />
+              {isWriting ? "Confirm in wallet..." : "Swapping..."}
+            </button>
           ) : (
-            <div>
-              <button
-                disabled
-                className="w-full rounded-xl bg-surface-light py-4 text-base font-semibold text-gray-500 cursor-not-allowed"
-              >
-                Swap (Testnet Coming Soon)
-              </button>
-              <p className="mt-2 text-center text-xs text-gray-600">
-                Swap router deployment in progress. Use CLI for testnet swaps.
-              </p>
-            </div>
+            <button
+              onClick={handleSwap}
+              className="btn-primary w-full py-4 text-base"
+            >
+              Swap
+            </button>
           )}
         </div>
 
+        {/* Status messages */}
+        {isSuccess && (
+          <div className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+            <svg className="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-sm text-emerald-400">Swap successful!</span>
+          </div>
+        )}
+
         {error && (
-          <p className="mt-2 text-center text-sm text-red-400">
-            {error.message.slice(0, 100)}
+          <div className="mt-3 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2">
+            <p className="text-sm text-red-400">
+              {error.message.includes("User rejected")
+                ? "Transaction rejected"
+                : error.message.slice(0, 120)}
+            </p>
+          </div>
+        )}
+
+        {/* Approval note */}
+        {tokenIn && tokenOut && isConnected && (
+          <p className="mt-3 text-center text-[10px] text-gray-600">
+            You must approve token spending to BastionRouter before your first swap.
           </p>
         )}
       </Card>

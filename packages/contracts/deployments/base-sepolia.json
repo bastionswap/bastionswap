@@ -9,7 +9,8 @@
     "EscrowVault": "0x2C01998931380d7F4f3F292aa1023B51CDeA9dcD",
     "InsurancePool": "0x4EFE9E50d5bA7774459bea20f656aBBFd1887a98",
     "TriggerOracle": "0x04D369129F5722E8d4a9621F0AE8247BE487Ec82",
-    "ReputationEngine": "0x0a5a7346c64FC65Ce1AdFA21eA98931bd4A38b4E"
+    "ReputationEngine": "0x0a5a7346c64FC65Ce1AdFA21eA98931bd4A38b4E",
+    "BastionRouter": "0x3E5f4e75C04f8e7e692d0b6360752ce639C55033"
   },
   "external": {
     "PoolManager": "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408",
@@ -27,7 +28,7 @@
     "status": "PASSED",
     "gasUsed": "0.001037 ETH",
     "escrowLocked": "1000 BTT",
-    "insuranceBalance": "100000000000000 wei",
+    "insuranceBalance": "200000000000000 wei",
     "reputationScore": 202
   },
   "subgraph": {

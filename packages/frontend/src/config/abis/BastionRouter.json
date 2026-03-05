@@ -1,0 +1,105 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      { "name": "_poolManager", "type": "address", "internalType": "contract IPoolManager" }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "poolManager",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "address", "internalType": "contract IPoolManager" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "swapExactInput",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "tuple",
+        "internalType": "struct PoolKey",
+        "components": [
+          { "name": "currency0", "type": "address", "internalType": "Currency" },
+          { "name": "currency1", "type": "address", "internalType": "Currency" },
+          { "name": "fee", "type": "uint24", "internalType": "uint24" },
+          { "name": "tickSpacing", "type": "int24", "internalType": "int24" },
+          { "name": "hooks", "type": "address", "internalType": "contract IHooks" }
+        ]
+      },
+      { "name": "zeroForOne", "type": "bool", "internalType": "bool" },
+      { "name": "amountIn", "type": "uint256", "internalType": "uint256" },
+      { "name": "minAmountOut", "type": "uint256", "internalType": "uint256" },
+      { "name": "deadline", "type": "uint256", "internalType": "uint256" }
+    ],
+    "outputs": [
+      { "name": "amountOut", "type": "uint256", "internalType": "uint256" }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "swapExactOutput",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "tuple",
+        "internalType": "struct PoolKey",
+        "components": [
+          { "name": "currency0", "type": "address", "internalType": "Currency" },
+          { "name": "currency1", "type": "address", "internalType": "Currency" },
+          { "name": "fee", "type": "uint24", "internalType": "uint24" },
+          { "name": "tickSpacing", "type": "int24", "internalType": "int24" },
+          { "name": "hooks", "type": "address", "internalType": "contract IHooks" }
+        ]
+      },
+      { "name": "zeroForOne", "type": "bool", "internalType": "bool" },
+      { "name": "amountOut", "type": "uint256", "internalType": "uint256" },
+      { "name": "maxAmountIn", "type": "uint256", "internalType": "uint256" },
+      { "name": "deadline", "type": "uint256", "internalType": "uint256" }
+    ],
+    "outputs": [
+      { "name": "amountIn", "type": "uint256", "internalType": "uint256" }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "unlockCallback",
+    "inputs": [{ "name": "data", "type": "bytes", "internalType": "bytes" }],
+    "outputs": [{ "name": "", "type": "bytes", "internalType": "bytes" }],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "error",
+    "name": "Expired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyPoolManager",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientOutput",
+    "inputs": [
+      { "name": "amountOut", "type": "uint256" },
+      { "name": "minAmountOut", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ExcessiveInput",
+    "inputs": [
+      { "name": "amountIn", "type": "uint256" },
+      { "name": "maxAmountIn", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  }
+]

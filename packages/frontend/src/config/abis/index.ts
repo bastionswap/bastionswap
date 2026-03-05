@@ -4,6 +4,7 @@ import InsurancePoolABI from "./InsurancePool.json";
 import TriggerOracleABI from "./TriggerOracle.json";
 import ReputationEngineABI from "./ReputationEngine.json";
 import PoolManagerABI from "./PoolManager.json";
+import BastionRouterABI from "./BastionRouter.json";
 
 export {
   BastionHookABI,
@@ -12,4 +13,5 @@ export {
   TriggerOracleABI,
   ReputationEngineABI,
   PoolManagerABI,
+  BastionRouterABI,
 };
