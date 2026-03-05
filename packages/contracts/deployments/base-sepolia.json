@@ -16,6 +16,20 @@
     "Permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "WETH": "0x4200000000000000000000000000000000000006"
   },
+  "testInfra": {
+    "testToken": "0x1Afed1eC73e27a7ffbc24fE40Bcc6c3442D8709e",
+    "baseToken": "0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21",
+    "lpRouter": "0x6c1760dFDb8406a39829f9c671946bD81CDAb310",
+    "swapRouter": "0x5c85610a3b98221c203B4f615196601f2282a668",
+    "testPoolId": "0x86faed6bb090dc8c4f13903862010bd13308e7abe103046ef54cb5846e86e94e"
+  },
+  "e2e": {
+    "status": "PASSED",
+    "gasUsed": "0.001037 ETH",
+    "escrowLocked": "1000 BTT",
+    "insuranceBalance": "100000000000000 wei",
+    "reputationScore": 202
+  },
   "subgraph": {
     "name": "bastionswap-base-sepolia",
     "url": "https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest"
