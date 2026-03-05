@@ -282,17 +282,22 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario1_rugPullTrigger() internal {
+        // Warp past vesting so issuer can actually remove LP (needed to trigger oracle)
+        vm.warp(block.timestamp + 91 days);
+
         uint256 totalLP = _getTotalLP();
+        uint128 removable = escrowVault.getRemovableLiquidity(_escrowId);
+        assertGt(removable, 0, "issuer should have removable LP after full vesting");
 
         vm.expectEmit(true, false, false, false, address(hook));
-        emit BastionHook.LPRemovalReported(_poolId, ISSUER_LP, totalLP);
+        emit BastionHook.LPRemovalReported(_poolId, removable, totalLP);
 
-        // Remove LP using the same router as the issuer — must pass hookData identifying the user.
-        // address(this) is NOT the issuer, so vesting is not enforced, but the removal is reported.
+        // Issuer removes their fully-vested LP — this triggers the rug-pull detection
+        vm.prank(issuerAddr);
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
-            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(ISSUER_LP), salt: 0}),
-            abi.encode(address(this))
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(removable)), salt: 0}),
+            abi.encode(issuerAddr)
         );
 
         (bool exists, ITriggerOracle.TriggerType tt,) = triggerOracle.getPendingTrigger(_poolId);
@@ -317,10 +322,11 @@ contract E2E_ScenariosTest is Test, Deployers {
         // Verify trigger state
         assertTrue(triggerOracle.checkTrigger(_poolId).triggered);
 
-        // Escrow locked down — no LP removal possible
+        // Escrow locked down — no further LP removal possible
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
         assertEq(s.remainingLiquidity, 0, "escrow remaining should be 0 after lockdown");
-        assertEq(s.removedLiquidity, 0, "no LP was removed before lockdown");
+        // Issuer removed all vested LP before lockdown was executed
+        assertEq(s.removedLiquidity, s.totalLiquidity, "issuer removed all LP before lockdown");
         assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0, "removable should be 0 after lockdown");
 
         console.log("  Escrow locked down (LP removal permanently blocked)");

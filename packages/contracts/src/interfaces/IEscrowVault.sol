@@ -50,6 +50,12 @@ interface IEscrowVault {
     /// @param liquidity Total liquidity locked
     event EscrowCreated(uint256 indexed escrowId, PoolId indexed poolId, address indexed issuer, uint128 liquidity);
 
+    /// @notice Emitted when additional liquidity is added to an escrow.
+    /// @param escrowId Escrow identifier
+    /// @param liquidityAdded Amount of liquidity added
+    /// @param newTotal New total liquidity after addition
+    event LiquidityAdded(uint256 indexed escrowId, uint128 liquidityAdded, uint128 newTotal);
+
     /// @notice Emitted when LP removal is recorded for the issuer.
     /// @param escrowId Escrow identifier
     /// @param liquidityRemoved Amount of liquidity removed in this transaction
@@ -81,6 +87,17 @@ interface IEscrowVault {
         VestingStep[] calldata vestingSchedule,
         IssuerCommitment calldata commitment
     ) external returns (uint256 escrowId);
+
+    /// @notice Adds liquidity to an existing escrow (subsequent issuer LP additions).
+    /// @dev Called by BastionHook when the issuer adds more LP.
+    /// @param escrowId Identifier of the escrow position
+    /// @param liquidity Amount of liquidity to add
+    function addLiquidity(uint256 escrowId, uint128 liquidity) external;
+
+    /// @notice Returns the total liquidity locked in an escrow position.
+    /// @param escrowId Identifier of the escrow position
+    /// @return totalLiquidity Total liquidity locked
+    function getTotalLiquidity(uint256 escrowId) external view returns (uint128 totalLiquidity);
 
     /// @notice Records an LP removal by the issuer. Called by BastionHook.
     /// @dev Enforces daily withdraw limits and updates removedLiquidity.

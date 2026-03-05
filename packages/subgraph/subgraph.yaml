@@ -86,6 +86,8 @@ dataSources:
       eventHandlers:
         - event: EscrowCreated(indexed uint256,indexed bytes32,indexed address,uint128)
           handler: handleEscrowVaultCreated
+        - event: LiquidityAdded(indexed uint256,uint128,uint128)
+          handler: handleLiquidityAdded
         - event: LPRemovalRecorded(indexed uint256,uint128)
           handler: handleLPRemovalRecorded
         - event: Lockdown(indexed uint256,indexed uint8)

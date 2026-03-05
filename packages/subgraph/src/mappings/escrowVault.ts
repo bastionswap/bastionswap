@@ -1,6 +1,7 @@
 import { BigDecimal, BigInt } from "@graphprotocol/graph-ts";
 import {
   EscrowCreated,
+  LiquidityAdded,
   LPRemovalRecorded,
   Lockdown,
   CommitmentSet,
@@ -55,6 +56,23 @@ export function handleEscrowVaultCreated(event: EscrowCreated): void {
     toDecimal(BigInt.fromI64(event.params.liquidity))
   );
   stats.save();
+}
+
+export function handleLiquidityAdded(event: LiquidityAdded): void {
+  let escrowId = event.params.escrowId.toHexString();
+  let escrow = Escrow.load(escrowId);
+  if (escrow != null) {
+    let newTotal = toDecimal(BigInt.fromI64(event.params.newTotal));
+    escrow.totalLiquidity = newTotal;
+    escrow.remainingLiquidity = newTotal.minus(escrow.removedLiquidity);
+    escrow.save();
+
+    // Update protocol stats
+    let addedAmount = toDecimal(BigInt.fromI64(event.params.liquidityAdded));
+    let stats = getOrCreateProtocolStats();
+    stats.totalEscrowLocked = stats.totalEscrowLocked.plus(addedAmount);
+    stats.save();
+  }
 }
 
 export function handleLPRemovalRecorded(event: LPRemovalRecorded): void {

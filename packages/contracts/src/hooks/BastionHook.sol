@@ -55,12 +55,18 @@ contract BastionHook is BaseTestHooks {
     /// @dev Cached insurance fee rate (basis points) to avoid cross-contract call
     uint16 internal _cachedFeeRate;
 
+    // ─── Constants ──────────────────────────────────────────────────────
+
+    /// @notice Minimum initial liquidity required for issuer's first LP addition (1 ETH worth)
+    uint128 public constant MIN_INITIAL_LIQUIDITY = 1e18;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyPoolManager();
     error InvalidHookData();
     error ExceedsVestedAmount(uint128 requested, uint128 removable);
     error MustIdentifyUser();
+    error BelowMinInitialLiquidity(uint128 provided, uint128 required);
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -131,20 +137,35 @@ contract BastionHook is BaseTestHooks {
         bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4) {
         PoolId poolId = key.toId();
+        uint128 liquidity = params.liquidityDelta > 0
+            ? uint128(uint256(int256(params.liquidityDelta)))
+            : 0;
 
-        // If no issuer registered yet, this is the first LP → register as issuer
         if (_issuers[poolId] == address(0) && hookData.length > 0) {
-            _registerIssuerAndCreateEscrow(poolId, key, sender, uint128(uint256(int256(params.liquidityDelta))), hookData);
+            // First LP → register as issuer, enforce minimum liquidity
+            if (liquidity < MIN_INITIAL_LIQUIDITY) {
+                revert BelowMinInitialLiquidity(liquidity, MIN_INITIAL_LIQUIDITY);
+            }
+            _registerIssuerAndCreateEscrow(poolId, key, sender, liquidity, hookData);
+        } else if (liquidity > 0 && sender == _issuerLPOwner[poolId]) {
+            // Subsequent issuer LP addition via same router → decode hookData to identify user
+            if (hookData.length > 0) {
+                address user = abi.decode(hookData, (address));
+                if (user == _issuers[poolId]) {
+                    // All issuer LP additions get locked in escrow
+                    uint256 escrowId = _escrowIds[poolId];
+                    escrowVault.addLiquidity(escrowId, liquidity);
+                }
+            }
         }
 
         // Track total liquidity
-        if (params.liquidityDelta > 0) {
-            uint256 addedLP = uint256(int256(params.liquidityDelta));
-            _totalLiquidity[poolId] += addedLP;
+        if (liquidity > 0) {
+            _totalLiquidity[poolId] += liquidity;
 
             // RISK-4: Report LP addition for flash-loan inflation tracking
             if (_issuers[poolId] != address(0)) {
-                try triggerOracle.reportLPAddition(poolId, addedLP) {} catch {
+                try triggerOracle.reportLPAddition(poolId, liquidity) {} catch {
                     emit ExternalCallFailed("TriggerOracle.reportLPAddition", poolId);
                 }
             }
@@ -154,6 +175,7 @@ contract BastionHook is BaseTestHooks {
     }
 
     /// @notice Called before liquidity is removed. Enforces vesting for issuer's LP.
+    ///         Non-issuer LP is completely free — no restrictions.
     function beforeRemoveLiquidity(
         address sender,
         PoolKey calldata key,
@@ -161,51 +183,58 @@ contract BastionHook is BaseTestHooks {
         bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4) {
         PoolId poolId = key.toId();
+        address issuer = _issuers[poolId];
+
+        // No escrow on this pool → pass through
+        if (issuer == address(0)) {
+            return IHooks.beforeRemoveLiquidity.selector;
+        }
+
         uint256 removeAmount = params.liquidityDelta < 0
             ? uint256(uint128(int128(-params.liquidityDelta)))
             : 0;
 
-        if (removeAmount > 0) {
-            address issuer = _issuers[poolId];
-
-            // Enforce vesting if this pool has an escrow
-            if (issuer != address(0) && sender == _issuerLPOwner[poolId]) {
-                // This removal is from the issuer's LP position (same router that created it)
-                if (hookData.length == 0) revert MustIdentifyUser();
-
-                address user = abi.decode(hookData, (address));
-                if (user == issuer) {
-                    // Issuer is removing LP — enforce vesting
-                    uint256 escrowId = _escrowIds[poolId];
-                    uint128 liquidityToRemove = uint128(removeAmount);
-                    uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
-                    if (liquidityToRemove > removable) {
-                        revert ExceedsVestedAmount(liquidityToRemove, removable);
-                    }
-                    escrowVault.recordLPRemoval(escrowId, liquidityToRemove);
-                }
-                // else: non-issuer using same router → allow
-            }
-            // else: different router or no escrow → allow
-
-            uint256 totalLP = _totalLiquidity[poolId];
-
-            // Update tracked liquidity before external call (CEI pattern)
-            if (removeAmount <= totalLP) {
-                _totalLiquidity[poolId] = totalLP - removeAmount;
-            } else {
-                _totalLiquidity[poolId] = 0;
-            }
-
-            // Report LP removal to TriggerOracle (for all LPs, but especially issuers)
-            if (issuer != address(0) && totalLP > 0) {
-                try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
-                    emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
-                }
-            }
-
-            emit LPRemovalReported(poolId, removeAmount, totalLP);
+        if (removeAmount == 0) {
+            return IHooks.beforeRemoveLiquidity.selector;
         }
+
+        // Check if this is the issuer removing LP
+        bool isIssuerRemoval = false;
+        if (sender == _issuerLPOwner[poolId]) {
+            if (hookData.length == 0) revert MustIdentifyUser();
+            address user = abi.decode(hookData, (address));
+            if (user == issuer) {
+                isIssuerRemoval = true;
+                // Enforce vesting
+                uint256 escrowId = _escrowIds[poolId];
+                uint128 liquidityToRemove = uint128(removeAmount);
+                uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
+                if (liquidityToRemove > removable) {
+                    revert ExceedsVestedAmount(liquidityToRemove, removable);
+                }
+                escrowVault.recordLPRemoval(escrowId, liquidityToRemove);
+            }
+            // else: non-issuer using same router → allow freely
+        }
+        // else: different router → different position → allow freely
+
+        uint256 totalLP = _totalLiquidity[poolId];
+
+        // Update tracked liquidity (CEI pattern)
+        if (removeAmount <= totalLP) {
+            _totalLiquidity[poolId] = totalLP - removeAmount;
+        } else {
+            _totalLiquidity[poolId] = 0;
+        }
+
+        // Report LP removal to TriggerOracle ONLY for issuer removals
+        if (isIssuerRemoval && totalLP > 0) {
+            try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
+                emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
+            }
+        }
+
+        emit LPRemovalReported(poolId, removeAmount, totalLP);
 
         return IHooks.beforeRemoveLiquidity.selector;
     }

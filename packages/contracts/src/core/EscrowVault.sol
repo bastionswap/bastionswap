@@ -139,6 +139,29 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @inheritdoc IEscrowVault
+    function addLiquidity(uint256 escrowId, uint128 liquidity)
+        external
+        onlyHook
+        nonReentrant
+    {
+        if (liquidity == 0) revert ZeroAmount();
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) revert EscrowNotFound();
+        if (escrow.isTriggered) revert EscrowTriggered();
+
+        escrow.totalLiquidity += liquidity;
+
+        emit LiquidityAdded(escrowId, liquidity, escrow.totalLiquidity);
+    }
+
+    /// @inheritdoc IEscrowVault
+    function getTotalLiquidity(uint256 escrowId) external view returns (uint128) {
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) return 0;
+        return escrow.totalLiquidity;
+    }
+
+    /// @inheritdoc IEscrowVault
     function recordLPRemoval(uint256 escrowId, uint128 liquidityRemoved)
         external
         onlyHook

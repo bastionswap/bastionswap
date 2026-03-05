@@ -395,6 +395,19 @@ export default function CreatePoolPage() {
                 </p>
               </div>
             )}
+
+            {/* Minimum liquidity warning */}
+            {ethAmount && parseFloat(ethAmount) > 0 && parseFloat(ethAmount) < 1 && (
+              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 flex items-start gap-2.5">
+                <svg className="h-5 w-5 text-red-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-red-700">Minimum 1 ETH required</p>
+                  <p className="text-xs text-red-600/70">Bastion pools require a minimum initial liquidity of 1 ETH to prevent spam.</p>
+                </div>
+              </div>
+            )}
           </div>
           <div className="mt-5 flex gap-3">
             <button
@@ -405,7 +418,7 @@ export default function CreatePoolPage() {
             </button>
             <button
               onClick={() => setStep(3)}
-              disabled={!ethAmount || !tokenAmount}
+              disabled={!ethAmount || !tokenAmount || parseFloat(ethAmount) < 1}
               className="btn-primary flex-1 py-3.5 disabled:opacity-40"
             >
               Continue

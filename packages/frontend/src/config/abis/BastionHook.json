@@ -36,6 +36,19 @@
   },
   {
     "type": "function",
+    "name": "MIN_INITIAL_LIQUIDITY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "afterAddLiquidity",
     "inputs": [
       {
@@ -1173,6 +1186,22 @@
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "BelowMinInitialLiquidity",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "required",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
   },
   {
     "type": "error",
