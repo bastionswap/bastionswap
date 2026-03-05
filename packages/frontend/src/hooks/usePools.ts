@@ -343,6 +343,20 @@ function useLocalPoolOnChain() {
               functionName: "encodeScoreData",
               args: [issuerAddr],
             },
+            // 3: EscrowVault.getVestingSchedule(escrowId)
+            {
+              address: contracts.EscrowVault as `0x${string}`,
+              abi: EscrowVaultABI,
+              functionName: "getVestingSchedule",
+              args: [escrowId],
+            },
+            // 4: EscrowVault.getEscrowInfo(escrowId)
+            {
+              address: contracts.EscrowVault as `0x${string}`,
+              abi: EscrowVaultABI,
+              functionName: "getEscrowInfo",
+              args: [escrowId],
+            },
           ]
         : undefined,
     query: { enabled: !!contracts && escrowId !== undefined && !!issuerAddr },
@@ -385,6 +399,16 @@ function useLocalPoolOnChain() {
     } catch { /* ignore */ }
   }
 
+  // Parse vesting schedule + escrow info
+  const vestingSteps = data2?.[3]?.status === "success"
+    ? (data2[3].result as { timeOffset: bigint; basisPoints: number }[])
+    : null;
+  const escrowInfo = data2?.[4]?.status === "success"
+    ? (data2[4].result as [bigint, { dailyWithdrawLimit: number; lockDuration: bigint; maxSellPercent: number }])
+    : null;
+  const escrowCreatedAt = escrowInfo ? Number(escrowInfo[0]) : 0;
+  const escrowCommitment = escrowInfo ? escrowInfo[1] : null;
+
   const pool: SubgraphPool | null =
     isLoading || !contracts
       ? null
@@ -413,6 +437,21 @@ function useLocalPoolOnChain() {
                 released: formatUnits(escrowStatus.released, 18),
                 remaining: formatUnits(escrowStatus.remaining, 18),
                 isTriggered: false,
+                createdAt: escrowCreatedAt > 0 ? escrowCreatedAt.toString() : undefined,
+                commitment: escrowCommitment
+                  ? {
+                      dailyWithdrawLimit: escrowCommitment.dailyWithdrawLimit.toString(),
+                      lockDuration: Number(escrowCommitment.lockDuration).toString(),
+                      maxSellPercent: escrowCommitment.maxSellPercent.toString(),
+                    }
+                  : undefined,
+                vestingSchedule: vestingSteps
+                  ? vestingSteps.map((s, i) => ({
+                      id: `${escrowId}-${i}`,
+                      timestamp: (escrowCreatedAt + Number(s.timeOffset)).toString(),
+                      basisPoints: Number(s.basisPoints),
+                    }))
+                  : undefined,
               }
             : null,
           insurancePool: insuranceStatus

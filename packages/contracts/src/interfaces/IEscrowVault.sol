@@ -135,4 +135,15 @@ interface IEscrowVault {
     /// @param escrowId Identifier of the escrow position
     /// @return level 2 = stricter than default, 1 = same as default, 0 = looser than default
     function getVestingStrictnessLevel(uint256 escrowId) external view returns (uint8 level);
+
+    /// @notice Returns the vesting schedule for an escrow position.
+    /// @param escrowId Identifier of the escrow position
+    /// @return schedule Array of vesting steps
+    function getVestingSchedule(uint256 escrowId) external view returns (VestingStep[] memory schedule);
+
+    /// @notice Returns the escrow's creation timestamp and commitment parameters.
+    /// @param escrowId Identifier of the escrow position
+    /// @return createdAt Timestamp when the escrow was created
+    /// @return commitment The issuer's commitment parameters
+    function getEscrowInfo(uint256 escrowId) external view returns (uint40 createdAt, IssuerCommitment memory commitment);
 }

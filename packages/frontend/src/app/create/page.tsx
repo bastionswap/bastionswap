@@ -10,6 +10,7 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatBps, formatDuration } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
 import { PoolManagerABI } from "@/config/abis";
+import { VestingChart } from "@/components/ui/VestingChart";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -440,19 +441,24 @@ export default function CreatePoolPage() {
               </div>
             )}
 
-            {/* Milestone Preview for Presets */}
-            {vestingMode !== "custom" && (
-              <div className="rounded-xl bg-gray-50 p-4 mb-4">
-                <div className="space-y-2">
-                  {activeMilestones.map((m, i) => (
-                    <div key={i} className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">Day {m.days}</span>
-                      <span className="font-medium text-gray-900 tabular-nums">{m.bps / 100}% unlocked</span>
-                    </div>
-                  ))}
-                </div>
+            {/* Vesting Chart */}
+            <div className="rounded-xl bg-gray-50 p-4 mb-4">
+              <VestingChart
+                milestones={activeMilestones}
+                defaultMilestones={vestingMode !== "standard" ? VESTING_PRESETS.standard : undefined}
+                label={vestingMode === "custom" ? "Custom" : vestingMode.charAt(0).toUpperCase() + vestingMode.slice(1)}
+                height={160}
+              />
+              {/* Milestone list below chart */}
+              <div className="mt-3 pt-3 border-t border-gray-200 space-y-1.5">
+                {activeMilestones.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">Day {m.days}</span>
+                    <span className="font-medium text-gray-900 tabular-nums">{m.bps / 100}% unlocked</span>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
 
             {/* Strictness Indicator */}
             {strictness === "stricter" && (

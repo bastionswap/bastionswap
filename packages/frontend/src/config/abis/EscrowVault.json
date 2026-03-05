@@ -184,6 +184,47 @@
   },
   {
     "type": "function",
+    "name": "getEscrowInfo",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "createdAt",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "commitment",
+        "type": "tuple",
+        "internalType": "struct IEscrowVault.IssuerCommitment",
+        "components": [
+          {
+            "name": "dailyWithdrawLimit",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "lockDuration",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "maxSellPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getEscrowStatus",
     "inputs": [
       {
@@ -238,6 +279,37 @@
         "name": "endTime",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getVestingSchedule",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple[]",
+        "internalType": "struct IEscrowVault.VestingStep[]",
+        "components": [
+          {
+            "name": "timeOffset",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "basisPoints",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
       }
     ],
     "stateMutability": "view"

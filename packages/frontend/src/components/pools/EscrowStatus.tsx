@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { Badge } from "@/components/ui/Badge";
+import { VestingChart } from "@/components/ui/VestingChart";
 import { formatBps } from "@/lib/formatters";
 
 interface EscrowStatusProps {
@@ -544,9 +545,22 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: 
         </div>
       )}
 
-      {/* Milestone list */}
+      {/* Vesting Chart + Milestone list */}
       {!escrow.isTriggered && sortedMilestones && sortedMilestones.length > 0 && (
         <div className="border-t border-subtle px-6 py-4">
+          <VestingChart
+            milestones={sortedMilestones.map((m) => ({
+              days: Math.round((parseInt(m.timestamp) - createdAt) / 86400),
+              bps: m.basisPoints,
+            }))}
+            defaultMilestones={[
+              { days: 7, bps: 1000 },
+              { days: 30, bps: 3000 },
+              { days: 90, bps: 10000 },
+            ]}
+            label="This pool"
+            height={160}
+          />
           <MilestoneList milestones={sortedMilestones} total={total} tokenLabel={tokenLabel} />
         </div>
       )}

@@ -386,6 +386,21 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         return _getStrictnessLevel(escrowId);
     }
 
+    /// @inheritdoc IEscrowVault
+    function getVestingSchedule(uint256 escrowId) external view returns (VestingStep[] memory) {
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) revert EscrowNotFound();
+        return _vestingSchedules[escrowId];
+    }
+
+    /// @inheritdoc IEscrowVault
+    function getEscrowInfo(uint256 escrowId) external view returns (uint40 createdAt, IssuerCommitment memory commitment) {
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) revert EscrowNotFound();
+        createdAt = escrow.createdAt;
+        commitment = escrow.commitment;
+    }
+
     /// @dev Returns 2 = stricter, 1 = same as default, 0 = looser
     function _getStrictnessLevel(uint256 escrowId) internal view returns (uint8) {
         VestingStep[] storage schedule = _vestingSchedules[escrowId];
