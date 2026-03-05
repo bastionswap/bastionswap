@@ -77,7 +77,7 @@ contract GasBenchmarkTest is Test, Deployers {
         bytes memory creationCode = type(BastionHook).creationCode;
         bytes memory constructorArgs = abi.encode(
             address(manager), address(escrowVault), address(insurancePool),
-            address(triggerOracle), reputationAddr
+            address(triggerOracle), reputationAddr, governance, address(0), address(0)
         );
         bytes memory bytecode = abi.encodePacked(creationCode, constructorArgs);
         address deployed;
@@ -87,6 +87,10 @@ contract GasBenchmarkTest is Test, Deployers {
 
         issuedToken = new MockERC20("Issued", "ISS", 18);
         baseToken = new MockERC20("Base", "BASE", 18);
+
+        // Register baseToken as allowed base token (storage lost by vm.etch)
+        vm.prank(governance);
+        hook.addBaseToken(address(baseToken), 0);
 
         (Currency c0, Currency c1) = SortTokens.sort(issuedToken, baseToken);
         currency0 = c0;

@@ -38,7 +38,7 @@ contract Deploy is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        (address poolManager, address governance, address guardian) = _loadConfig(deployer);
+        (address poolManager, address governance, address guardian, address weth, address usdc) = _loadConfig(deployer);
 
         console2.log("=== BastionSwap Deployment ===");
         console2.log("Chain ID:", block.chainid);
@@ -47,7 +47,7 @@ contract Deploy is Script {
 
         // ─── Phase 1: Pre-compute addresses (off-chain) ─────────────────
 
-        Addresses memory a = _precompute(deployer, poolManager);
+        Addresses memory a = _precompute(deployer, poolManager, governance, weth, usdc);
 
         console2.log("Hook address:", a.hook);
         console2.log("Salt:", vm.toString(a.salt));
@@ -103,7 +103,11 @@ contract Deploy is Script {
 
     // ─── Internal Helpers ───────────────────────────────────────────────
 
-    function _precompute(address deployer, address poolManager) internal view returns (Addresses memory a) {
+    function _precompute(address deployer, address poolManager, address governance, address weth, address usdc)
+        internal
+        view
+        returns (Addresses memory a)
+    {
         uint64 nonce = vm.getNonce(deployer);
         console2.log("Deployer nonce:", nonce);
 
@@ -117,7 +121,7 @@ contract Deploy is Script {
         // Build BastionHook creation bytecode with constructor args
         a.hookCreationCode = abi.encodePacked(
             type(BastionHook).creationCode,
-            abi.encode(poolManager, a.escrow, a.insurance, a.trigger, a.reputation)
+            abi.encode(poolManager, a.escrow, a.insurance, a.trigger, a.reputation, governance, weth, usdc)
         );
 
         // Mine CREATE2 salt for hook flag matching
@@ -130,16 +134,19 @@ contract Deploy is Script {
     function _loadConfig(address deployer)
         internal
         view
-        returns (address poolManager, address governance, address guardian)
+        returns (address poolManager, address governance, address guardian, address weth, address usdc)
     {
         if (block.chainid == 84532) {
             poolManager = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
+            usdc = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
         } else if (block.chainid == 8453) {
             poolManager = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
+            usdc = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
         } else {
             revert("Unsupported chain");
         }
 
+        weth = 0x4200000000000000000000000000000000000006; // Same on all Base chains
         governance = vm.envOr("GOVERNANCE", deployer);
         guardian = vm.envOr("GUARDIAN", deployer);
     }

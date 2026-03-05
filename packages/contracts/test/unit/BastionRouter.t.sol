@@ -83,7 +83,7 @@ contract BastionRouterTest is Test, Deployers {
 
         bytes memory bytecode = abi.encodePacked(
             type(BastionHook).creationCode,
-            abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr)
+            abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr, governance, address(0), address(0))
         );
         address deployed;
         assembly { deployed := create(0, add(bytecode, 0x20), mload(bytecode)) }
@@ -93,6 +93,10 @@ contract BastionRouterTest is Test, Deployers {
         // Deploy tokens
         issuedToken = new MockERC20("Issued Token", "ISS", 18);
         baseToken = new MockERC20("Base Token", "BASE", 18);
+
+        // Register baseToken as allowed base token (storage lost by vm.etch)
+        vm.prank(governance);
+        hook.addBaseToken(address(baseToken), 0);
 
         (Currency c0, Currency c1) = SortTokens.sort(issuedToken, baseToken);
         currency0 = c0;

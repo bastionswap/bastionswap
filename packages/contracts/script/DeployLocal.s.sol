@@ -37,6 +37,10 @@ contract DeployLocal is Script {
     // Base mainnet Uniswap V4 PoolManager
     address constant POOL_MANAGER = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
 
+    // Base WETH and USDC
+    address constant WETH = 0x4200000000000000000000000000000000000006;
+    address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+
     // Hook permission flags
     uint160 constant HOOK_FLAGS =
         uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
@@ -230,7 +234,7 @@ contract DeployLocal is Script {
 
         a.hookCreationCode = abi.encodePacked(
             type(BastionHook).creationCode,
-            abi.encode(POOL_MANAGER, a.escrow, a.insurance, a.trigger, a.reputation)
+            abi.encode(POOL_MANAGER, a.escrow, a.insurance, a.trigger, a.reputation, deployer, WETH, USDC)
         );
 
         console2.log("Mining CREATE2 salt for hook flags...");

@@ -19,6 +19,10 @@ import {InsurancePool} from "../core/InsurancePool.sol";
 import {ITriggerOracle} from "../interfaces/ITriggerOracle.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
+import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 import {TriggerOracle} from "../core/TriggerOracle.sol";
 
@@ -28,6 +32,7 @@ import {TriggerOracle} from "../core/TriggerOracle.sol";
 ///         insurance fee collection, and rug-pull protection.
 contract BastionHook is BaseTestHooks {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -36,6 +41,7 @@ contract BastionHook is BaseTestHooks {
     InsurancePool public immutable insurancePool;
     TriggerOracle public immutable triggerOracle;
     IReputationEngine public immutable reputationEngine;
+    address public immutable GOVERNANCE;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -66,22 +72,27 @@ contract BastionHook is BaseTestHooks {
     /// @dev Cached insurance fee rate (basis points) to avoid cross-contract call
     uint16 internal _cachedFeeRate;
 
-    // ─── Constants ──────────────────────────────────────────────────────
+    /// @dev Base token allowlist: token address => allowed
+    mapping(address => bool) public allowedBaseTokens;
 
-    /// @notice Minimum initial liquidity required for issuer's first LP addition (1 ETH worth)
-    uint128 public constant MIN_INITIAL_LIQUIDITY = 1e18;
+    /// @dev Minimum base token amount for initial liquidity per base token
+    mapping(address => uint256) public minBaseAmount;
 
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyPoolManager();
     error OnlyEscrowVault();
     error OnlyOwner();
+    error OnlyGovernance();
     error RouterAlreadySet();
     error RouterNotSet();
     error InvalidHookData();
     error ExceedsVestedAmount(uint128 requested, uint128 removable);
     error MustIdentifyUser();
-    error BelowMinInitialLiquidity(uint128 provided, uint128 required);
+    error BelowMinBaseAmount(uint256 provided, uint256 required);
+    error NoAllowedBaseToken();
+    error BaseTokenAlreadySet(address token);
+    error BaseTokenNotSet(address token);
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -93,6 +104,9 @@ contract BastionHook is BaseTestHooks {
     event ExternalCallFailed(string target, PoolId indexed poolId);
     event ForceRemovalExecuted(PoolId indexed poolId, uint256 ethAmount, address token, uint256 tokenAmount);
     event BastionRouterSet(address indexed router);
+    event BaseTokenAdded(address indexed token, uint256 minAmount);
+    event BaseTokenRemoved(address indexed token);
+    event MinBaseAmountUpdated(address indexed token, uint256 newMinAmount);
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -103,19 +117,36 @@ contract BastionHook is BaseTestHooks {
 
     // ─── Constructor ──────────────────────────────────────────────────
 
+    modifier onlyGovernance() {
+        if (msg.sender != GOVERNANCE) revert OnlyGovernance();
+        _;
+    }
+
     constructor(
         IPoolManager _poolManager,
         IEscrowVault _escrowVault,
         InsurancePool _insurancePool,
         TriggerOracle _triggerOracle,
-        IReputationEngine _reputationEngine
+        IReputationEngine _reputationEngine,
+        address _governance,
+        address _weth,
+        address _usdc
     ) {
         poolManager = _poolManager;
         escrowVault = _escrowVault;
         insurancePool = _insurancePool;
         triggerOracle = _triggerOracle;
         reputationEngine = _reputationEngine;
+        GOVERNANCE = _governance;
         _owner = msg.sender;
+
+        // Initialize base tokens
+        allowedBaseTokens[address(0)] = true; // native ETH
+        minBaseAmount[address(0)] = 1 ether;
+        allowedBaseTokens[_weth] = true;
+        minBaseAmount[_weth] = 1 ether;
+        allowedBaseTokens[_usdc] = true;
+        minBaseAmount[_usdc] = 2000e6; // 2000 USDC (6 decimals)
     }
 
     // ─── Hook Permission Flags ────────────────────────────────────────
@@ -160,10 +191,14 @@ contract BastionHook is BaseTestHooks {
             : 0;
 
         if (_issuers[poolId] == address(0) && hookData.length > 0) {
-            // First LP → register as issuer, enforce minimum liquidity
-            if (liquidity < MIN_INITIAL_LIQUIDITY) {
-                revert BelowMinInitialLiquidity(liquidity, MIN_INITIAL_LIQUIDITY);
+            // First LP → register as issuer, enforce base token allowlist & min amount
+            uint8 result = _validateBaseToken(key, params);
+            if (result == 2) {
+                // Both tokens are base tokens → skip Bastion protection
+                return IHooks.beforeAddLiquidity.selector;
             }
+            // result == 1 means validation passed (single base token, amount OK)
+
             _registerIssuerAndCreateEscrow(poolId, key, sender, liquidity, hookData);
         } else if (liquidity > 0 && sender == _issuerLPOwner[poolId]) {
             // Subsequent issuer LP addition via same router → decode hookData to identify user
@@ -419,6 +454,30 @@ contract BastionHook is BaseTestHooks {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  GOVERNANCE — Base Token Management
+    // ═══════════════════════════════════════════════════════════════════
+
+    function addBaseToken(address token, uint256 _minBaseAmount) external onlyGovernance {
+        if (allowedBaseTokens[token]) revert BaseTokenAlreadySet(token);
+        allowedBaseTokens[token] = true;
+        minBaseAmount[token] = _minBaseAmount;
+        emit BaseTokenAdded(token, _minBaseAmount);
+    }
+
+    function removeBaseToken(address token) external onlyGovernance {
+        if (!allowedBaseTokens[token]) revert BaseTokenNotSet(token);
+        allowedBaseTokens[token] = false;
+        minBaseAmount[token] = 0;
+        emit BaseTokenRemoved(token);
+    }
+
+    function updateMinBaseAmount(address token, uint256 _minBaseAmount) external onlyGovernance {
+        if (!allowedBaseTokens[token]) revert BaseTokenNotSet(token);
+        minBaseAmount[token] = _minBaseAmount;
+        emit MinBaseAmountUpdated(token, _minBaseAmount);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  INTERNAL
     // ═══════════════════════════════════════════════════════════════════
 
@@ -473,6 +532,83 @@ contract BastionHook is BaseTestHooks {
 
         emit IssuerRegistered(poolId, issuer, token);
         emit EscrowCreated(poolId, escrowId, issuer);
+    }
+
+    /// @dev Validates base token allowlist and minimum amount for initial liquidity.
+    ///      Returns 1 if single base token validated OK, 2 if both tokens are base tokens.
+    ///      Reverts if no base token or below minimum amount.
+    function _validateBaseToken(
+        PoolKey calldata key,
+        ModifyLiquidityParams calldata params
+    ) internal view returns (uint8) {
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
+        bool token0IsBase = allowedBaseTokens[token0];
+        bool token1IsBase = allowedBaseTokens[token1];
+
+        if (!token0IsBase && !token1IsBase) revert NoAllowedBaseToken();
+        if (token0IsBase && token1IsBase) return 2;
+
+        address baseToken = token0IsBase ? token0 : token1;
+        uint256 baseAmount = _computeBaseAmount(key, params, token0IsBase);
+
+        if (baseAmount < minBaseAmount[baseToken]) {
+            revert BelowMinBaseAmount(baseAmount, minBaseAmount[baseToken]);
+        }
+
+        return 1;
+    }
+
+    /// @dev Computes expected base token deposit from liquidityDelta using pool's current sqrtPriceX96 and tick range.
+    function _computeBaseAmount(
+        PoolKey calldata key,
+        ModifyLiquidityParams calldata params,
+        bool baseIsToken0
+    ) internal view returns (uint256) {
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+
+        uint160 sqrtPriceAX96 = TickMath.getSqrtPriceAtTick(params.tickLower);
+        uint160 sqrtPriceBX96 = TickMath.getSqrtPriceAtTick(params.tickUpper);
+
+        uint128 liquidity = uint128(uint256(int256(params.liquidityDelta)));
+
+        if (baseIsToken0) {
+            return _getAmount0ForLiquidity(sqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, liquidity);
+        } else {
+            return _getAmount1ForLiquidity(sqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, liquidity);
+        }
+    }
+
+    /// @dev Compute amount0 from liquidity, sqrtPrice, and tick bounds.
+    ///      amount0 = L * (sqrtB - sqrtPrice) / (sqrtPrice * sqrtB) * Q96
+    function _getAmount0ForLiquidity(
+        uint160 sqrtPriceX96,
+        uint160 sqrtPriceAX96,
+        uint160 sqrtPriceBX96,
+        uint128 liquidity
+    ) internal pure returns (uint256) {
+        if (sqrtPriceAX96 > sqrtPriceBX96) (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
+        if (sqrtPriceX96 >= sqrtPriceBX96) return 0; // all in token1
+        uint160 effectiveLower = sqrtPriceX96 > sqrtPriceAX96 ? sqrtPriceX96 : sqrtPriceAX96;
+        return FullMath.mulDiv(
+            uint256(liquidity) << FixedPoint96.RESOLUTION,
+            sqrtPriceBX96 - effectiveLower,
+            uint256(effectiveLower) * sqrtPriceBX96
+        );
+    }
+
+    /// @dev Compute amount1 from liquidity, sqrtPrice, and tick bounds.
+    ///      amount1 = L * (sqrtPrice - sqrtA) / Q96
+    function _getAmount1ForLiquidity(
+        uint160 sqrtPriceX96,
+        uint160 sqrtPriceAX96,
+        uint160 sqrtPriceBX96,
+        uint128 liquidity
+    ) internal pure returns (uint256) {
+        if (sqrtPriceAX96 > sqrtPriceBX96) (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
+        if (sqrtPriceX96 <= sqrtPriceAX96) return 0; // all in token0
+        uint160 effectiveUpper = sqrtPriceX96 < sqrtPriceBX96 ? sqrtPriceX96 : sqrtPriceBX96;
+        return FullMath.mulDiv(liquidity, effectiveUpper - sqrtPriceAX96, FixedPoint96.Q96);
     }
 
     /// @dev Determine if a swap is a "buy" of the issued token.

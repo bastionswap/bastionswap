@@ -90,7 +90,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         {
             bytes memory bytecode = abi.encodePacked(
                 type(BastionHook).creationCode,
-                abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr)
+                abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr, governance, address(0), address(0))
             );
             address deployed;
             assembly {
@@ -102,6 +102,10 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         issuedToken = new MockERC20("IssuedToken", "ISS", 18);
         baseToken = new MockERC20("BaseToken", "BASE", 18);
+
+        // Register baseToken as an allowed base token (storage lost by vm.etch)
+        vm.prank(governance);
+        hook.addBaseToken(address(baseToken), 0);
 
         (Currency c0, Currency c1) = SortTokens.sort(issuedToken, baseToken);
         currency0 = c0;

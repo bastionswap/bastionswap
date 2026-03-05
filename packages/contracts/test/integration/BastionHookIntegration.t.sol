@@ -81,7 +81,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // Deploy hook implementation and etch it at the correct address
         bytes memory creationCode = type(BastionHook).creationCode;
         bytes memory constructorArgs =
-            abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr);
+            abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr, governance, address(0), address(0));
         bytes memory bytecode = abi.encodePacked(creationCode, constructorArgs);
 
         address deployed;
@@ -94,6 +94,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // Deploy tokens
         issuedToken = new MockERC20("Issued", "ISS", 18);
         baseToken = new MockERC20("Base", "BASE", 18);
+
+        // Register baseToken as an allowed base token (storage lost by vm.etch)
+        vm.prank(governance);
+        hook.addBaseToken(address(baseToken), 0);
 
         // Sort tokens for V4 pool
         (Currency c0, Currency c1) = SortTokens.sort(issuedToken, baseToken);
@@ -823,6 +827,123 @@ contract BastionHookIntegrationTest is Test, Deployers {
             ""
         );
         vm.stopPrank();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  BASE TOKEN ALLOWLIST & MIN AMOUNT TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_addBaseToken_onlyGovernance() public {
+        address randomToken = makeAddr("randomToken");
+
+        vm.expectRevert(BastionHook.OnlyGovernance.selector);
+        hook.addBaseToken(randomToken, 1 ether);
+
+        vm.prank(governance);
+        hook.addBaseToken(randomToken, 1 ether);
+        assertTrue(hook.allowedBaseTokens(randomToken));
+        assertEq(hook.minBaseAmount(randomToken), 1 ether);
+    }
+
+    function test_removeBaseToken_onlyGovernance() public {
+        // baseToken was added in setUp
+        vm.expectRevert(BastionHook.OnlyGovernance.selector);
+        hook.removeBaseToken(address(baseToken));
+
+        vm.prank(governance);
+        hook.removeBaseToken(address(baseToken));
+        assertFalse(hook.allowedBaseTokens(address(baseToken)));
+        assertEq(hook.minBaseAmount(address(baseToken)), 0);
+    }
+
+    function test_addBaseToken_reverts_ifAlreadySet() public {
+        vm.prank(governance);
+        vm.expectRevert(abi.encodeWithSelector(BastionHook.BaseTokenAlreadySet.selector, address(baseToken)));
+        hook.addBaseToken(address(baseToken), 1 ether);
+    }
+
+    function test_removeBaseToken_reverts_ifNotSet() public {
+        address randomToken = makeAddr("randomToken");
+        vm.prank(governance);
+        vm.expectRevert(abi.encodeWithSelector(BastionHook.BaseTokenNotSet.selector, randomToken));
+        hook.removeBaseToken(randomToken);
+    }
+
+    function test_updateMinBaseAmount_onlyGovernance() public {
+        vm.expectRevert(BastionHook.OnlyGovernance.selector);
+        hook.updateMinBaseAmount(address(baseToken), 5 ether);
+
+        vm.prank(governance);
+        hook.updateMinBaseAmount(address(baseToken), 5 ether);
+        assertEq(hook.minBaseAmount(address(baseToken)), 5 ether);
+    }
+
+    function test_beforeAddLiquidity_noBaseToken_reverts() public {
+        // Remove base token so neither token qualifies
+        vm.prank(governance);
+        hook.removeBaseToken(address(baseToken));
+
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        vm.expectRevert(); // NoAllowedBaseToken (wrapped by PoolManager)
+        modifyLiquidityRouter.modifyLiquidity(_key, params, _encodeIssuerHookData());
+    }
+
+    function test_beforeAddLiquidity_bothBaseTokens_skipsBastion() public {
+        // Register issuedToken as a base token too
+        vm.prank(governance);
+        hook.addBaseToken(address(issuedToken), 0);
+
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        PoolId _poolId = _key.toId();
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        // Should succeed but NOT register an issuer (both are base tokens)
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(_key, params, _encodeIssuerHookData());
+
+        // No issuer registered
+        assertFalse(hook.isIssuer(_poolId, issuerAddr));
+    }
+
+    function test_beforeAddLiquidity_belowMinBaseAmount_reverts() public {
+        // Set min base amount to something large
+        vm.prank(governance);
+        hook.updateMinBaseAmount(address(baseToken), 1000 ether);
+
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        // Small liquidity at 1:1 price with narrow range will produce less than 1000 base tokens
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        vm.expectRevert(); // BelowMinBaseAmount
+        modifyLiquidityRouter.modifyLiquidity(_key, params, _encodeIssuerHookData());
+    }
+
+    function test_beforeAddLiquidity_meetsMinBaseAmount_succeeds() public {
+        // Set min base amount to a small value
+        vm.prank(governance);
+        hook.updateMinBaseAmount(address(baseToken), 1);
+
+        _initPoolWithIssuer();
+        assertTrue(hook.isIssuer(poolId, issuerAddr));
     }
 
     function test_non_issuer_swap_no_false_positive() public {
