@@ -1,11 +1,11 @@
-import { useReadContract } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
+import { useReadContract, useChainId } from "wagmi";
 import { getContracts } from "@/config/contracts";
 import { BastionHookABI } from "@/config/abis";
 
-const contracts = getContracts(baseSepolia.id);
-
 export function usePoolInfo(poolId: `0x${string}` | undefined) {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+
   const { data } = useReadContract({
     address: contracts?.BastionHook as `0x${string}`,
     abi: BastionHookABI,

@@ -1,11 +1,11 @@
-import { useReadContract } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
+import { useReadContract, useChainId } from "wagmi";
 import { getContracts } from "@/config/contracts";
 import { EscrowVaultABI } from "@/config/abis";
 
-const contracts = getContracts(baseSepolia.id);
-
 export function useEscrowStatus(escrowId: bigint | undefined) {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+
   return useReadContract({
     address: contracts?.EscrowVault as `0x${string}`,
     abi: EscrowVaultABI,
@@ -16,6 +16,9 @@ export function useEscrowStatus(escrowId: bigint | undefined) {
 }
 
 export function useVestingEndTime(poolId: `0x${string}` | undefined) {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+
   return useReadContract({
     address: contracts?.EscrowVault as `0x${string}`,
     abi: EscrowVaultABI,

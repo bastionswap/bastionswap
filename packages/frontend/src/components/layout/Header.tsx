@@ -18,7 +18,7 @@ export function Header() {
   const chainId = useChainId();
   const { isConnected } = useAccount();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const wrongNetwork = isConnected && chainId !== baseSepolia.id;
+  const wrongNetwork = isConnected && chainId !== baseSepolia.id && chainId !== 31337;
 
   return (
     <>

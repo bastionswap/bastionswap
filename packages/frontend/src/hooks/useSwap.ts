@@ -7,14 +7,12 @@ import {
   useReadContract,
   useBalance,
   usePublicClient,
+  useChainId,
 } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
-import { baseSepolia } from "wagmi/chains";
 import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionResult } from "viem";
 import { getContracts } from "@/config/contracts";
 import { BastionRouterABI } from "@/config/abis";
-
-const contracts = getContracts(baseSepolia.id);
 
 const ERC20_ABI = [
   {
@@ -155,6 +153,9 @@ export interface SwapConfig {
 }
 
 export function useExecuteSwap() {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+
   const {
     writeContract,
     data: hash,
@@ -281,6 +282,8 @@ function computeStorageSlots(account: `0x${string}`, spender: `0x${string}`) {
 }
 
 export function useSwapQuote(params: QuoteParams | null) {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
   const publicClient = usePublicClient();
 
   return useQuery({
@@ -315,23 +318,32 @@ export function useSwapQuote(params: QuoteParams | null) {
         ],
       });
 
+      const isNativeInput = inputToken === "0x0000000000000000000000000000000000000000";
       const { balSlot, allowSlot } = computeStorageSlots(QUOTE_ACCOUNT, routerAddr);
 
       try {
-        // Try with state overrides (sets infinite balance + allowance for dummy account)
         const result = await publicClient.call({
           to: routerAddr,
           data,
           account: QUOTE_ACCOUNT,
-          stateOverride: [
-            {
-              address: inputToken,
-              stateDiff: [
-                { slot: balSlot, value: MAX_UINT256 },
-                { slot: allowSlot, value: MAX_UINT256 },
+          value: isNativeInput ? params.amountIn : 0n,
+          stateOverride: isNativeInput
+            ? [
+                {
+                  // Give the dummy account enough ETH
+                  address: QUOTE_ACCOUNT,
+                  balance: params.amountIn * 2n,
+                },
+              ]
+            : [
+                {
+                  address: inputToken,
+                  stateDiff: [
+                    { slot: balSlot, value: MAX_UINT256 },
+                    { slot: allowSlot, value: MAX_UINT256 },
+                  ],
+                },
               ],
-            },
-          ],
         });
 
         if (!result.data) return null;

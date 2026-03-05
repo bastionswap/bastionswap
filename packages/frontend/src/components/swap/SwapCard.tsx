@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useChainId } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
-import { baseSepolia } from "wagmi/chains";
 import { ConnectKitButton } from "connectkit";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -34,7 +33,8 @@ const INSURANCE_FEE_BPS = 100;
 
 export function SwapCard() {
   const { address, isConnected } = useAccount();
-  const contracts = getContracts(baseSepolia.id);
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
   const [tokenIn, setTokenIn] = useState<Token | null>(null);
   const [tokenOut, setTokenOut] = useState<Token | null>(null);
   const [amountIn, setAmountIn] = useState("");
@@ -161,8 +161,6 @@ export function SwapCard() {
     const r1 = parseFloat(poolReserves.reserve1 || "0");
     if (r0 <= 0 || r1 <= 0) return 0;
 
-    // Spot price = reserveOut / reserveIn
-    // Determine which reserve is "in" and which is "out" based on sort order
     const tokenInAddr = tokenIn?.address.toLowerCase() ?? "";
     const tokenOutAddr = tokenOut?.address.toLowerCase() ?? "";
     const token0Addr = tokenInAddr < tokenOutAddr ? tokenInAddr : tokenOutAddr;
@@ -172,9 +170,7 @@ export function SwapCard() {
     const reserveOut = isZeroForOne ? r1 : r0;
     const spotRate = reserveOut / reserveIn;
 
-    // Effective rate from the actual quote
     const effectiveRate = Number(quotedOut) / Number(parsedAmountIn);
-
     const impact = (1 - effectiveRate / spotRate) * 100;
     return Math.max(impact, 0);
   }, [quotedOut, poolReserves, parsedAmountIn, tokenIn?.address, tokenOut?.address]);

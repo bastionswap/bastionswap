@@ -53,6 +53,19 @@
   },
   {
     "type": "function",
+    "name": "MIN_VESTING_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "REPUTATION_ENGINE",
     "inputs": [],
     "outputs": [
@@ -231,12 +244,50 @@
   },
   {
     "type": "function",
+    "name": "getVestingStrictnessLevel",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "isFullyVested",
     "inputs": [
       {
         "name": "poolId",
         "type": "bytes32",
         "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isStricterThanDefault",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -534,6 +585,11 @@
   {
     "type": "error",
     "name": "ScheduleTooLong",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VestingBelowMinDuration",
     "inputs": []
   },
   {

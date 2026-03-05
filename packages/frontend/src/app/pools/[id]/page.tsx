@@ -2,8 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useChainId } from "wagmi";
 import Link from "next/link";
 import { usePool } from "@/hooks/usePools";
 import { useTokenInfo, useTokenBalance } from "@/hooks/useTokenInfo";
@@ -58,7 +57,8 @@ function TriggerBanner({
   holderBalance: bigint | undefined;
   onClaim: () => void;
 }) {
-  const contracts = getContracts(baseSepolia.id);
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
 
   const { data: pendingTrigger } = useReadContract({
     address: contracts?.TriggerOracle as `0x${string}`,
@@ -256,7 +256,8 @@ export default function PoolDetailPage() {
     holderBalance
   );
 
-  const contracts = getContracts(baseSepolia.id);
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
   const { writeContract, data: claimHash, isPending: isClaiming } =
     useWriteContract();
   const { isLoading: isClaimConfirming, isSuccess: claimSuccess } =

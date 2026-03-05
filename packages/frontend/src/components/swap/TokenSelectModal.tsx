@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useChainId } from "wagmi";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { Badge } from "@/components/ui/Badge";
+import { LOCAL_CONTRACTS } from "@/config/contracts.generated";
 
 interface Token {
   address: string;
@@ -11,7 +13,7 @@ interface Token {
   isProtected?: boolean;
 }
 
-const POPULAR_TOKENS: Token[] = [
+const SEPOLIA_TOKENS: Token[] = [
   {
     address: "0x410521668Ad1625527562CA90475406b1b9cB8Af",
     symbol: "BTT",
@@ -22,6 +24,20 @@ const POPULAR_TOKENS: Token[] = [
     address: "0x69ce9bACB558F35bCAC2e6fd54caa8770AEE85d4",
     symbol: "BTST",
     name: "Base Test Token",
+  },
+];
+
+const LOCAL_TOKENS: Token[] = [
+  {
+    address: "0x0000000000000000000000000000000000000000",
+    symbol: "ETH",
+    name: "Ether",
+  },
+  {
+    address: (LOCAL_CONTRACTS as Record<number, Record<string, string>>)[31337]?.TestToken ?? "",
+    symbol: "BTT",
+    name: "Bastion Test Token",
+    isProtected: true,
   },
 ];
 
@@ -38,7 +54,10 @@ export function TokenSelectModal({
   onSelect,
   protectedTokens = [],
 }: TokenSelectModalProps) {
+  const chainId = useChainId();
   const [search, setSearch] = useState("");
+
+  const POPULAR_TOKENS = chainId === 31337 ? LOCAL_TOKENS : SEPOLIA_TOKENS;
 
   if (!isOpen) return null;
 

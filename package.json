@@ -6,6 +6,8 @@
     "build:contracts": "pnpm --filter @bastionswap/contracts build",
     "test:contracts": "pnpm --filter @bastionswap/contracts test",
     "build:subgraph": "pnpm --filter @bastionswap/subgraph build",
-    "dev:frontend": "pnpm --filter @bastionswap/frontend dev"
+    "dev:frontend": "pnpm --filter @bastionswap/frontend dev",
+    "dev": "bash scripts/dev.sh",
+    "redeploy": "bash scripts/redeploy.sh"
   }
 }

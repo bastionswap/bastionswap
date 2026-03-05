@@ -1,3 +1,5 @@
+import { LOCAL_CONTRACTS } from "./contracts.generated";
+
 export const CONTRACTS = {
   84532: {
     BastionHook: "0xC85852313B9BE98Be4EA17E212caeb6BB56e4Ac0",
@@ -10,8 +12,13 @@ export const CONTRACTS = {
   },
 } as const;
 
-export type SupportedChainId = keyof typeof CONTRACTS;
+const ALL_CONTRACTS: Record<number, Record<string, string>> = {
+  ...CONTRACTS,
+  ...LOCAL_CONTRACTS,
+};
+
+export type SupportedChainId = keyof typeof CONTRACTS | keyof typeof LOCAL_CONTRACTS;
 
 export function getContracts(chainId: number) {
-  return CONTRACTS[chainId as SupportedChainId];
+  return ALL_CONTRACTS[chainId];
 }

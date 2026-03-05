@@ -1,7 +1,6 @@
 "use client";
 
-import { useReadContract } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
+import { useReadContract, useChainId } from "wagmi";
 import { Badge } from "@/components/ui/Badge";
 import { shortenAddress, explorerUrl, formatBps, formatDuration } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
@@ -90,7 +89,8 @@ function CommitmentTag({ value, defaultValue, isLowerBetter }: {
 }
 
 function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
-  const contracts = getContracts(baseSepolia.id);
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
 
   const { data: encodedData } = useReadContract({
     address: contracts?.ReputationEngine as `0x${string}`,

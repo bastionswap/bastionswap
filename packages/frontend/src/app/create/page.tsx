@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useChainId } from "wagmi";
 import { ConnectKitButton } from "connectkit";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -10,7 +10,6 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatBps, formatDuration } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
 import { PoolManagerABI } from "@/config/abis";
-import { baseSepolia } from "wagmi/chains";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -121,7 +120,8 @@ export default function CreatePoolPage() {
   }, [activeMilestones]);
   const { createPool, isWriting, isConfirming, isSuccess, hash, error } =
     useCreateBastionPool();
-  const contracts = getContracts(baseSepolia.id);
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
 
   const handleCreatePool = () => {
     if (!contracts || !address) return;

@@ -47,17 +47,35 @@ export interface TokenInfo {
   decimals: number | null;
 }
 
+const NATIVE_ETH = "0x0000000000000000000000000000000000000000";
+
+function isNativeETH(address: string | undefined): boolean {
+  return !!address && address.toLowerCase() === NATIVE_ETH;
+}
+
 export function useTokenInfo(address: `0x${string}` | undefined) {
+  const isETH = isNativeETH(address);
+
   const { data, isLoading } = useReadContracts({
-    contracts: address
+    contracts: address && !isETH
       ? [
           { address, abi: ERC20_ABI, functionName: "name" },
           { address, abi: ERC20_ABI, functionName: "symbol" },
           { address, abi: ERC20_ABI, functionName: "decimals" },
         ]
       : undefined,
-    query: { enabled: !!address },
+    query: { enabled: !!address && !isETH },
   });
+
+  if (isETH) {
+    return {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18,
+      isLoading: false,
+      displayName: "ETH",
+    };
+  }
 
   const name = data?.[0]?.status === "success" ? (data[0].result as string) : null;
   const symbol = data?.[1]?.status === "success" ? (data[1].result as string) : null;
