@@ -2,6 +2,7 @@
 pragma solidity =0.8.26;
 
 import {IInsurancePool} from "../interfaces/IInsurancePool.sol";
+import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
@@ -17,12 +18,14 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     uint40 internal constant CLAIM_PERIOD = 30 days;
     uint40 internal constant FALLBACK_CLAIM_PERIOD = 7 days;
     uint40 internal constant EMERGENCY_DELAY = 2 days;
+    uint40 internal constant TREASURY_GRACE_PERIOD = 30 days;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
     address public immutable BASTION_HOOK;
     address public immutable TRIGGER_ORACLE;
     address public immutable GOVERNANCE;
+    IEscrowVault public immutable ESCROW_VAULT;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -45,6 +48,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
     /// @notice Current fee rate in basis points (default 100 = 1%)
     uint16 public feeRate;
+
+    /// @notice Protocol treasury address for fund collection
+    address public treasury;
 
     /// @dev Emergency withdrawal requests subject to timelock
     mapping(bytes32 => IInsurancePool.EmergencyRequest) public emergencyRequests;
@@ -71,6 +77,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error EmergencyRequestNotFound();
     error EmergencyRequestAlreadyExecuted();
     error InsufficientTokenBalance();
+    error EscrowNotFullyVested();
+    error GracePeriodNotPassed();
+    error TreasuryNotSet();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -91,10 +100,12 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
     // ─── Constructor ──────────────────────────────────────────────────
 
-    constructor(address bastionHook, address triggerOracle, address governance) {
+    constructor(address bastionHook, address triggerOracle, address governance, address escrowVault, address treasury_) {
         BASTION_HOOK = bastionHook;
         TRIGGER_ORACLE = triggerOracle;
         GOVERNANCE = governance;
+        ESCROW_VAULT = IEscrowVault(escrowVault);
+        treasury = treasury_;
         feeRate = 100; // 1% default
     }
 
@@ -256,6 +267,38 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     /// @notice Check if a holder has already claimed for a pool
     function hasClaimed(PoolId poolId, address holder) external view returns (bool) {
         return _getPool(poolId).claimed[holder];
+    }
+
+    /// @inheritdoc IInsurancePool
+    function setTreasury(address treasury_) external onlyGovernance {
+        if (treasury_ == address(0)) revert ZeroAddress();
+        address old = treasury;
+        treasury = treasury_;
+        emit IInsurancePool.TreasurySet(old, treasury_);
+    }
+
+    /// @inheritdoc IInsurancePool
+    function claimTreasuryFunds(PoolId poolId) external onlyGovernance nonReentrant {
+        if (treasury == address(0)) revert TreasuryNotSet();
+
+        PoolData storage pool = _getPool(poolId);
+        if (pool.isTriggered) revert AlreadyTriggered();
+        if (pool.balance == 0) revert ZeroAmount();
+
+        // Escrow must be fully vested
+        if (!ESCROW_VAULT.isFullyVested(poolId)) revert EscrowNotFullyVested();
+
+        // Grace period must have passed since vesting end
+        uint256 vestingEndTime = ESCROW_VAULT.getVestingEndTime(poolId);
+        if (block.timestamp < vestingEndTime + TREASURY_GRACE_PERIOD) revert GracePeriodNotPassed();
+
+        uint256 amount = pool.balance;
+        pool.balance = 0;
+
+        (bool success,) = treasury.call{value: amount}("");
+        if (!success) revert TransferFailed();
+
+        emit IInsurancePool.TreasuryFundsClaimed(poolId, treasury, amount);
     }
 
     // ─── Internal Functions ───────────────────────────────────────────

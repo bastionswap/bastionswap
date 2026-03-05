@@ -700,4 +700,70 @@ contract EscrowVaultTest is Test {
         vm.expectRevert(EscrowVault.EscrowNotFound.selector);
         vault.getEscrowStatus(999);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  isFullyVested TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_isFullyVested_falseBeforeFullRelease() public {
+        _createDefaultEscrow();
+        assertFalse(vault.isFullyVested(defaultPoolId));
+    }
+
+    function test_isFullyVested_trueAfterFullRelease() public {
+        // Use no daily limit so we can release everything at once
+        IEscrowVault.IssuerCommitment memory noDailyLimit = IEscrowVault.IssuerCommitment({
+            dailyWithdrawLimit: 0,
+            lockDuration: 0,
+            maxSellPercent: 200
+        });
+        PoolId pid = PoolId.wrap(bytes32(uint256(42)));
+        vm.prank(hook);
+        uint256 escrowId = vault.createEscrow(pid, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), noDailyLimit);
+
+        // Warp past all vesting (90 days schedule, no lock)
+        vm.warp(block.timestamp + 90 days + 1);
+
+        vm.prank(issuer);
+        vault.releaseVested(escrowId);
+
+        assertTrue(vault.isFullyVested(pid));
+    }
+
+    function test_isFullyVested_falseForNonexistent() public view {
+        PoolId unknownPool = PoolId.wrap(bytes32(uint256(999)));
+        assertFalse(vault.isFullyVested(unknownPool));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  getVestingEndTime TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_getVestingEndTime_returnsCorrectTime() public {
+        uint256 startTs = block.timestamp;
+        _createDefaultEscrow();
+        // Default schedule: last milestone at 90 days, lockDuration = 0
+        uint256 endTime = vault.getVestingEndTime(defaultPoolId);
+        assertEq(endTime, startTs + 90 days);
+    }
+
+    function test_getVestingEndTime_withLockDuration() public {
+        uint256 startTs = block.timestamp;
+        IEscrowVault.VestingStep[] memory schedule = _defaultSchedule();
+        IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
+            dailyWithdrawLimit: 500,
+            lockDuration: 30 days,
+            maxSellPercent: 200
+        });
+        vm.prank(hook);
+        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, commitment);
+
+        uint256 endTime = vault.getVestingEndTime(defaultPoolId);
+        assertEq(endTime, startTs + 30 days + 90 days);
+    }
+
+    function test_getVestingEndTime_zeroForNonexistent() public view {
+        PoolId unknownPool = PoolId.wrap(bytes32(uint256(999)));
+        assertEq(vault.getVestingEndTime(unknownPool), 0);
+    }
 }

@@ -13,13 +13,13 @@ interface Token {
 
 const POPULAR_TOKENS: Token[] = [
   {
-    address: "0x1Afed1eC73e27a7ffbc24fE40Bcc6c3442D8709e",
+    address: "0x410521668Ad1625527562CA90475406b1b9cB8Af",
     symbol: "BTT",
     name: "Bastion Test Token",
     isProtected: true,
   },
   {
-    address: "0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21",
+    address: "0x69ce9bACB558F35bCAC2e6fd54caa8770AEE85d4",
     symbol: "BTST",
     name: "Base Test Token",
   },

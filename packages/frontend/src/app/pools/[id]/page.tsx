@@ -6,7 +6,9 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadCont
 import { baseSepolia } from "wagmi/chains";
 import Link from "next/link";
 import { usePool } from "@/hooks/usePools";
-import { useTokenInfo } from "@/hooks/useTokenInfo";
+import { useTokenInfo, useTokenBalance } from "@/hooks/useTokenInfo";
+import { useEstimatedCompensation } from "@/hooks/useInsurance";
+import { formatUnits } from "viem";
 import { LoadingSpinner, SkeletonCard } from "@/components/ui/LoadingSpinner";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -42,6 +44,8 @@ function TriggerBanner({
   address,
   alreadyClaimed,
   claimedAmount,
+  estimatedCompensation,
+  holderBalance,
   onClaim,
 }: {
   poolId: string;
@@ -49,6 +53,8 @@ function TriggerBanner({
   address: string | undefined;
   alreadyClaimed: boolean;
   claimedAmount: string | undefined;
+  estimatedCompensation: bigint | undefined;
+  holderBalance: bigint | undefined;
   onClaim: () => void;
 }) {
   const contracts = getContracts(baseSepolia.id);
@@ -62,15 +68,45 @@ function TriggerBanner({
     query: { enabled: !!contracts },
   });
 
-  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
-  useEffect(() => {
-    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  // Get trigger timestamp for claim deadline calculation
+  const { data: poolStatus } = useReadContract({
+    address: contracts?.InsurancePool as `0x${string}`,
+    abi: InsurancePoolABI,
+    functionName: "getPoolStatus",
+    args: [poolId as `0x${string}`],
+    query: { enabled: !!contracts && pool.insurancePool?.isTriggered },
+  });
 
-  const isTriggered = pool.insurancePool?.isTriggered;
+  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
+
+  // Compute claim deadline
+  const isTriggeredFlag = pool.insurancePool?.isTriggered;
+  const useMerkleProofFlag = pool.insurancePool?.useMerkleProof;
+  const triggerTimestamp = (poolStatus as { triggerTimestamp?: number })?.triggerTimestamp ?? 0;
+  const claimDeadline = triggerTimestamp > 0
+    ? triggerTimestamp + (useMerkleProofFlag ? 30 * 86400 : 7 * 86400)
+    : 0;
+  const claimRemaining = claimDeadline > 0 ? Math.max(claimDeadline - now, 0) : 0;
+  const isClaimExpired = claimDeadline > 0 && claimRemaining === 0;
+  const isClaimUrgent = claimRemaining > 0 && claimRemaining < 3 * 86400;
+
+  useEffect(() => {
+    const interval = isClaimUrgent ? 1000 : 60_000;
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), interval);
+    return () => clearInterval(id);
+  }, [isClaimUrgent]);
+
+  const isTriggered = isTriggeredFlag;
   const hasMerkleRoot = pool.insurancePool?.merkleRoot && pool.insurancePool.merkleRoot !== "0x0000000000000000000000000000000000000000000000000000000000000000";
-  const useMerkleProof = pool.insurancePool?.useMerkleProof;
+  const useMerkleProof = useMerkleProofFlag;
+
+  const formatDeadline = (secs: number) => {
+    const d = Math.floor(secs / 86400);
+    const h = Math.floor((secs % 86400) / 3600);
+    if (d > 0) return `${d}d ${h}h`;
+    const m = Math.floor((secs % 3600) / 60);
+    return `${h}h ${m}m`;
+  };
 
   // Parse pending trigger: (bool exists, uint8 triggerType, uint256 executeAfter)
   const pending = pendingTrigger as [boolean, number, bigint] | undefined;
@@ -128,9 +164,29 @@ function TriggerBanner({
                 </p>
               </>
             )}
-            {address && !alreadyClaimed && (
+            {address && estimatedCompensation && estimatedCompensation > 0n && (
+              <p className="text-xs text-emerald-400 mt-1">
+                Your estimated compensation: {parseFloat(formatUnits(estimatedCompensation, 18)).toFixed(4)} ETH
+              </p>
+            )}
+            {/* Claim deadline */}
+            {claimDeadline > 0 && !alreadyClaimed && (
+              <p className={`text-xs mt-1 ${isClaimExpired ? "text-gray-500" : isClaimUrgent ? "text-red-400 font-medium" : "text-gray-400"}`}>
+                {isClaimExpired
+                  ? "Claim period has expired."
+                  : isClaimUrgent
+                    ? `Claim expires in ${formatDeadline(claimRemaining)}! Claim now.`
+                    : `Claim deadline: ${formatDeadline(claimRemaining)} remaining`}
+              </p>
+            )}
+            {address && !alreadyClaimed && !isClaimExpired && (
               <button onClick={onClaim} className="btn-success mt-2 text-sm px-4 py-1.5">
                 Claim Compensation
+              </button>
+            )}
+            {address && !alreadyClaimed && isClaimExpired && (
+              <button disabled className="btn-success mt-2 text-sm px-4 py-1.5 opacity-50 cursor-not-allowed">
+                Claim Expired
               </button>
             )}
             {!address && (
@@ -187,6 +243,16 @@ export default function PoolDetailPage() {
   const token1Info = useTokenInfo(pool?.token1 as `0x${string}` | undefined);
   const issuedTokenInfo = useTokenInfo(pool?.issuedToken as `0x${string}` | undefined);
 
+  // Holder balance & estimated compensation for claim
+  const { balance: holderBalance } = useTokenBalance(
+    pool?.issuedToken as `0x${string}` | undefined,
+    address
+  );
+  const { data: estimatedCompensation } = useEstimatedCompensation(
+    poolId as `0x${string}`,
+    holderBalance
+  );
+
   const contracts = getContracts(baseSepolia.id);
   const { writeContract, data: claimHash, isPending: isClaiming } =
     useWriteContract();
@@ -194,12 +260,12 @@ export default function PoolDetailPage() {
     useWaitForTransactionReceipt({ hash: claimHash });
 
   const handleClaim = () => {
-    if (!contracts || !address) return;
+    if (!contracts || !address || !holderBalance) return;
     writeContract({
       address: contracts.InsurancePool as `0x${string}`,
       abi: InsurancePoolABI,
       functionName: "claimCompensation",
-      args: [poolId as `0x${string}`, [] as readonly `0x${string}`[]],
+      args: [poolId as `0x${string}`, holderBalance, [] as readonly `0x${string}`[]],
     });
   };
 
@@ -312,6 +378,8 @@ export default function PoolDetailPage() {
             address={address}
             alreadyClaimed={!!alreadyClaimed}
             claimedAmount={claimedAmount}
+            estimatedCompensation={estimatedCompensation as bigint | undefined}
+            holderBalance={holderBalance}
             onClaim={handleClaim}
           />
 

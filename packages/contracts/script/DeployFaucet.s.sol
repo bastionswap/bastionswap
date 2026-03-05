@@ -8,9 +8,9 @@ import {TokenFaucet} from "../src/test/TokenFaucet.sol";
 
 /// @title DeployFaucet — Deploy faucet for BTT and BTST test tokens
 contract DeployFaucet is Script {
-    // Test tokens deployed by TestE2E
-    address constant BTT = 0x1Afed1eC73e27a7ffbc24fE40Bcc6c3442D8709e;
-    address constant BTST = 0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21;
+    // Test tokens deployed by TestE2E (v2 deployment)
+    address constant BTT = 0x410521668Ad1625527562CA90475406b1b9cB8Af;
+    address constant BTST = 0x69ce9bACB558F35bCAC2e6fd54caa8770AEE85d4;
 
     // Seed each faucet with 10,000 tokens
     uint256 constant SEED_AMOUNT = 10_000e18;

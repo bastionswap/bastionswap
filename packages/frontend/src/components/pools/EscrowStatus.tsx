@@ -107,9 +107,11 @@ function timeAgo(ts: number): string {
 function HorizontalTimeline({
   milestones,
   createdAt,
+  lockDuration,
 }: {
   milestones: { id: string; timestamp: string; basisPoints: number }[];
   createdAt: number;
+  lockDuration?: number;
 }) {
   const now = Math.floor(Date.now() / 1000);
   const sorted = milestones
@@ -124,6 +126,12 @@ function HorizontalTimeline({
   if (range <= 0) return null;
 
   const currentPct = Math.min(Math.max(((now - startTs) / range) * 100, 0), 100);
+  const lockPct = lockDuration && lockDuration > 0
+    ? Math.min((lockDuration / range) * 100, 100)
+    : 0;
+  const lockEndTs = lockDuration ? createdAt + lockDuration : 0;
+  const isLocked = lockEndTs > 0 && now < lockEndTs;
+  const lockRemainingDays = isLocked ? Math.ceil((lockEndTs - now) / 86400) : 0;
 
   return (
     <div className="mt-5 border-t border-subtle pt-4">
@@ -131,11 +139,31 @@ function HorizontalTimeline({
 
       {/* Horizontal bar */}
       <div className="relative h-2 rounded-full bg-surface-lighter">
+        {/* Lock duration overlay */}
+        {lockPct > 0 && (
+          <div
+            className="absolute inset-y-0 left-0 rounded-l-full bg-amber-500/20 z-[1]"
+            style={{ width: `${lockPct}%` }}
+          />
+        )}
         {/* Filled portion */}
         <div
-          className="absolute inset-y-0 left-0 rounded-full bg-emerald-500/40 transition-all duration-500"
+          className="absolute inset-y-0 left-0 rounded-full bg-emerald-500/40 transition-all duration-500 z-[2]"
           style={{ width: `${currentPct}%` }}
         />
+        {/* Lock boundary marker */}
+        {lockPct > 0 && lockPct < 100 && (
+          <div
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-[15] flex flex-col items-center"
+            style={{ left: `${lockPct}%` }}
+          >
+            <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${isLocked ? "border-amber-500 bg-amber-500/30" : "border-gray-500 bg-surface"}`}>
+              <svg className={`h-2.5 w-2.5 ${isLocked ? "text-amber-400" : "text-gray-500"}`} viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM9 8V6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9z"/>
+              </svg>
+            </div>
+          </div>
+        )}
         {/* Current time marker */}
         <div
           className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-4 w-4 rounded-full bg-emerald-500 border-2 border-surface shadow-lg shadow-emerald-500/30 transition-all duration-500 z-20"
@@ -164,6 +192,15 @@ function HorizontalTimeline({
           );
         })}
       </div>
+
+      {/* Lock status text */}
+      {lockDuration && lockDuration > 0 && (
+        <p className={`text-[10px] mt-2 ${isLocked ? "text-amber-400" : "text-gray-500"}`}>
+          {isLocked
+            ? `Liquidity locked until ${formatDate(lockEndTs)} (${lockRemainingDays}d remaining)`
+            : "Lock period ended. Issuer can withdraw vested amounts."}
+        </p>
+      )}
 
       {/* Labels below */}
       <div className="relative mt-3 h-10">
@@ -303,7 +340,7 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens" }: EscrowStatusProp
 
       {/* Horizontal vesting timeline */}
       {sortedMilestones && sortedMilestones.length > 0 && createdAt > 0 && (
-        <HorizontalTimeline milestones={sortedMilestones} createdAt={createdAt} />
+        <HorizontalTimeline milestones={sortedMilestones} createdAt={createdAt} lockDuration={lockDuration} />
       )}
 
       {/* Escrow dates */}

@@ -63,7 +63,7 @@ contract Deploy is Script {
         require(address(escrowVault) == a.escrow, "EscrowVault address mismatch");
 
         // 3. Deploy InsurancePool (nonce N+2)
-        InsurancePool insurancePool = new InsurancePool(a.hook, a.trigger, governance);
+        InsurancePool insurancePool = new InsurancePool(a.hook, a.trigger, governance, a.escrow, deployer);
         require(address(insurancePool) == a.insurance, "InsurancePool address mismatch");
 
         // 4. Deploy TriggerOracle (nonce N+3)

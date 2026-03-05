@@ -114,4 +114,14 @@ interface IEscrowVault {
     /// @param escrowId Identifier of the escrow position
     /// @return status Full status snapshot including locked, released, remaining amounts and next unlock
     function getEscrowStatus(uint256 escrowId) external view returns (EscrowStatus memory status);
+
+    /// @notice Checks whether an escrow position is fully vested (all funds released).
+    /// @param poolId Uniswap V4 pool identifier
+    /// @return True if the escrow's releasedAmount equals its totalAmount
+    function isFullyVested(PoolId poolId) external view returns (bool);
+
+    /// @notice Returns the timestamp when the last vesting tranche unlocks.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @return endTime Timestamp of the final vesting unlock
+    function getVestingEndTime(PoolId poolId) external view returns (uint256 endTime);
 }

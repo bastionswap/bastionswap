@@ -202,8 +202,8 @@ export function useExecuteSwap() {
 // ─── Faucet ──────────────────────────────────
 
 export const FAUCETS: Record<string, `0x${string}`> = {
-  "0x1Afed1eC73e27a7ffbc24fE40Bcc6c3442D8709e": "0x9B76963C1e78a4480d97d5a119024eCa6B41081a",
-  "0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21": "0x43B1ca77024007e33D84911368070B6a772aE92A",
+  "0x410521668Ad1625527562CA90475406b1b9cB8Af": "0x5c45BE6ebc3a6559caFDaA4401BA925a28bf40cc",
+  "0x69ce9bACB558F35bCAC2e6fd54caa8770AEE85d4": "0xFE2c5447a7FA44d0758090d2ceb926A1aBaFf620",
 };
 
 export function useFaucet(faucetAddress: `0x${string}` | undefined, account: `0x${string}` | undefined) {

@@ -47,6 +47,9 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     /// @dev escrowId => dayNumber => amount withdrawn that day
     mapping(uint256 => mapping(uint256 => uint256)) internal _dailyWithdrawn;
 
+    /// @dev PoolId hash => escrowId (for pool-based lookups)
+    mapping(bytes32 => uint256) internal _poolEscrowIds;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyHook();
@@ -120,6 +123,9 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
             isTriggered: false,
             triggerType: 0
         });
+
+        // Map poolId to escrowId for pool-based lookups
+        _poolEscrowIds[PoolId.unwrap(poolId)] = escrowId;
 
         // Copy vesting schedule to storage
         for (uint256 i; i < vestingSchedule.length; ++i) {
@@ -266,6 +272,26 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
                 }
             }
         }
+    }
+
+    /// @inheritdoc IEscrowVault
+    function isFullyVested(PoolId poolId) external view returns (bool) {
+        uint256 escrowId = _poolEscrowIds[PoolId.unwrap(poolId)];
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) return false;
+        return escrow.releasedAmount == escrow.totalAmount;
+    }
+
+    /// @inheritdoc IEscrowVault
+    function getVestingEndTime(PoolId poolId) external view returns (uint256 endTime) {
+        uint256 escrowId = _poolEscrowIds[PoolId.unwrap(poolId)];
+        Escrow storage escrow = _escrows[escrowId];
+        if (escrow.createdAt == 0) return 0;
+
+        VestingStep[] storage schedule = _vestingSchedules[escrowId];
+        if (schedule.length == 0) return 0;
+
+        endTime = escrow.createdAt + escrow.commitment.lockDuration + schedule[schedule.length - 1].timeOffset;
     }
 
     // ─── Internal Functions ───────────────────────────────────────────

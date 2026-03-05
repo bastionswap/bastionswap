@@ -1,16 +1,15 @@
 {
   "network": "base-sepolia",
   "chainId": 84532,
-  "deployBlock": 38450218,
   "deployer": "0xAeF962115855bc985f56ECdE3b3B2e3995fE0f51",
   "contracts": {
-    "BastionDeployer": "0x1c36b9F19F2b95CB2A3ABDe4FdE2B831aC1c092f",
-    "BastionHook": "0x248B92269Bb935d76D871D5E271f29879A144AC0",
-    "EscrowVault": "0x2C01998931380d7F4f3F292aa1023B51CDeA9dcD",
-    "InsurancePool": "0x4EFE9E50d5bA7774459bea20f656aBBFd1887a98",
-    "TriggerOracle": "0x04D369129F5722E8d4a9621F0AE8247BE487Ec82",
-    "ReputationEngine": "0x0a5a7346c64FC65Ce1AdFA21eA98931bd4A38b4E",
-    "BastionRouter": "0x3E5f4e75C04f8e7e692d0b6360752ce639C55033"
+    "BastionDeployer": "0x48FFD436E949AcDCC2e49CA57121c658c3Dbb941",
+    "BastionHook": "0xC85852313B9BE98Be4EA17E212caeb6BB56e4Ac0",
+    "EscrowVault": "0xADdb75264a16a9d5727c5743859a39B4d57CD669",
+    "InsurancePool": "0x86b43706D57f948f704836a13Eb989833EE44611",
+    "TriggerOracle": "0x221D8a269626C0C43970874571eab5a45a434683",
+    "ReputationEngine": "0x3a3160A9257FDaBbbD1CfEA6f31763B064D24A7f",
+    "BastionRouter": "0x1aDcd4553C05a0A3eDDD022AF9788E4408D4395b"
   },
   "external": {
     "PoolManager": "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408",
@@ -18,28 +17,15 @@
     "WETH": "0x4200000000000000000000000000000000000006"
   },
   "testInfra": {
-    "testToken": "0x1Afed1eC73e27a7ffbc24fE40Bcc6c3442D8709e",
-    "baseToken": "0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21",
-    "lpRouter": "0x6c1760dFDb8406a39829f9c671946bD81CDAb310",
-    "swapRouter": "0x5c85610a3b98221c203B4f615196601f2282a668",
-    "testPoolId": "0x86faed6bb090dc8c4f13903862010bd13308e7abe103046ef54cb5846e86e94e",
-    "bttFaucet": "0x9B76963C1e78a4480d97d5a119024eCa6B41081a",
-    "btstFaucet": "0x43B1ca77024007e33D84911368070B6a772aE92A"
-  },
-  "e2e": {
-    "status": "PASSED",
-    "gasUsed": "0.001037 ETH",
-    "escrowLocked": "1000 BTT",
-    "insuranceBalance": "200000000000000 wei",
-    "reputationScore": 202
-  },
-  "subgraph": {
-    "name": "bastionswap-base-sepolia",
-    "url": "https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest"
+    "testToken": "0x410521668Ad1625527562CA90475406b1b9cB8Af",
+    "baseToken": "0x69ce9bACB558F35bCAC2e6fd54caa8770AEE85d4",
+    "lpRouter": "0x02fd82d9a0F3DC62De96C2025769A3728a47CAB1",
+    "swapRouter": "0x6f5C20c8Fa8830872931599f47159D5b4eC3506D",
+    "testPoolId": "0x4065c41a687983d9d6ed9a918c5ba0e4eb61e3041e1396e0e722241b6231f11e",
+    "bttFaucet": "0x5c45BE6ebc3a6559caFDaA4401BA925a28bf40cc",
+    "btstFaucet": "0xFE2c5447a7FA44d0758090d2ceb926A1aBaFf620"
   },
   "verification": {
-    "allContractsVerified": true,
-    "immutableReferencesChecked": true,
     "hookFlagsVerified": "0x0AC0",
     "explorerBaseUrl": "https://sepolia.basescan.org"
   }

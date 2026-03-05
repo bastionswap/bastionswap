@@ -227,8 +227,9 @@ export function InsuranceStatus({
 
       {!insurance.isTriggered && (
         <p className="mt-4 text-xs text-gray-500 leading-relaxed">
-          Insurance collects {formatBps(insurance.feeRate)} from each swap.
-          If a rug pull is detected, funds are distributed to holders as compensation.
+          Insurance collects {formatBps(insurance.feeRate)} from each swap as protection premium.
+          If a rug pull is detected, funds are distributed to holders.
+          If no incident occurs, premiums support the protocol treasury after a 30-day grace period.
         </p>
       )}
     </Card>

@@ -129,4 +129,21 @@ interface IInsurancePool {
     /// @notice Cancel a pending emergency withdrawal request.
     /// @param requestId The request identifier
     function cancelEmergencyWithdraw(bytes32 requestId) external;
+
+    // ─── Treasury ────────────────────────────────────────────────────
+
+    /// @notice Emitted when unclaimed insurance funds are sent to the protocol treasury.
+    event TreasuryFundsClaimed(PoolId indexed poolId, address indexed treasury, uint256 amount);
+
+    /// @notice Emitted when the treasury address is updated.
+    event TreasurySet(address oldTreasury, address newTreasury);
+
+    /// @notice Sets the treasury address for protocol fund collection.
+    /// @param treasury_ New treasury address
+    function setTreasury(address treasury_) external;
+
+    /// @notice Claims insurance pool funds to the treasury after normal pool completion.
+    /// @dev Requires: pool not triggered, escrow fully vested, grace period passed.
+    /// @param poolId Uniswap V4 pool identifier
+    function claimTreasuryFunds(PoolId poolId) external;
 }

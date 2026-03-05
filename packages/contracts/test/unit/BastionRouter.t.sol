@@ -80,7 +80,7 @@ contract BastionRouterTest is Test, Deployers {
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
         escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr, reputationAddr);
-        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance);
+        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
 
         bytes memory bytecode = abi.encodePacked(

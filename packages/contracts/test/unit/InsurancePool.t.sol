@@ -30,7 +30,7 @@ contract InsurancePoolTest is Test {
         holder2 = makeAddr("holder2");
         holder3 = makeAddr("holder3");
 
-        pool = new InsurancePool(hook, oracle, governance);
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
 
         // Fund the hook for deposits
@@ -927,6 +927,143 @@ contract InsurancePoolTest is Test {
         vm.expectRevert(InsurancePool.InsufficientTokenBalance.selector);
         pool.claimCompensation(defaultPoolId, 100_000 ether, emptyProof);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  TREASURY TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function _createTreasuryPool() internal returns (InsurancePool, MockEscrowVault, address) {
+        MockEscrowVault mockEscrow = new MockEscrowVault();
+        address treasuryAddr = makeAddr("treasury");
+
+        InsurancePool treasuryPool = new InsurancePool(hook, oracle, governance, address(mockEscrow), treasuryAddr);
+        return (treasuryPool, mockEscrow, treasuryAddr);
+    }
+
+    function test_claimTreasuryFunds_happyPath() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow, address treasuryAddr) = _createTreasuryPool();
+
+        // Deposit fees
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        // Set escrow as fully vested; set vesting end in the past
+        mockEscrow.setFullyVested(true);
+        uint256 vestingEnd = block.timestamp;
+        mockEscrow.setVestingEndTime(vestingEnd);
+
+        // Warp past grace period
+        vm.warp(vestingEnd + 30 days + 1);
+
+        vm.prank(governance);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+
+        assertEq(treasuryAddr.balance, DEPOSIT_AMOUNT);
+        IInsurancePool.PoolStatus memory status = treasuryPool.getPoolStatus(defaultPoolId);
+        assertEq(status.balance, 0);
+    }
+
+    function test_claimTreasuryFunds_revertsWhenTriggered() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow,) = _createTreasuryPool();
+
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        // Trigger the pool
+        vm.prank(oracle);
+        treasuryPool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(0));
+
+        mockEscrow.setFullyVested(true);
+        uint256 vestingEnd = block.timestamp;
+        mockEscrow.setVestingEndTime(vestingEnd);
+        vm.warp(vestingEnd + 30 days + 1);
+
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.AlreadyTriggered.selector);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    function test_claimTreasuryFunds_revertsEscrowNotVested() public {
+        (InsurancePool treasuryPool,,) = _createTreasuryPool();
+
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        // escrow not fully vested (default false)
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.EscrowNotFullyVested.selector);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    function test_claimTreasuryFunds_revertsGracePeriodNotPassed() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow,) = _createTreasuryPool();
+
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        mockEscrow.setFullyVested(true);
+        mockEscrow.setVestingEndTime(block.timestamp); // grace period not yet passed
+
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.GracePeriodNotPassed.selector);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    function test_claimTreasuryFunds_revertsZeroBalance() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow,) = _createTreasuryPool();
+
+        mockEscrow.setFullyVested(true);
+        uint256 vestingEnd = block.timestamp;
+        mockEscrow.setVestingEndTime(vestingEnd);
+        vm.warp(vestingEnd + 30 days + 1);
+
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.ZeroAmount.selector);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    function test_claimTreasuryFunds_revertsNotGovernance() public {
+        (InsurancePool treasuryPool,,) = _createTreasuryPool();
+
+        vm.expectRevert(InsurancePool.OnlyGovernance.selector);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    function test_setTreasury_happyPath() public {
+        (InsurancePool treasuryPool,,) = _createTreasuryPool();
+        address newTreasury = makeAddr("newTreasury");
+
+        vm.prank(governance);
+        treasuryPool.setTreasury(newTreasury);
+
+        assertEq(treasuryPool.treasury(), newTreasury);
+    }
+
+    function test_setTreasury_revertsZeroAddress() public {
+        (InsurancePool treasuryPool,,) = _createTreasuryPool();
+
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.ZeroAddress.selector);
+        treasuryPool.setTreasury(address(0));
+    }
+
+    function test_setTreasury_revertsNotGovernance() public {
+        (InsurancePool treasuryPool,,) = _createTreasuryPool();
+
+        vm.expectRevert(InsurancePool.OnlyGovernance.selector);
+        treasuryPool.setTreasury(makeAddr("newTreasury"));
+    }
+}
+
+contract MockEscrowVault {
+    bool public fullyVested;
+    uint256 public vestingEndTime;
+
+    function setFullyVested(bool _vested) external { fullyVested = _vested; }
+    function setVestingEndTime(uint256 _time) external { vestingEndTime = _time; }
+
+    function isFullyVested(PoolId) external view returns (bool) { return fullyVested; }
+    function getVestingEndTime(PoolId) external view returns (uint256) { return vestingEndTime; }
 }
 
 contract MockToken {

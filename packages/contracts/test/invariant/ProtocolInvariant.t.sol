@@ -234,7 +234,7 @@ contract ProtocolInvariantTest is Test {
         vault = new EscrowVault(hook, oracle, address(0), address(new MockRepEngine()));
 
         // InsurancePool: hook deposits fees, oracle triggers payouts
-        pool = new InsurancePool(hook, oracle, governance);
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
         insuranceAddr = address(pool);
 
         handler = new ProtocolHandler(vault, pool, token, hook, oracle, insuranceAddr, governance);
@@ -451,7 +451,7 @@ contract EconomicInvariantTest is Test {
 
         token = new MockERC20Token();
         vault = new EscrowVault(hook, oracle, address(0), address(new MockRepEngine()));
-        pool = new InsurancePool(hook, oracle, governance);
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
 
         handler = new EconomicHandler(vault, pool, token, hook, oracle, address(pool), AMOUNT);
 
@@ -518,7 +518,7 @@ contract CrossContractFuzzTest is Test {
 
         token = new MockERC20Token();
         vault = new EscrowVault(hook, oracle, address(0), address(new MockRepEngine()));
-        pool = new InsurancePool(hook, oracle, governance);
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
         insurancePool_ = address(pool);
     }
 
