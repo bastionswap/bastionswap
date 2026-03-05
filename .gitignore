@@ -17,6 +17,7 @@ packages/subgraph/generated/
 .env
 .env.local
 .env.*
+!.env.example
 
 # Coverage
 lcov.info
