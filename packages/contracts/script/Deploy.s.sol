@@ -5,10 +5,12 @@ import {Script, console2} from "forge-std/Script.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 import {BastionHook} from "../src/hooks/BastionHook.sol";
+import {BastionRouter} from "../src/router/BastionRouter.sol";
 import {EscrowVault} from "../src/core/EscrowVault.sol";
 import {InsurancePool} from "../src/core/InsurancePool.sol";
 import {TriggerOracle} from "../src/core/TriggerOracle.sol";
 import {ReputationEngine} from "../src/core/ReputationEngine.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {BastionDeployer} from "./BastionDeployer.sol";
 import {HookMiner} from "./HookMiner.sol";
@@ -77,6 +79,11 @@ contract Deploy is Script {
         // 6. Deploy BastionHook via CREATE2
         address deployedHook = factory.deploy(a.salt, a.hookCreationCode);
         require(deployedHook == a.hook, "Hook address mismatch");
+
+        // 7. Deploy BastionRouter and wire up cross-references
+        BastionRouter router = new BastionRouter(IPoolManager(poolManager));
+        BastionHook(payable(deployedHook)).setBastionRouter(address(router));
+        router.setBastionHook(deployedHook);
 
         vm.stopBroadcast();
 

@@ -2,6 +2,7 @@
 pragma solidity =0.8.26;
 
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
+import {IBastionHook} from "../interfaces/IBastionHook.sol";
 import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -54,6 +55,9 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     /// @dev PoolId hash => escrowId (for pool-based lookups)
     mapping(bytes32 => uint256) internal _poolEscrowIds;
+
+    /// @dev escrowId => PoolId (reverse mapping for force removal)
+    mapping(uint256 => PoolId) internal _escrowPoolIds;
 
     // ─── Errors ───────────────────────────────────────────────────────
 
@@ -129,6 +133,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
         // Map poolId to escrowId for pool-based lookups
         _poolEscrowIds[PoolId.unwrap(poolId)] = escrowId;
+        _escrowPoolIds[escrowId] = poolId;
 
         // Copy vesting schedule to storage
         for (uint256 i; i < vestingSchedule.length; ++i) {
@@ -217,7 +222,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @inheritdoc IEscrowVault
-    function triggerLockdown(uint256 escrowId, uint8 triggerType_)
+    function triggerForceRemoval(uint256 escrowId, uint8 triggerType_)
         external
         onlyTriggerOracle
         nonReentrant
@@ -226,10 +231,30 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         if (escrow.createdAt == 0) revert EscrowNotFound();
         if (escrow.isTriggered) revert EscrowTriggered();
 
+        // CEI: effects before interactions
         escrow.isTriggered = true;
         escrow.triggerType = triggerType_;
 
-        emit Lockdown(escrowId, triggerType_);
+        // Compute remaining liquidity to seize
+        uint128 remainingLiquidity = escrow.totalLiquidity - escrow.removedLiquidity;
+        escrow.removedLiquidity = escrow.totalLiquidity; // all seized
+
+        // Force-remove issuer LP via hook → router → poolManager
+        if (remainingLiquidity > 0) {
+            // Look up the poolId for this escrow
+            PoolId poolId = _escrowPoolIds[escrowId];
+            // Use low-level call to safely handle non-contract addresses and reverts
+            (bool success, bytes memory reason) = BASTION_HOOK.call(
+                abi.encodeCall(IBastionHook.forceRemoveIssuerLP, (poolId))
+            );
+            if (success) {
+                emit ForceRemoval(escrowId, triggerType_, remainingLiquidity);
+            } else {
+                emit ForceRemovalFailed(escrowId, reason);
+            }
+        } else {
+            emit ForceRemoval(escrowId, triggerType_, 0);
+        }
     }
 
     /// @inheritdoc IEscrowVault

@@ -7,6 +7,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 
 /// @title InsurancePool
 /// @notice Per-token isolated insurance pool funded by a portion of buy-side swap fees.
@@ -40,6 +41,10 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 totalClaimed; // cumulative claimed amount (safety check)
         bool useMerkleProof; // true = Merkle path, false = balanceOf fallback
         address issuedToken; // issued token address for fallback balanceOf claims
+        uint256 escrowEthBalance; // ETH from force-removed issuer LP
+        uint256 escrowTokenBalance; // tokens from force-removed issuer LP
+        address escrowToken; // token address for escrow funds
+        uint256 tokenPayoutBalance; // snapshot of escrow token balance at payout time
         mapping(address => bool) claimed;
     }
 
@@ -122,6 +127,16 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     }
 
     /// @inheritdoc IInsurancePool
+    function receiveEscrowFunds(PoolId poolId, address token, uint256 tokenAmount) external payable onlyHook {
+        PoolData storage pool = _getPool(poolId);
+        pool.escrowEthBalance += msg.value;
+        pool.escrowTokenBalance += tokenAmount;
+        pool.escrowToken = token;
+
+        emit EscrowFundsReceived(poolId, msg.value, token, tokenAmount);
+    }
+
+    /// @inheritdoc IInsurancePool
     function executePayout(
         PoolId poolId,
         uint8 triggerType,
@@ -133,13 +148,15 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (pool.isTriggered) revert AlreadyTriggered();
         if (totalEligibleSupply == 0) revert ZeroEligibleSupply();
 
-        totalPayout = pool.balance;
+        // Include escrow ETH in total payout
+        totalPayout = pool.balance + pool.escrowEthBalance;
 
         pool.isTriggered = true;
         pool.triggerTimestamp = uint40(block.timestamp);
         pool.triggerType = triggerType;
         pool.totalEligibleSupply = totalEligibleSupply;
         pool.payoutBalance = totalPayout;
+        pool.tokenPayoutBalance = pool.escrowTokenBalance; // snapshot token balance
         pool.merkleRoot = merkleRoot;
         pool.useMerkleProof = (merkleRoot != bytes32(0));
         pool.issuedToken = issuedToken;
@@ -174,7 +191,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         }
 
         amount = _calculateCompensation(pool, holderBalance);
-        if (amount == 0) revert ZeroAmount();
+        uint256 tokenShare = _calculateTokenCompensation(pool, holderBalance);
+        if (amount == 0 && tokenShare == 0) revert ZeroAmount();
 
         // Safety check: totalClaimed must not exceed pool balance
         if (pool.totalClaimed + amount > pool.payoutBalance) revert ExceedsPoolBalance();
@@ -184,8 +202,16 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         pool.totalClaimed += amount;
         pool.balance -= amount;
 
-        (bool success,) = msg.sender.call{value: amount}("");
-        if (!success) revert TransferFailed();
+        // Transfer ETH
+        if (amount > 0) {
+            (bool success,) = msg.sender.call{value: amount}("");
+            if (!success) revert TransferFailed();
+        }
+
+        // Transfer tokens from escrow funds
+        if (tokenShare > 0 && pool.escrowToken != address(0)) {
+            IERC20Minimal(pool.escrowToken).transfer(msg.sender, tokenShare);
+        }
 
         emit CompensationClaimed(poolId, msg.sender, amount);
     }
@@ -315,5 +341,14 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         // pro-rata: (payoutBalance * holderBalance) / totalEligibleSupply
         // Round down to prevent over-distribution
         return (pool.payoutBalance * holderBalance) / pool.totalEligibleSupply;
+    }
+
+    function _calculateTokenCompensation(PoolData storage pool, uint256 holderBalance)
+        internal
+        view
+        returns (uint256)
+    {
+        if (pool.tokenPayoutBalance == 0) return 0;
+        return (pool.tokenPayoutBalance * holderBalance) / pool.totalEligibleSupply;
     }
 }

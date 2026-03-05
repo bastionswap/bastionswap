@@ -394,8 +394,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);
         IEscrowVault.EscrowStatus memory status = escrowVault.getEscrowStatus(escrowId);
         assertEq(status.remainingLiquidity, 0); // triggered, so remaining = 0
-        // removedLiquidity should still be 0 (no LP was actually removed before trigger)
-        assertEq(status.removedLiquidity, 0);
+        // removedLiquidity == totalLiquidity (all seized during force removal)
+        assertEq(status.removedLiquidity, status.totalLiquidity);
     }
 
     // ═══════════════════════════════════════════════════════════════════

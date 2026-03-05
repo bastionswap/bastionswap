@@ -74,7 +74,7 @@ contract EscrowVaultHandler is Test {
         if (ghost_triggered) return;
 
         vm.prank(oracle);
-        try vault.triggerLockdown(escrowId, 1) {
+        try vault.triggerForceRemoval(escrowId, 1) {
             ghost_triggered = true;
         } catch {}
     }
@@ -442,7 +442,7 @@ contract EscrowVaultFuzzTest is Test {
 
         // Trigger lockdown
         vm.prank(oracle);
-        vault.triggerLockdown(escrowId, 1);
+        vault.triggerForceRemoval(escrowId, 1);
 
         // Removal must revert
         vm.prank(hook);

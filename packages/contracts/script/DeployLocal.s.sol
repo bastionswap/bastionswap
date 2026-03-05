@@ -112,6 +112,11 @@ contract DeployLocal is Script {
         require(deployedHook == a.hook, "Hook address mismatch");
 
         BastionRouter router = new BastionRouter(IPoolManager(POOL_MANAGER));
+
+        // Wire up hook ↔ router cross-references
+        BastionHook(payable(deployedHook)).setBastionRouter(address(router));
+        router.setBastionHook(deployedHook);
+
         TestToken btt = new TestToken("Bastion Test Token", "BTT", 18, 1_000_000e18);
         PoolModifyLiquidityTest lpRouter = new PoolModifyLiquidityTest(IPoolManager(POOL_MANAGER));
         PoolSwapTest swapRouter = new PoolSwapTest(IPoolManager(POOL_MANAGER));

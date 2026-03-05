@@ -66,6 +66,19 @@
   },
   {
     "type": "function",
+    "name": "bastionHook",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "createPool",
     "inputs": [
       {
@@ -133,6 +146,56 @@
   },
   {
     "type": "function",
+    "name": "forceRemoveLiquidity",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "tuple",
+        "internalType": "struct PoolKey",
+        "components": [
+          {
+            "name": "currency0",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "currency1",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "fee",
+            "type": "uint24",
+            "internalType": "uint24"
+          },
+          {
+            "name": "tickSpacing",
+            "type": "int24",
+            "internalType": "int24"
+          },
+          {
+            "name": "hooks",
+            "type": "address",
+            "internalType": "contract IHooks"
+          }
+        ]
+      },
+      {
+        "name": "liquidity",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "poolManager",
     "inputs": [],
     "outputs": [
@@ -184,6 +247,19 @@
         "name": "liquidityToRemove",
         "type": "uint128",
         "internalType": "uint128"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setBastionHook",
+    "inputs": [
+      {
+        "name": "hook",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -363,6 +439,11 @@
   },
   {
     "type": "error",
+    "name": "HookAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InsufficientOutput",
     "inputs": [
       {
@@ -376,6 +457,11 @@
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "OnlyHook",
+    "inputs": []
   },
   {
     "type": "error",

@@ -52,6 +52,8 @@ type InsurancePool @entity {
   id: ID! # poolId
   pool: Pool!
   balance: BigDecimal!
+  escrowEthBalance: BigDecimal!
+  escrowTokenBalance: BigDecimal!
   isTriggered: Boolean!
   triggerType: Int
   merkleRoot: Bytes
@@ -68,7 +70,8 @@ type TriggerEvent @entity {
   triggerTypeName: String!
   timestamp: BigInt!
   transactionHash: Bytes!
-  escrowLockedDown: Boolean!
+  escrowForceRemoved: Boolean!
+  liquidityRemoved: BigDecimal
   insurancePayout: BigDecimal
   withMerkleRoot: Boolean!
 }
@@ -88,6 +91,7 @@ type Claim @entity {
   pool: Pool!
   holder: Bytes!
   amount: BigDecimal!
+  tokenAmount: BigDecimal
   claimedAt: BigInt!
   transactionHash: Bytes!
 }

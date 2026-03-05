@@ -26,7 +26,7 @@ export function handleTriggerPending(event: TriggerPending): void {
   trigger.triggerTypeName = triggerTypeName(triggerType);
   trigger.timestamp = event.block.timestamp;
   trigger.transactionHash = event.transaction.hash;
-  trigger.escrowLockedDown = false;
+  trigger.escrowForceRemoved = false;
   trigger.withMerkleRoot = false;
   trigger.save();
 }
@@ -50,7 +50,7 @@ export function handleTriggerExecuted(event: TriggerExecuted): void {
   trigger.triggerTypeName = triggerTypeName(triggerType);
   trigger.timestamp = event.block.timestamp;
   trigger.transactionHash = event.transaction.hash;
-  trigger.escrowLockedDown = true;
+  trigger.escrowForceRemoved = true;
   trigger.withMerkleRoot = event.params.withMerkleRoot;
   trigger.save();
 

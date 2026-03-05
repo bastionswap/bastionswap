@@ -460,6 +460,19 @@
   },
   {
     "type": "function",
+    "name": "bastionRouter",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "beforeAddLiquidity",
     "inputs": [
       {
@@ -849,6 +862,19 @@
   },
   {
     "type": "function",
+    "name": "forceRemoveIssuerLP",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "getHookPermissions",
     "inputs": [],
     "outputs": [
@@ -1031,6 +1057,19 @@
   },
   {
     "type": "function",
+    "name": "setBastionRouter",
+    "inputs": [
+      {
+        "name": "router",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "syncFeeRate",
     "inputs": [],
     "outputs": [],
@@ -1048,6 +1087,19 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "BastionRouterSet",
+    "inputs": [
+      {
+        "name": "router",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
   },
   {
     "type": "event",
@@ -1089,6 +1141,37 @@
         "type": "bytes32",
         "indexed": true,
         "internalType": "PoolId"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ForceRemovalExecuted",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "PoolId"
+      },
+      {
+        "name": "ethAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -1236,7 +1319,27 @@
   },
   {
     "type": "error",
+    "name": "OnlyEscrowVault",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyOwner",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OnlyPoolManager",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouterNotSet",
     "inputs": []
   }
 ]

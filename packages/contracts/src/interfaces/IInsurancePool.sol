@@ -46,6 +46,13 @@ interface IInsurancePool {
     /// @param newRate New fee rate in basis points
     event FeeRateUpdated(uint16 oldRate, uint16 newRate);
 
+    /// @notice Emitted when escrow funds are received from force-removed LP.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param ethAmount Amount of ETH received
+    /// @param token Address of the token received
+    /// @param tokenAmount Amount of tokens received
+    event EscrowFundsReceived(PoolId indexed poolId, uint256 ethAmount, address token, uint256 tokenAmount);
+
     /// @notice Emitted when an emergency withdrawal is executed.
     /// @param poolId Pool identifier
     /// @param to Recipient address
@@ -85,6 +92,13 @@ interface IInsurancePool {
     function claimCompensation(PoolId poolId, uint256 holderBalance, bytes32[] calldata merkleProof)
         external
         returns (uint256 amount);
+
+    /// @notice Receives ETH and token assets from force-removed issuer LP.
+    /// @dev Called by BastionHook after force removal. Tokens must be transferred before calling.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param token Address of the issued token
+    /// @param tokenAmount Amount of tokens received
+    function receiveEscrowFunds(PoolId poolId, address token, uint256 tokenAmount) external payable;
 
     /// @notice Calculates the compensation amount for a given holder balance.
     /// @param poolId Uniswap V4 pool identifier

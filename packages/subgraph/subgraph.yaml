@@ -90,8 +90,10 @@ dataSources:
           handler: handleLiquidityAdded
         - event: LPRemovalRecorded(indexed uint256,uint128)
           handler: handleLPRemovalRecorded
-        - event: Lockdown(indexed uint256,indexed uint8)
-          handler: handleLockdown
+        - event: ForceRemoval(indexed uint256,indexed uint8,uint128)
+          handler: handleForceRemoval
+        - event: ForceRemovalFailed(indexed uint256,bytes)
+          handler: handleForceRemovalFailed
         - event: CommitmentSet(indexed uint256,(uint16,uint40,uint16))
           handler: handleCommitmentSet
       file: ./src/mappings/escrowVault.ts
@@ -121,6 +123,8 @@ dataSources:
           handler: handlePayoutExecuted
         - event: CompensationClaimed(indexed bytes32,indexed address,uint256)
           handler: handleCompensationClaimed
+        - event: EscrowFundsReceived(indexed bytes32,uint256,address,uint256)
+          handler: handleEscrowFundsReceived
         - event: FeeRateUpdated(uint16,uint16)
           handler: handleFeeRateUpdated
       file: ./src/mappings/insurancePool.ts

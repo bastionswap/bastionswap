@@ -478,7 +478,7 @@
   },
   {
     "type": "function",
-    "name": "triggerLockdown",
+    "name": "triggerForceRemoval",
     "inputs": [
       {
         "name": "escrowId",
@@ -582,6 +582,50 @@
   },
   {
     "type": "event",
+    "name": "ForceRemoval",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "triggerType",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "uint8"
+      },
+      {
+        "name": "liquidityRemoved",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ForceRemovalFailed",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reason",
+        "type": "bytes",
+        "indexed": false,
+        "internalType": "bytes"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "LPRemovalRecorded",
     "inputs": [
       {
@@ -620,25 +664,6 @@
         "type": "uint128",
         "indexed": false,
         "internalType": "uint128"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "Lockdown",
-    "inputs": [
-      {
-        "name": "escrowId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "triggerType",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "uint8"
       }
     ],
     "anonymous": false

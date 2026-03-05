@@ -43,6 +43,8 @@ export function handleIssuerRegistered(event: IssuerRegistered): void {
   let insurance = new InsurancePoolEntity(poolId);
   insurance.pool = poolId;
   insurance.balance = ZERO_BD;
+  insurance.escrowEthBalance = ZERO_BD;
+  insurance.escrowTokenBalance = ZERO_BD;
   insurance.isTriggered = false;
   insurance.useMerkleProof = false;
   insurance.totalClaimed = ZERO_BD;

@@ -13,10 +13,29 @@ contract MockReputationEngine {
     function getScore(address) external pure returns (uint256) { return 500; }
 }
 
+// ─── Mock BastionHook (for triggerForceRemoval calls) ────────────────────────
+
+contract MockBastionHook {
+    bool public forceRemoveCalled;
+    PoolId public lastPoolId;
+    bool public shouldRevert;
+
+    function forceRemoveIssuerLP(PoolId poolId) external {
+        if (shouldRevert) revert("MockHook: forced revert");
+        forceRemoveCalled = true;
+        lastPoolId = poolId;
+    }
+
+    function setShouldRevert(bool _shouldRevert) external {
+        shouldRevert = _shouldRevert;
+    }
+}
+
 // ─── Test Contract ────────────────────────────────────────────────────────────
 
 contract EscrowVaultTest is Test {
     EscrowVault public vault;
+    MockBastionHook public mockHook;
 
     address public hook;
     address public oracle;
@@ -28,7 +47,8 @@ contract EscrowVaultTest is Test {
     uint128 constant ESCROW_LIQUIDITY = 100e18;
 
     function setUp() public {
-        hook = makeAddr("hook");
+        mockHook = new MockBastionHook();
+        hook = address(mockHook);
         oracle = makeAddr("oracle");
         issuer = makeAddr("issuer");
 
@@ -299,7 +319,7 @@ contract EscrowVaultTest is Test {
 
         // Trigger lockdown first
         vm.prank(oracle);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.EscrowTriggered.selector);
@@ -410,51 +430,72 @@ contract EscrowVaultTest is Test {
     //  TRIGGER LOCKDOWN TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_triggerLockdown_setsTriggered() public {
+    function test_triggerForceRemoval_setsTriggered() public {
         _createDefaultEscrow();
 
         vm.prank(oracle);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
 
         // getRemovableLiquidity should return 0
         assertEq(vault.getRemovableLiquidity(defaultEscrowId), 0);
     }
 
-    function test_triggerLockdown_emitsEvent() public {
+    function test_triggerForceRemoval_emitsEvent() public {
         _createDefaultEscrow();
 
-        vm.expectEmit(true, true, false, false);
-        emit IEscrowVault.Lockdown(defaultEscrowId, 1);
+        vm.expectEmit(true, true, false, true);
+        emit IEscrowVault.ForceRemoval(defaultEscrowId, 1, ESCROW_LIQUIDITY);
 
         vm.prank(oracle);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
     }
 
-    function test_triggerLockdown_revertsNotOracle() public {
+    function test_triggerForceRemoval_callsHook() public {
+        _createDefaultEscrow();
+
+        vm.prank(oracle);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
+
+        assertTrue(mockHook.forceRemoveCalled());
+    }
+
+    function test_triggerForceRemoval_persistsOnHookFailure() public {
+        _createDefaultEscrow();
+
+        mockHook.setShouldRevert(true);
+
+        vm.prank(oracle);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
+
+        // Escrow should still be marked as triggered
+        assertEq(vault.getRemovableLiquidity(defaultEscrowId), 0);
+    }
+
+    function test_triggerForceRemoval_revertsNotOracle() public {
         _createDefaultEscrow();
 
         vm.expectRevert(EscrowVault.OnlyTriggerOracle.selector);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
     }
 
-    function test_triggerLockdown_revertsAlreadyTriggered() public {
+    function test_triggerForceRemoval_revertsAlreadyTriggered() public {
         _createDefaultEscrow();
 
         vm.prank(oracle);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
 
         vm.prank(oracle);
         vm.expectRevert(EscrowVault.EscrowTriggered.selector);
-        vault.triggerLockdown(defaultEscrowId, 2);
+        vault.triggerForceRemoval(defaultEscrowId, 2);
     }
 
-    function test_triggerLockdown_revertsNotFound() public {
+    function test_triggerForceRemoval_revertsNotFound() public {
         vm.prank(oracle);
         vm.expectRevert(EscrowVault.EscrowNotFound.selector);
-        vault.triggerLockdown(999, 1);
+        vault.triggerForceRemoval(999, 1);
     }
 
-    function test_triggerLockdown_blocksRemoval() public {
+    function test_triggerForceRemoval_blocksRemoval() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
             lockDuration: 0,
@@ -470,7 +511,7 @@ contract EscrowVaultTest is Test {
 
         // Trigger lockdown
         vm.prank(oracle);
-        vault.triggerLockdown(escrowId, 1);
+        vault.triggerForceRemoval(escrowId, 1);
 
         // Attempt removal — should fail
         vm.prank(hook);
@@ -528,7 +569,7 @@ contract EscrowVaultTest is Test {
         vm.warp(block.timestamp + 90 days);
 
         vm.prank(oracle);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
 
         assertEq(vault.getRemovableLiquidity(defaultEscrowId), 0);
     }
@@ -660,7 +701,7 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         vm.prank(oracle);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
 
         IEscrowVault.IssuerCommitment memory stricter = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 300,
@@ -762,7 +803,7 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         vm.prank(oracle);
-        vault.triggerLockdown(defaultEscrowId, 1);
+        vault.triggerForceRemoval(defaultEscrowId, 1);
 
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(defaultEscrowId);
         assertEq(status.remainingLiquidity, 0);

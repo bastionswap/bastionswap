@@ -30,6 +30,10 @@ contract BastionRouter is IUnlockCallback {
     uint8 private constant ACTION_CREATE_POOL = 1;
     uint8 private constant ACTION_REMOVE_LP = 2;
     uint8 private constant ACTION_ADD_LP = 3;
+    uint8 private constant ACTION_FORCE_REMOVE = 4;
+
+    /// @dev BastionHook address for access control on forceRemoveLiquidity
+    address public bastionHook;
 
     struct CreatePoolParams {
         PoolKey key;
@@ -41,11 +45,30 @@ contract BastionRouter is IUnlockCallback {
 
     error Expired();
     error OnlyPoolManager();
+    error OnlyHook();
+    error HookAlreadySet();
     error InsufficientOutput(uint256 amountOut, uint256 minAmountOut);
     error ExcessiveInput(uint256 amountIn, uint256 maxAmountIn);
 
     constructor(IPoolManager _poolManager) {
         poolManager = _poolManager;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  HOOK SETUP
+    // ═══════════════════════════════════════════════════════════════
+
+    /// @notice Set the BastionHook address for access control. One-time setter.
+    function setBastionHook(address hook) external {
+        if (bastionHook != address(0)) revert HookAlreadySet();
+        bastionHook = hook;
+    }
+
+    /// @notice Force-removes liquidity from a pool and sends resulting tokens to recipient.
+    /// @dev Called by BastionHook during force removal. Only callable by the hook.
+    function forceRemoveLiquidity(PoolKey calldata key, uint128 liquidity, address recipient) external {
+        if (msg.sender != bastionHook) revert OnlyHook();
+        poolManager.unlock(abi.encode(ACTION_FORCE_REMOVE, recipient, key, liquidity));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -157,6 +180,8 @@ contract BastionRouter is IUnlockCallback {
             return _handleRemoveLP(data);
         } else if (action == ACTION_ADD_LP) {
             return _handleAddLP(data);
+        } else if (action == ACTION_FORCE_REMOVE) {
+            return _handleForceRemoveLP(data);
         }
 
         revert("Unknown action");
@@ -288,6 +313,34 @@ contract BastionRouter is IUnlockCallback {
         return abi.encode(delta);
     }
 
+    function _handleForceRemoveLP(bytes calldata data) internal returns (bytes memory) {
+        (, address recipient, PoolKey memory key, uint128 liquidity) =
+            abi.decode(data, (uint8, address, PoolKey, uint128));
+
+        // Compute full-range ticks
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+
+        // Force remove with empty hookData (transient flag handles auth in hook)
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: -int256(uint256(liquidity)),
+                salt: 0
+            }),
+            ""
+        );
+
+        // Send tokens/ETH to recipient (the hook) — both deltas should be positive (receiving)
+        _settleToRecipient(key.currency0, recipient, delta.amount0());
+        _settleToRecipient(key.currency1, recipient, delta.amount1());
+
+        return abi.encode(delta);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  INTERNAL SETTLEMENT
     // ═══════════════════════════════════════════════════════════════
@@ -307,6 +360,27 @@ contract BastionRouter is IUnlockCallback {
         } else if (amount > 0) {
             uint256 amountToReceive = uint256(uint128(amount));
             poolManager.take(currency, sender, amountToReceive);
+        }
+    }
+
+    /// @dev Settlement for force removal: positive deltas go to recipient, negatives settle from pool
+    function _settleToRecipient(Currency currency, address recipient, int128 amount) internal {
+        if (amount > 0) {
+            uint256 amountToReceive = uint256(uint128(amount));
+            poolManager.take(currency, recipient, amountToReceive);
+        }
+        // Negative deltas shouldn't happen for removals, but handle defensively
+        if (amount < 0) {
+            uint256 amountToSend = uint256(uint128(-amount));
+            if (currency.isAddressZero()) {
+                poolManager.settle{value: amountToSend}();
+            } else {
+                poolManager.sync(currency);
+                IERC20Minimal(Currency.unwrap(currency)).transferFrom(
+                    address(this), address(poolManager), amountToSend
+                );
+                poolManager.settle();
+            }
         }
     }
 

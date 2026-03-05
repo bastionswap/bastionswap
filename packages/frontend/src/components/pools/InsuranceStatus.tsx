@@ -231,7 +231,7 @@ export function InsuranceStatus({
                   {TRIGGER_NAMES[insurance.triggerType ?? 0] || "Unknown"} detected
                 </p>
                 <p className="text-xs text-red-600/70 mt-0.5">
-                  {totalClaimed.toFixed(4)} ETH distributed so far
+                  Issuer LP force-removed. {totalClaimed.toFixed(4)} ETH distributed so far.
                 </p>
               </div>
             </div>

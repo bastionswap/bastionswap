@@ -13,10 +13,12 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
+import {IBastionRouter} from "../interfaces/IBastionRouter.sol";
 import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
 import {InsurancePool} from "../core/InsurancePool.sol";
 import {ITriggerOracle} from "../interfaces/ITriggerOracle.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 
 import {TriggerOracle} from "../core/TriggerOracle.sol";
 
@@ -52,6 +54,15 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => router address that created the issuer's LP position
     mapping(PoolId => address) internal _issuerLPOwner;
 
+    /// @dev poolId => PoolKey stored during issuer registration for force removal
+    mapping(PoolId => PoolKey) internal _poolKeys;
+
+    /// @dev BastionRouter address (set via one-time setter, deployed after hook due to CREATE2)
+    address public bastionRouter;
+
+    /// @dev Owner address for setBastionRouter (deployer)
+    address internal _owner;
+
     /// @dev Cached insurance fee rate (basis points) to avoid cross-contract call
     uint16 internal _cachedFeeRate;
 
@@ -63,6 +74,10 @@ contract BastionHook is BaseTestHooks {
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyPoolManager();
+    error OnlyEscrowVault();
+    error OnlyOwner();
+    error RouterAlreadySet();
+    error RouterNotSet();
     error InvalidHookData();
     error ExceedsVestedAmount(uint128 requested, uint128 removable);
     error MustIdentifyUser();
@@ -76,6 +91,8 @@ contract BastionHook is BaseTestHooks {
     event IssuerSaleReported(PoolId indexed poolId, address indexed issuer, uint256 amount);
     event LPRemovalReported(PoolId indexed poolId, uint256 amount, uint256 totalLP);
     event ExternalCallFailed(string target, PoolId indexed poolId);
+    event ForceRemovalExecuted(PoolId indexed poolId, uint256 ethAmount, address token, uint256 tokenAmount);
+    event BastionRouterSet(address indexed router);
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -98,6 +115,7 @@ contract BastionHook is BaseTestHooks {
         insurancePool = _insurancePool;
         triggerOracle = _triggerOracle;
         reputationEngine = _reputationEngine;
+        _owner = msg.sender;
     }
 
     // ─── Hook Permission Flags ────────────────────────────────────────
@@ -176,6 +194,7 @@ contract BastionHook is BaseTestHooks {
 
     /// @notice Called before liquidity is removed. Enforces vesting for issuer's LP.
     ///         Non-issuer LP is completely free — no restrictions.
+    ///         Force removal via trigger bypasses all vesting checks.
     function beforeRemoveLiquidity(
         address sender,
         PoolKey calldata key,
@@ -195,6 +214,18 @@ contract BastionHook is BaseTestHooks {
             : 0;
 
         if (removeAmount == 0) {
+            return IHooks.beforeRemoveLiquidity.selector;
+        }
+
+        // Force removal in progress → skip all vesting checks
+        if (_tload(_FORCE_REMOVAL_SLOT) == 1) {
+            // Only update tracked liquidity (forceRemoveIssuerLP handles the rest)
+            uint256 currentLP = _totalLiquidity[poolId];
+            if (removeAmount <= currentLP) {
+                _totalLiquidity[poolId] = currentLP - removeAmount;
+            } else {
+                _totalLiquidity[poolId] = 0;
+            }
             return IHooks.beforeRemoveLiquidity.selector;
         }
 
@@ -303,6 +334,61 @@ contract BastionHook is BaseTestHooks {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  FORCE REMOVAL
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @dev Transient storage slot for force removal in-progress flag
+    bytes32 private constant _FORCE_REMOVAL_SLOT = keccak256("BastionHook.forceRemovalInProgress");
+
+    /// @notice Set the BastionRouter address. One-time setter (router deployed after hook).
+    function setBastionRouter(address router) external {
+        if (msg.sender != _owner) revert OnlyOwner();
+        if (bastionRouter != address(0)) revert RouterAlreadySet();
+        bastionRouter = router;
+        emit BastionRouterSet(router);
+    }
+
+    /// @notice Force-removes issuer's remaining LP from the pool and sends assets to InsurancePool.
+    /// @dev Called by EscrowVault during triggerForceRemoval.
+    function forceRemoveIssuerLP(PoolId poolId) external {
+        if (msg.sender != address(escrowVault)) revert OnlyEscrowVault();
+        if (bastionRouter == address(0)) revert RouterNotSet();
+
+        PoolKey memory key = _poolKeys[poolId];
+        uint256 liquidity = _totalLiquidity[poolId];
+        if (liquidity == 0) return;
+
+        // Set transient flag to bypass vesting checks in beforeRemoveLiquidity
+        _tstore(_FORCE_REMOVAL_SLOT, 1);
+
+        // Call router to force-remove liquidity, tokens/ETH sent to this contract
+        IBastionRouter(bastionRouter).forceRemoveLiquidity(key, uint128(liquidity), address(this));
+
+        // Clear transient flag
+        _tstore(_FORCE_REMOVAL_SLOT, 0);
+
+        // Update tracked liquidity
+        _totalLiquidity[poolId] = 0;
+
+        // Forward received ETH + tokens to InsurancePool
+        address token = _issuedTokens[poolId];
+        uint256 ethBalance = address(this).balance;
+        uint256 tokenAmount = 0;
+        if (token != address(0)) {
+            tokenAmount = ERC20(token).balanceOf(address(this));
+            if (tokenAmount > 0) {
+                IERC20Minimal(token).transfer(address(insurancePool), tokenAmount);
+            }
+        }
+
+        if (ethBalance > 0 || tokenAmount > 0) {
+            insurancePool.receiveEscrowFunds{value: ethBalance}(poolId, token, tokenAmount);
+        }
+
+        emit ForceRemovalExecuted(poolId, ethBalance, token, tokenAmount);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -338,7 +424,7 @@ contract BastionHook is BaseTestHooks {
 
     function _registerIssuerAndCreateEscrow(
         PoolId poolId,
-        PoolKey calldata,
+        PoolKey calldata key,
         address sender,
         uint128 liquidity,
         bytes calldata hookData
@@ -359,6 +445,7 @@ contract BastionHook is BaseTestHooks {
         _issuers[poolId] = issuer;
         _issuedTokens[poolId] = token;
         _issuerLPOwner[poolId] = sender; // Store the router that created issuer's LP
+        _poolKeys[poolId] = key; // Store PoolKey for force removal
 
         // Initialize cached fee rate on first pool creation
         if (_cachedFeeRate == 0) {

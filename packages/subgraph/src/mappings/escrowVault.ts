@@ -3,7 +3,8 @@ import {
   EscrowCreated,
   LiquidityAdded,
   LPRemovalRecorded,
-  Lockdown,
+  ForceRemoval,
+  ForceRemovalFailed,
   CommitmentSet,
 } from "../../generated/EscrowVault/EscrowVault";
 import {
@@ -27,9 +28,9 @@ export function handleEscrowVaultCreated(event: EscrowCreated): void {
   let escrow = new Escrow(escrowId);
   escrow.pool = poolId;
   escrow.issuer = event.params.issuer;
-  escrow.totalLiquidity = toDecimal(BigInt.fromI64(event.params.liquidity));
+  escrow.totalLiquidity = toDecimal(event.params.liquidity);
   escrow.removedLiquidity = ZERO_BD;
-  escrow.remainingLiquidity = toDecimal(BigInt.fromI64(event.params.liquidity));
+  escrow.remainingLiquidity = toDecimal(event.params.liquidity);
   escrow.isTriggered = false;
   escrow.createdAt = event.block.timestamp;
   escrow.save();
@@ -53,7 +54,7 @@ export function handleEscrowVaultCreated(event: EscrowCreated): void {
   // Update protocol stats
   let stats = getOrCreateProtocolStats();
   stats.totalEscrowLocked = stats.totalEscrowLocked.plus(
-    toDecimal(BigInt.fromI64(event.params.liquidity))
+    toDecimal(event.params.liquidity)
   );
   stats.save();
 }
@@ -62,13 +63,13 @@ export function handleLiquidityAdded(event: LiquidityAdded): void {
   let escrowId = event.params.escrowId.toHexString();
   let escrow = Escrow.load(escrowId);
   if (escrow != null) {
-    let newTotal = toDecimal(BigInt.fromI64(event.params.newTotal));
+    let newTotal = toDecimal(event.params.newTotal);
     escrow.totalLiquidity = newTotal;
     escrow.remainingLiquidity = newTotal.minus(escrow.removedLiquidity);
     escrow.save();
 
     // Update protocol stats
-    let addedAmount = toDecimal(BigInt.fromI64(event.params.liquidityAdded));
+    let addedAmount = toDecimal(event.params.liquidityAdded);
     let stats = getOrCreateProtocolStats();
     stats.totalEscrowLocked = stats.totalEscrowLocked.plus(addedAmount);
     stats.save();
@@ -79,18 +80,20 @@ export function handleLPRemovalRecorded(event: LPRemovalRecorded): void {
   let escrowId = event.params.escrowId.toHexString();
   let escrow = Escrow.load(escrowId);
   if (escrow != null) {
-    let removedAmount = toDecimal(BigInt.fromI64(event.params.liquidityRemoved));
+    let removedAmount = toDecimal(event.params.liquidityRemoved);
     escrow.removedLiquidity = escrow.removedLiquidity.plus(removedAmount);
     escrow.remainingLiquidity = escrow.totalLiquidity.minus(escrow.removedLiquidity);
     escrow.save();
   }
 }
 
-export function handleLockdown(event: Lockdown): void {
+export function handleForceRemoval(event: ForceRemoval): void {
   let escrowId = event.params.escrowId.toHexString();
   let escrow = Escrow.load(escrowId);
   if (escrow != null) {
     escrow.isTriggered = true;
+    let liquidityRemoved = toDecimal(event.params.liquidityRemoved);
+    escrow.removedLiquidity = escrow.totalLiquidity;
     escrow.remainingLiquidity = ZERO_BD;
     escrow.save();
 
@@ -102,6 +105,18 @@ export function handleLockdown(event: Lockdown): void {
     issuer.totalTriggersActivated = issuer.totalTriggersActivated + 1;
     issuer.lastUpdated = event.block.timestamp;
     issuer.save();
+  }
+}
+
+export function handleForceRemovalFailed(event: ForceRemovalFailed): void {
+  let escrowId = event.params.escrowId.toHexString();
+  let escrow = Escrow.load(escrowId);
+  if (escrow != null) {
+    // Escrow is still marked as triggered even if force removal failed
+    escrow.isTriggered = true;
+    escrow.removedLiquidity = escrow.totalLiquidity;
+    escrow.remainingLiquidity = ZERO_BD;
+    escrow.save();
   }
 }
 

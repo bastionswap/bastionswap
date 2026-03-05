@@ -61,10 +61,16 @@ interface IEscrowVault {
     /// @param liquidityRemoved Amount of liquidity removed in this transaction
     event LPRemovalRecorded(uint256 indexed escrowId, uint128 liquidityRemoved);
 
-    /// @notice Emitted when escrow is locked down due to a trigger event.
+    /// @notice Emitted when escrow LP is force-removed due to a trigger event.
     /// @param escrowId Escrow identifier
-    /// @param triggerType Type of trigger that caused the lockdown
-    event Lockdown(uint256 indexed escrowId, uint8 indexed triggerType);
+    /// @param triggerType Type of trigger that caused the force removal
+    /// @param liquidityRemoved Amount of liquidity force-removed
+    event ForceRemoval(uint256 indexed escrowId, uint8 indexed triggerType, uint128 liquidityRemoved);
+
+    /// @notice Emitted when force removal of LP fails (trigger marking persists).
+    /// @param escrowId Escrow identifier
+    /// @param reason Revert reason from the failed call
+    event ForceRemovalFailed(uint256 indexed escrowId, bytes reason);
 
     /// @notice Emitted when an issuer updates their commitment to stricter values.
     /// @param escrowId Escrow identifier
@@ -110,11 +116,12 @@ interface IEscrowVault {
     /// @return removable Amount of liquidity removable right now
     function getRemovableLiquidity(uint256 escrowId) external view returns (uint128 removable);
 
-    /// @notice Locks down the escrow due to a trigger event. No LP removal allowed after this.
-    /// @dev Can only be called by the TriggerOracle.
+    /// @notice Force-removes issuer LP on trigger and sends assets to InsurancePool.
+    /// @dev Can only be called by the TriggerOracle. Marks escrow as triggered,
+    ///      seizes all remaining liquidity, and calls hook to force-remove LP.
     /// @param escrowId Identifier of the escrow position
     /// @param triggerType The type of trigger event that occurred
-    function triggerLockdown(uint256 escrowId, uint8 triggerType) external;
+    function triggerForceRemoval(uint256 escrowId, uint8 triggerType) external;
 
     /// @notice Calculates the total liquidity vested so far for an escrow.
     /// @param escrowId Identifier of the escrow position

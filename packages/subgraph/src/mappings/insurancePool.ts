@@ -4,6 +4,7 @@ import {
   PayoutExecuted,
   CompensationClaimed,
   FeeRateUpdated,
+  EscrowFundsReceived,
 } from "../../generated/InsurancePool/InsurancePool";
 import {
   InsurancePool as InsurancePoolEntity,
@@ -67,6 +68,18 @@ export function handleCompensationClaimed(event: CompensationClaimed): void {
     toDecimal(event.params.amount)
   );
   stats.save();
+}
+
+export function handleEscrowFundsReceived(event: EscrowFundsReceived): void {
+  let poolId = event.params.poolId.toHexString();
+  let insurance = InsurancePoolEntity.load(poolId);
+  if (insurance != null) {
+    let ethAmount = toDecimal(event.params.ethAmount);
+    let tokenAmount = toDecimal(event.params.tokenAmount);
+    insurance.escrowEthBalance = insurance.escrowEthBalance.plus(ethAmount);
+    insurance.escrowTokenBalance = insurance.escrowTokenBalance.plus(tokenAmount);
+    insurance.save();
+  }
 }
 
 export function handleFeeRateUpdated(event: FeeRateUpdated): void {

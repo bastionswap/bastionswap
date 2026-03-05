@@ -145,7 +145,7 @@ contract ProtocolHandler is Test {
         bytes32 poolKey = PoolId.unwrap(poolIds[poolIndex]);
 
         vm.prank(oracle);
-        try vault.triggerLockdown(escrowId, 1) {
+        try vault.triggerForceRemoval(escrowId, 1) {
             ghost_escrowTriggered[escrowId] = true;
             ghost_poolTriggerCount[poolKey]++;
         } catch {}
@@ -394,7 +394,7 @@ contract EconomicHandler is Test {
         if (ghost_triggered) return;
 
         vm.prank(oracle);
-        try vault.triggerLockdown(escrowId, 1) {
+        try vault.triggerForceRemoval(escrowId, 1) {
             ghost_triggered = true;
         } catch {}
     }
@@ -567,7 +567,7 @@ contract CrossContractFuzzTest is Test {
 
         // Trigger lockdown
         vm.prank(oracle);
-        vault.triggerLockdown(escrowId, 1);
+        vault.triggerForceRemoval(escrowId, 1);
 
         // Verify removal returns 0 after trigger
         uint128 removableAfter = vault.getRemovableLiquidity(escrowId);
@@ -576,8 +576,9 @@ contract CrossContractFuzzTest is Test {
         // After lockdown, getEscrowStatus reports remainingLiquidity = 0 (locked down).
         // The actual conservation is: removedLiquidity <= totalLiquidity
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
-        assertEq(status.remainingLiquidity, 0, "remaining should be 0 after lockdown");
-        assertEq(status.removedLiquidity, removed, "removed should match what was removed before lockdown");
+        assertEq(status.remainingLiquidity, 0, "remaining should be 0 after force removal");
+        // After force removal, all liquidity is seized (removedLiquidity = totalLiquidity)
+        assertEq(status.removedLiquidity, status.totalLiquidity, "all liquidity should be seized after force removal");
         assertLe(status.removedLiquidity, status.totalLiquidity, "removed must not exceed total");
     }
 
