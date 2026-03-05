@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { shortenAddress } from "@/lib/formatters";
+import { useTokenInfo } from "@/hooks/useTokenInfo";
 import type { SubgraphPool } from "@/hooks/usePools";
 
 interface PoolCardProps {
@@ -14,6 +15,14 @@ interface PoolCardProps {
 export function PoolCard({ pool }: PoolCardProps) {
   const router = useRouter();
   const isTriggered = pool.escrow?.isTriggered;
+
+  const token0Info = useTokenInfo(pool.token0 as `0x${string}`);
+  const token1Info = useTokenInfo(pool.token1 as `0x${string}`);
+  const issuedInfo = useTokenInfo(pool.issuedToken as `0x${string}` | undefined);
+
+  const token0Label = token0Info.displayName;
+  const token1Label = token1Info.displayName;
+  const issuedLabel = issuedInfo.symbol || (pool.issuedToken ? shortenAddress(pool.issuedToken, 3) : "tokens");
 
   return (
     <Card
@@ -29,7 +38,7 @@ export function PoolCard({ pool }: PoolCardProps) {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-medium">
-                {shortenAddress(pool.token0, 3)} / {shortenAddress(pool.token1, 3)}
+                {token0Label} / {token1Label}
               </span>
               {pool.isBastion ? (
                 <Badge variant="protected">Protected</Badge>
@@ -52,7 +61,7 @@ export function PoolCard({ pool }: PoolCardProps) {
             {
               label: "Escrow Locked",
               value: pool.escrow ? `${parseFloat(pool.escrow.totalLocked).toFixed(2)}` : "—",
-              sub: pool.issuedToken ? shortenAddress(pool.issuedToken, 3) : "tokens",
+              sub: issuedLabel,
             },
             {
               label: "Insurance",

@@ -1,7 +1,11 @@
 "use client";
 
+import { useReadContract } from "wagmi";
+import { baseSepolia } from "wagmi/chains";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { shortenAddress, explorerUrl, formatBps, formatDuration } from "@/lib/formatters";
+import { getContracts } from "@/config/contracts";
+import { ReputationEngineABI } from "@/config/abis";
 
 interface IssuerInfoProps {
   issuer: {
@@ -18,10 +22,15 @@ interface IssuerInfoProps {
   } | null;
 }
 
+// Default commitment values from the protocol
+const DEFAULTS = {
+  dailyWithdrawLimit: 500, // 5% in bps
+  lockDuration: 7_776_000, // 90 days
+  maxSellPercent: 300, // 3% in bps
+};
+
 function SemiCircleGauge({ score }: { score: number }) {
   const pct = Math.min(score / 1000, 1);
-  const angle = pct * 180;
-  // Color based on score range
   let color: string;
   if (score < 200) color = "#EF4444";
   else if (score < 500) color = "#F59E0B";
@@ -29,18 +38,16 @@ function SemiCircleGauge({ score }: { score: number }) {
   else color = "#34D399";
 
   const r = 50;
-  const c = Math.PI * r; // half circumference
-  const offset = c - (pct * c);
+  const c = Math.PI * r;
+  const offset = c - pct * c;
 
   return (
     <div className="relative mx-auto h-20 w-36">
       <svg className="h-full w-full" viewBox="0 0 120 70">
-        {/* Background arc */}
         <path
           d="M 10 65 A 50 50 0 0 1 110 65"
           fill="none" stroke="#1E293B" strokeWidth="8" strokeLinecap="round"
         />
-        {/* Filled arc */}
         <path
           d="M 10 65 A 50 50 0 0 1 110 65"
           fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
@@ -53,6 +60,77 @@ function SemiCircleGauge({ score }: { score: number }) {
         <span className="text-xl font-bold" style={{ color }}>{score}</span>
         <p className="text-[10px] text-gray-500">/ 1000</p>
       </div>
+    </div>
+  );
+}
+
+function CommitmentTag({ value, defaultValue, isLowerBetter }: {
+  value: number;
+  defaultValue: number;
+  isLowerBetter: boolean;
+}) {
+  const isDefault = value === defaultValue;
+  const isStricter = isLowerBetter ? value < defaultValue : value > defaultValue;
+
+  if (isDefault) {
+    return <span className="text-[10px] text-gray-600 ml-1.5">Default</span>;
+  }
+  if (isStricter) {
+    return (
+      <span className="text-[10px] text-emerald-500 ml-1.5 flex items-center gap-0.5">
+        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+        Strict
+      </span>
+    );
+  }
+  return <span className="text-[10px] text-amber-500 ml-1.5">Relaxed</span>;
+}
+
+function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
+  const contracts = getContracts(baseSepolia.id);
+
+  // Use encodeScoreData to get breakdown data
+  const { data: encodedData } = useReadContract({
+    address: contracts?.ReputationEngine as `0x${string}`,
+    abi: ReputationEngineABI,
+    functionName: "encodeScoreData",
+    args: [issuerAddress as `0x${string}`],
+    query: { enabled: !!contracts },
+  });
+
+  // Decode the encoded data
+  const { data: decoded } = useReadContract({
+    address: contracts?.ReputationEngine as `0x${string}`,
+    abi: ReputationEngineABI,
+    functionName: "decodeScoreData",
+    args: encodedData ? [encodedData as `0x${string}`] : undefined,
+    query: { enabled: !!encodedData },
+  });
+
+  if (!decoded) return null;
+
+  const [, poolsCreated, escrowsCompleted, triggerCount, uniqueTokens] = decoded as [
+    bigint, number, number, number, number
+  ];
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Score Components</p>
+      {[
+        { label: "Pools Created", value: poolsCreated },
+        { label: "Escrows Completed", value: escrowsCompleted },
+        { label: "Triggers", value: triggerCount, negative: true },
+        { label: "Token Diversity", value: uniqueTokens },
+      ].map(({ label, value, negative }) => (
+        <div key={label} className="flex items-center justify-between text-[11px]">
+          <span className="text-gray-500">{label}</span>
+          <span className={negative && value > 0 ? "text-red-400" : "text-gray-400"}>
+            {value}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -88,6 +166,9 @@ export function IssuerInfo({ issuer, commitment }: IssuerInfoProps) {
       {/* Reputation Gauge */}
       <SemiCircleGauge score={score} />
 
+      {/* Score Breakdown */}
+      <ScoreBreakdown issuerAddress={issuer.id} />
+
       {/* History Grid */}
       <div className="mt-4 grid grid-cols-4 gap-2">
         {[
@@ -104,21 +185,51 @@ export function IssuerInfo({ issuer, commitment }: IssuerInfoProps) {
       </div>
 
       {/* Commitment Parameters */}
-      {commitment && (
+      {commitment ? (
         <div className="mt-4 border-t border-subtle pt-4">
-          <p className="text-xs text-gray-500 mb-3">Commitment Parameters</p>
+          <p className="text-xs text-gray-500 mb-3">Commitments</p>
           <div className="space-y-2.5">
             {[
-              { label: "Daily Withdraw Limit", value: formatBps(parseInt(commitment.dailyWithdrawLimit)) },
-              { label: "Lock Duration", value: formatDuration(parseInt(commitment.lockDuration)) },
-              { label: "Max Sell / 24h", value: formatBps(parseInt(commitment.maxSellPercent)) },
-            ].map(({ label, value }) => (
+              {
+                label: "Daily Withdraw Limit",
+                value: formatBps(parseInt(commitment.dailyWithdrawLimit)),
+                raw: parseInt(commitment.dailyWithdrawLimit),
+                default_: DEFAULTS.dailyWithdrawLimit,
+                lowerBetter: true,
+              },
+              {
+                label: "Max Sell / 24h",
+                value: formatBps(parseInt(commitment.maxSellPercent)),
+                raw: parseInt(commitment.maxSellPercent),
+                default_: DEFAULTS.maxSellPercent,
+                lowerBetter: true,
+              },
+              {
+                label: "Lock Duration",
+                value: formatDuration(parseInt(commitment.lockDuration)),
+                raw: parseInt(commitment.lockDuration),
+                default_: DEFAULTS.lockDuration,
+                lowerBetter: false,
+              },
+            ].map(({ label, value, raw, default_, lowerBetter }) => (
               <div key={label} className="flex items-center justify-between text-sm">
                 <span className="text-gray-500">{label}</span>
-                <span className="font-medium tabular-nums">{value}</span>
+                <div className="flex items-center">
+                  <span className="font-medium tabular-nums">{value}</span>
+                  <CommitmentTag
+                    value={raw}
+                    defaultValue={default_}
+                    isLowerBetter={lowerBetter}
+                  />
+                </div>
               </div>
             ))}
           </div>
+        </div>
+      ) : (
+        <div className="mt-4 border-t border-subtle pt-4">
+          <p className="text-xs text-gray-500 mb-2">Commitments</p>
+          <p className="text-xs text-gray-600">No custom commitments (using defaults)</p>
         </div>
       )}
     </Card>
