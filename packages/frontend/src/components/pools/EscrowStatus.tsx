@@ -23,6 +23,7 @@ interface EscrowStatusProps {
       basisPoints: number;
     }[];
   };
+  tokenLabel?: string;
 }
 
 function CircleProgress({
@@ -89,7 +90,7 @@ function Countdown({ targetTs }: { targetTs: number }) {
   );
 }
 
-export function EscrowStatus({ escrow }: EscrowStatusProps) {
+export function EscrowStatus({ escrow, tokenLabel = "tokens" }: EscrowStatusProps) {
   const total = parseFloat(escrow.totalLocked);
   const released = parseFloat(escrow.released);
   const remaining = parseFloat(escrow.remaining);
@@ -134,13 +135,14 @@ export function EscrowStatus({ escrow }: EscrowStatusProps) {
       {/* Stats row */}
       <div className="mt-5 grid grid-cols-3 gap-3">
         {[
-          { label: "Total Locked", value: total.toFixed(4), color: "text-gray-100" },
-          { label: "Released", value: released.toFixed(4), color: "text-emerald-400" },
-          { label: "Remaining", value: remaining.toFixed(4), color: "text-bastion-300" },
+          { label: "Total Locked", value: total.toFixed(2), color: "text-gray-100" },
+          { label: "Released", value: released.toFixed(2), color: "text-emerald-400" },
+          { label: "Remaining", value: remaining.toFixed(2), color: "text-bastion-300" },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded-xl bg-surface-light p-3 text-center">
             <p className="text-xs text-gray-500">{label}</p>
             <p className={`text-sm font-semibold ${color}`}>{value}</p>
+            <p className="text-[10px] text-gray-600">{tokenLabel}</p>
           </div>
         ))}
       </div>

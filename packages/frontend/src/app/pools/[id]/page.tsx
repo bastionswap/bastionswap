@@ -119,7 +119,12 @@ export default function PoolDetailPage() {
         <>
           {/* Dashboard */}
           <div className="grid gap-6 lg:grid-cols-2">
-            {pool.escrow && <EscrowStatus escrow={pool.escrow} />}
+            {pool.escrow && (
+              <EscrowStatus
+                escrow={pool.escrow}
+                tokenLabel={pool.issuedToken ? shortenAddress(pool.issuedToken, 3) : "tokens"}
+              />
+            )}
             {pool.insurancePool && (
               <InsuranceStatus
                 poolId={pool.id}

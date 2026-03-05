@@ -51,8 +51,8 @@ export function PoolCard({ pool }: PoolCardProps) {
           {[
             {
               label: "Escrow Locked",
-              value: pool.escrow ? `${parseFloat(pool.escrow.totalLocked).toFixed(4)}` : "—",
-              sub: "ETH",
+              value: pool.escrow ? `${parseFloat(pool.escrow.totalLocked).toFixed(2)}` : "—",
+              sub: pool.issuedToken ? shortenAddress(pool.issuedToken, 3) : "tokens",
             },
             {
               label: "Insurance",
