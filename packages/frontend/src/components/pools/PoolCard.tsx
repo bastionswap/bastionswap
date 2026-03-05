@@ -27,7 +27,6 @@ export function PoolCard({ pool }: PoolCardProps) {
   const formatReserve = (val: string | null, tokenDecimals: number | null): string => {
     if (!val || parseFloat(val) === 0) return "0";
     let n = parseFloat(val);
-    // Subgraph stores raw amounts; divide by 10^decimals for human-readable
     if (tokenDecimals) n = n / Math.pow(10, tokenDecimals);
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
@@ -40,15 +39,15 @@ export function PoolCard({ pool }: PoolCardProps) {
       onClick={() => router.push(`/pools/${pool.id}`)}
       glow={isTriggered ? "red" : pool.isBastion ? "emerald" : "none"}
     >
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex -space-x-2">
-            <TokenIcon address={pool.token0} size={36} />
-            <TokenIcon address={pool.token1} size={36} />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex -space-x-3">
+            <TokenIcon address={pool.token0} size={44} />
+            <TokenIcon address={pool.token1} size={44} />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="font-medium">
+            <div className="flex items-center gap-2.5">
+              <span className="text-base font-semibold text-gray-900">
                 {token0Label} / {token1Label}
               </span>
               {pool.isBastion ? (
@@ -58,16 +57,24 @@ export function PoolCard({ pool }: PoolCardProps) {
               )}
             </div>
             {pool.issuer && (
-              <p className="mt-0.5 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-gray-400">
                 Issuer: {shortenAddress(pool.issuer.id)}
+                {pool.issuer.reputationScore && (
+                  <span className="ml-2 text-gray-300">
+                    Score: {pool.issuer.reputationScore}
+                  </span>
+                )}
               </p>
             )}
           </div>
         </div>
+        <svg className="h-5 w-5 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
       </div>
 
       {pool.isBastion && (
-        <div className="mt-4 grid grid-cols-4 gap-3">
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
             {
               label: "Reserves",
@@ -94,10 +101,11 @@ export function PoolCard({ pool }: PoolCardProps) {
               sub: "/ 1000",
             },
           ].map(({ label, value, sub }) => (
-            <div key={label} className="rounded-lg bg-surface-light p-2.5">
-              <p className="text-[10px] text-gray-500">{label}</p>
-              <p className="text-sm font-semibold">
-                {value} <span className="text-[10px] text-gray-600 font-normal">{sub}</span>
+            <div key={label} className="rounded-xl bg-gray-50 px-3 py-3">
+              <p className="text-[11px] text-gray-400 mb-1">{label}</p>
+              <p className="text-sm font-semibold text-gray-900 tabular-nums">
+                {value}
+                {sub && <span className="text-[10px] text-gray-400 font-normal ml-1">{sub}</span>}
               </p>
             </div>
           ))}
@@ -105,8 +113,10 @@ export function PoolCard({ pool }: PoolCardProps) {
       )}
 
       {isTriggered && (
-        <div className="mt-3 flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-400">
-          <span>&#128680;</span>
+        <div className="mt-4 flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-xs text-red-600 font-medium">
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
           Trigger activated — compensation available
         </div>
       )}

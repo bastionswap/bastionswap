@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { useEffect, useState, useMemo } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { formatBps } from "@/lib/formatters";
 
@@ -27,68 +26,6 @@ interface EscrowStatusProps {
   vestingEndTime?: number;
 }
 
-function CircleProgress({
-  progress,
-  isTriggered,
-}: {
-  progress: number;
-  isTriggered: boolean;
-}) {
-  const r = 54;
-  const c = 2 * Math.PI * r;
-  const offset = c - (Math.min(progress, 100) / 100) * c;
-  const stroke = isTriggered ? "#EF4444" : "#10B981";
-
-  return (
-    <div className="relative mx-auto h-32 w-32">
-      <svg className="h-full w-full -rotate-90" viewBox="0 0 120 120">
-        <circle cx="60" cy="60" r={r} fill="none" stroke="#1E293B" strokeWidth="8" />
-        <circle
-          cx="60" cy="60" r={r} fill="none"
-          stroke={stroke} strokeWidth="8" strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={offset}
-          className="transition-all duration-1000"
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold">{progress.toFixed(1)}%</span>
-        <span className="text-xs text-gray-500">vested</span>
-      </div>
-    </div>
-  );
-}
-
-function Countdown({ targetTs }: { targetTs: number }) {
-  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
-  useEffect(() => {
-    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 60_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const diff = Math.max(targetTs - now, 0);
-  if (diff === 0) return <span className="text-emerald-400 font-medium text-sm">Unlocked</span>;
-
-  const d = Math.floor(diff / 86400);
-  const h = Math.floor((diff % 86400) / 3600);
-  const m = Math.floor((diff % 3600) / 60);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-
-  return (
-    <div className="flex gap-1 text-sm font-mono">
-      {[
-        { v: d, l: "d" },
-        { v: h, l: "h" },
-        { v: m, l: "m" },
-      ].map(({ v, l }) => (
-        <div key={l} className="rounded-md bg-surface-light px-1.5 py-0.5 text-center">
-          <span className="font-semibold">{pad(v)}</span>
-          <span className="text-[10px] text-gray-500">{l}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function formatDate(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString("en-US", {
     month: "short",
@@ -97,136 +34,327 @@ function formatDate(ts: number): string {
   });
 }
 
-function timeAgo(ts: number): string {
-  const diff = Math.floor(Date.now() / 1000) - ts;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+function formatShortDate(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
-function HorizontalTimeline({
+function Countdown({ targetTs, label }: { targetTs: number; label?: string }) {
+  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const diff = Math.max(targetTs - now, 0);
+  if (diff === 0) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <div className="h-2 w-2 rounded-full bg-emerald-500" />
+        <span className="text-sm font-medium text-emerald-600">Complete</span>
+      </div>
+    );
+  }
+
+  const d = Math.floor(diff / 86400);
+  const h = Math.floor((diff % 86400) / 3600);
+  const m = Math.floor((diff % 3600) / 60);
+  const s = diff % 60;
+
+  return (
+    <div>
+      {label && <p className="text-[11px] text-gray-400 mb-1.5">{label}</p>}
+      <div className="flex gap-1.5">
+        {[
+          { v: d, l: "days" },
+          { v: h, l: "hrs" },
+          { v: m, l: "min" },
+          { v: s, l: "sec" },
+        ].map(({ v, l }) => (
+          <div
+            key={l}
+            className="flex flex-col items-center rounded-lg bg-gray-900 px-2.5 py-1.5 min-w-[44px]"
+          >
+            <span className="text-base font-bold text-white tabular-nums leading-tight">
+              {v.toString().padStart(2, "0")}
+            </span>
+            <span className="text-[9px] text-gray-400 uppercase tracking-wider">{l}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Full-width Vesting Timeline ── */
+function VestingTimeline({
   milestones,
   createdAt,
   lockDuration,
+  vestingEndTime,
+  total,
+  tokenLabel,
 }: {
   milestones: { id: string; timestamp: string; basisPoints: number }[];
   createdAt: number;
-  lockDuration?: number;
+  lockDuration: number;
+  vestingEndTime?: number;
+  total: number;
+  tokenLabel: string;
 }) {
-  const now = Math.floor(Date.now() / 1000);
-  const sorted = milestones
-    .slice()
-    .sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
+  const [now, setNow] = useState(Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-  if (sorted.length === 0) return null;
+  const sorted = useMemo(
+    () => milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp)),
+    [milestones]
+  );
 
   const startTs = createdAt;
-  const endTs = parseInt(sorted[sorted.length - 1].timestamp);
+  const lastMilestoneTs = sorted.length > 0 ? parseInt(sorted[sorted.length - 1].timestamp) : 0;
+  const endTs = vestingEndTime && vestingEndTime > lastMilestoneTs
+    ? vestingEndTime
+    : lastMilestoneTs > 0
+      ? lastMilestoneTs
+      : lockDuration > 0
+        ? createdAt + lockDuration
+        : createdAt + 86400 * 90; // default 90d
   const range = endTs - startTs;
   if (range <= 0) return null;
 
-  const currentPct = Math.min(Math.max(((now - startTs) / range) * 100, 0), 100);
-  const lockPct = lockDuration && lockDuration > 0
-    ? Math.min((lockDuration / range) * 100, 100)
-    : 0;
-  const lockEndTs = lockDuration ? createdAt + lockDuration : 0;
+  const toPct = (ts: number) => Math.min(Math.max(((ts - startTs) / range) * 100, 0), 100);
+  const currentPct = toPct(now);
+  const lockEndTs = lockDuration > 0 ? createdAt + lockDuration : 0;
+  const lockPct = lockEndTs > 0 ? toPct(lockEndTs) : 0;
   const isLocked = lockEndTs > 0 && now < lockEndTs;
-  const lockRemainingDays = isLocked ? Math.ceil((lockEndTs - now) / 86400) : 0;
+
+  // Build phases for visual display
+  const phases: { label: string; color: string; bgColor: string; start: number; end: number; active: boolean }[] = [];
+  if (lockPct > 0) {
+    phases.push({
+      label: "Lock Period",
+      color: isLocked ? "text-amber-700" : "text-gray-400",
+      bgColor: isLocked ? "bg-amber-400/60" : "bg-amber-200/40",
+      start: 0,
+      end: lockPct,
+      active: isLocked,
+    });
+  }
+  phases.push({
+    label: "Vesting",
+    color: !isLocked && currentPct < 100 ? "text-emerald-700" : "text-gray-400",
+    bgColor: !isLocked && currentPct < 100 ? "bg-emerald-400/50" : "bg-emerald-200/30",
+    start: lockPct,
+    end: 100,
+    active: !isLocked && currentPct < 100,
+  });
 
   return (
-    <div className="mt-5 border-t border-subtle pt-4">
-      <p className="text-xs text-gray-500 mb-4">Vesting Timeline</p>
-
-      {/* Horizontal bar */}
-      <div className="relative h-2 rounded-full bg-surface-lighter">
-        {/* Lock duration overlay */}
-        {lockPct > 0 && (
+    <div className="mt-6">
+      {/* Phase labels */}
+      <div className="flex mb-3">
+        {phases.map((p) => (
           <div
-            className="absolute inset-y-0 left-0 rounded-l-full bg-amber-500/20 z-[1]"
-            style={{ width: `${lockPct}%` }}
+            key={p.label}
+            className="flex items-center gap-1.5"
+            style={{ width: `${p.end - p.start}%`, marginLeft: p.start > 0 ? undefined : 0 }}
+          >
+            <div className={`h-2.5 w-2.5 rounded-sm ${p.bgColor}`} />
+            <span className={`text-[11px] font-medium ${p.color}`}>
+              {p.label}
+              {p.active && (
+                <span className="ml-1 inline-flex h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Timeline track */}
+      <div className="relative">
+        {/* Background track */}
+        <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
+          {/* Lock period zone */}
+          {lockPct > 0 && (
+            <div
+              className="absolute inset-y-0 left-0 bg-amber-100 rounded-l-full"
+              style={{ width: `${lockPct}%`, height: "12px" }}
+            />
+          )}
+          {/* Progress fill */}
+          <div
+            className={`absolute inset-y-0 left-0 rounded-full transition-all duration-1000 ${
+              isLocked ? "bg-amber-400" : "bg-emerald-500"
+            }`}
+            style={{ width: `${currentPct}%`, height: "12px" }}
           />
-        )}
-        {/* Filled portion */}
-        <div
-          className="absolute inset-y-0 left-0 rounded-full bg-emerald-500/40 transition-all duration-500 z-[2]"
-          style={{ width: `${currentPct}%` }}
-        />
-        {/* Lock boundary marker */}
+        </div>
+
+        {/* Lock end marker */}
         {lockPct > 0 && lockPct < 100 && (
           <div
-            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-[15] flex flex-col items-center"
-            style={{ left: `${lockPct}%` }}
+            className="absolute top-1/2 -translate-y-1/2 z-20"
+            style={{ left: `${lockPct}%`, transform: `translateX(-50%) translateY(-50%)` }}
           >
-            <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${isLocked ? "border-amber-500 bg-amber-500/30" : "border-gray-500 bg-surface"}`}>
-              <svg className={`h-2.5 w-2.5 ${isLocked ? "text-amber-400" : "text-gray-500"}`} viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM9 8V6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9z"/>
+            <div
+              className={`h-5 w-5 rounded-full border-2 border-white shadow-md flex items-center justify-center ${
+                isLocked ? "bg-amber-500" : "bg-gray-300"
+              }`}
+            >
+              <svg className="h-3 w-3 text-white" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM9 8V6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9z" />
               </svg>
             </div>
           </div>
         )}
-        {/* Current time marker */}
-        <div
-          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-4 w-4 rounded-full bg-emerald-500 border-2 border-surface shadow-lg shadow-emerald-500/30 transition-all duration-500 z-20"
-          style={{ left: `${currentPct}%` }}
-        />
 
-        {/* Milestone dots */}
-        {sorted.map((m) => {
+        {/* Milestone markers */}
+        {sorted.map((m, i) => {
           const ts = parseInt(m.timestamp);
-          const pct = ((ts - startTs) / range) * 100;
+          const pct = toPct(ts);
           const isPast = ts <= now;
+          const prevBps = i > 0 ? sorted[i - 1].basisPoints : 0;
+          const incrementBps = m.basisPoints - prevBps;
+          const unlockAmount = (total * incrementBps) / 10000;
+
           return (
             <div
               key={m.id}
-              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
-              style={{ left: `${pct}%` }}
+              className="absolute top-1/2 z-10 group"
+              style={{ left: `${pct}%`, transform: "translateX(-50%) translateY(-50%)" }}
             >
               <div
-                className={`h-3 w-3 rounded-full border-2 ${
-                  isPast
-                    ? "border-emerald-500 bg-emerald-500"
-                    : "border-gray-600 bg-surface"
+                className={`h-4 w-4 rounded-full border-2 border-white shadow-sm transition-all ${
+                  isPast ? "bg-emerald-500" : "bg-white border-gray-300"
                 }`}
               />
+              {/* Tooltip on hover */}
+              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
+                <div className="bg-gray-900 text-white rounded-lg px-3 py-2 text-xs whitespace-nowrap shadow-lg">
+                  <p className="font-medium">{formatBps(m.basisPoints)} vested</p>
+                  <p className="text-gray-400">{unlockAmount.toFixed(2)} {tokenLabel}</p>
+                  <p className="text-gray-400">{formatDate(ts)}</p>
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                </div>
+              </div>
             </div>
           );
         })}
+
+        {/* Current position indicator */}
+        <div
+          className="absolute top-1/2 z-30"
+          style={{ left: `${currentPct}%`, transform: "translateX(-50%) translateY(-50%)" }}
+        >
+          <div className={`h-6 w-6 rounded-full border-3 border-white shadow-lg ${
+            isLocked ? "bg-amber-500" : "bg-emerald-600"
+          }`}>
+            <div className="absolute inset-0 rounded-full animate-ping opacity-30" style={{
+              backgroundColor: isLocked ? "#f59e0b" : "#059669"
+            }} />
+          </div>
+        </div>
       </div>
 
-      {/* Lock status text */}
-      {lockDuration && lockDuration > 0 && (
-        <p className={`text-[10px] mt-2 ${isLocked ? "text-amber-400" : "text-gray-500"}`}>
+      {/* Timeline dates */}
+      <div className="relative mt-3 flex justify-between text-[11px] text-gray-400">
+        <span>{formatShortDate(startTs)}</span>
+        {lockEndTs > 0 && lockPct > 15 && lockPct < 85 && (
+          <span className="absolute" style={{ left: `${lockPct}%`, transform: "translateX(-50%)" }}>
+            <span className={isLocked ? "text-amber-600 font-medium" : ""}>
+              {formatShortDate(lockEndTs)}
+            </span>
+          </span>
+        )}
+        <span>{formatShortDate(endTs)}</span>
+      </div>
+
+      {/* Lock status */}
+      {lockDuration > 0 && (
+        <div className={`mt-3 rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+          isLocked ? "bg-amber-50 text-amber-700" : "bg-gray-50 text-gray-500"
+        }`}>
+          <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          </svg>
           {isLocked
-            ? `Liquidity locked until ${formatDate(lockEndTs)} (${lockRemainingDays}d remaining)`
-            : "Lock period ended. Issuer can withdraw vested amounts."}
-        </p>
-      )}
-
-      {/* Labels below */}
-      <div className="relative mt-3 h-10">
-        {/* Start label */}
-        <div className="absolute left-0 text-center" style={{ transform: "translateX(0)" }}>
-          <p className="text-[10px] text-gray-500">Start</p>
-          <p className="text-[10px] text-gray-600 tabular-nums">{formatDate(startTs)}</p>
+            ? `Locked until ${formatDate(lockEndTs)} (${Math.ceil((lockEndTs - now) / 86400)} days remaining)`
+            : `Lock period ended on ${formatDate(lockEndTs)}`
+          }
         </div>
+      )}
+    </div>
+  );
+}
 
+/* ── Milestone List ── */
+function MilestoneList({
+  milestones,
+  total,
+  tokenLabel,
+}: {
+  milestones: { id: string; timestamp: string; basisPoints: number }[];
+  total: number;
+  tokenLabel: string;
+}) {
+  const now = Math.floor(Date.now() / 1000);
+  const sorted = milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
+
+  return (
+    <div className="mt-5">
+      <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">
+        Vesting Schedule
+      </p>
+      <div className="space-y-0">
         {sorted.map((m, i) => {
           const ts = parseInt(m.timestamp);
-          const pct = ((ts - startTs) / range) * 100;
           const isPast = ts <= now;
+          const isNext = !isPast && (i === 0 || parseInt(sorted[i - 1].timestamp) <= now);
+          const prevBps = i > 0 ? sorted[i - 1].basisPoints : 0;
+          const incrementBps = m.basisPoints - prevBps;
+          const unlockAmount = (total * incrementBps) / 10000;
+
           return (
-            <div
-              key={m.id}
-              className="absolute text-center"
-              style={{ left: `${pct}%`, transform: "translateX(-50%)" }}
-            >
-              <p className={`text-[10px] font-medium ${isPast ? "text-emerald-400" : "text-gray-500"}`}>
-                {formatBps(m.basisPoints)}
-              </p>
-              <p className="text-[10px] text-gray-600 tabular-nums">
-                {i === sorted.length - 1 ? formatDate(ts) : `${Math.round((ts - startTs) / 86400)}d`}
-              </p>
+            <div key={m.id} className="flex items-start gap-3">
+              {/* Timeline connector */}
+              <div className="flex flex-col items-center">
+                <div
+                  className={`h-3 w-3 rounded-full border-2 shrink-0 mt-1 ${
+                    isPast
+                      ? "bg-emerald-500 border-emerald-500"
+                      : isNext
+                        ? "bg-white border-emerald-500"
+                        : "bg-white border-gray-300"
+                  }`}
+                />
+                {i < sorted.length - 1 && (
+                  <div className={`w-0.5 h-8 ${isPast ? "bg-emerald-300" : "bg-gray-200"}`} />
+                )}
+              </div>
+              {/* Content */}
+              <div className={`flex-1 flex items-center justify-between pb-3 ${
+                isNext ? "bg-emerald-50/50 -mx-2 px-2 rounded-lg" : ""
+              }`}>
+                <div>
+                  <p className={`text-sm font-medium ${isPast ? "text-gray-400" : isNext ? "text-emerald-700" : "text-gray-700"}`}>
+                    {formatBps(m.basisPoints)} cumulative
+                    {isNext && <span className="text-[10px] ml-1.5 text-emerald-600 font-semibold">NEXT</span>}
+                  </p>
+                  <p className="text-[11px] text-gray-400">
+                    {formatDate(ts)} &middot; +{unlockAmount.toFixed(2)} {tokenLabel}
+                  </p>
+                </div>
+                {isPast && (
+                  <svg className="h-4 w-4 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </div>
             </div>
           );
         })}
@@ -246,7 +374,6 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: 
   const lockDuration = escrow.commitment?.lockDuration
     ? parseInt(escrow.commitment.lockDuration)
     : 0;
-  const fullUnlockTs = createdAt && lockDuration ? createdAt + lockDuration : 0;
 
   const sortedMilestones = escrow.vestingSchedule
     ?.slice()
@@ -256,140 +383,135 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", vestingEndTime }: 
   );
   const allVested = sortedMilestones && sortedMilestones.length > 0 && !nextMilestone;
 
-  // Calculate next unlock amount (incremental, not cumulative)
-  const nextUnlockTokens = (() => {
-    if (!nextMilestone || total <= 0) return null;
-    const idx = sortedMilestones!.indexOf(nextMilestone);
-    const prevBps = idx > 0 ? sortedMilestones![idx - 1].basisPoints : 0;
-    const incrementBps = nextMilestone.basisPoints - prevBps;
-    return (total * incrementBps) / 10000;
-  })();
-
   return (
-    <Card glow={escrow.isTriggered ? "red" : "none"}>
-      <CardHeader>
-        <h3 className="text-lg font-semibold">Escrow Status</h3>
+    <div className="glass-card p-0 overflow-hidden">
+      {/* Header */}
+      <div className="px-6 pt-5 pb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+            escrow.isTriggered ? "bg-red-100" : "bg-emerald-100"
+          }`}>
+            <svg className={`h-5 w-5 ${escrow.isTriggered ? "text-red-600" : "text-emerald-600"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Escrow Vault</h3>
+            <p className="text-xs text-gray-400">Token lock & vesting</p>
+          </div>
+        </div>
         {escrow.isTriggered ? (
           <Badge variant="triggered">TRIGGERED</Badge>
+        ) : allVested ? (
+          <Badge variant="protected">Fully Vested</Badge>
         ) : (
           <Badge variant="protected">Active</Badge>
         )}
-      </CardHeader>
-
-      {escrow.isTriggered && (
-        <div className="mb-5 flex items-start gap-3 rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3">
-          <span className="text-lg">&#128680;</span>
-          <div>
-            <p className="text-sm font-medium text-red-400">
-              Trigger activated
-            </p>
-            <p className="text-xs text-red-400/70">
-              Escrowed funds have been redistributed to protect holders.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Circle progress */}
-      <CircleProgress progress={progress} isTriggered={escrow.isTriggered} />
-
-      {/* Stats row */}
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Locked", value: total.toFixed(2), color: "text-gray-100" },
-          { label: "Released", value: released.toFixed(2), color: "text-emerald-400" },
-          { label: "Remaining", value: remaining.toFixed(2), color: "text-bastion-300" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-xl bg-surface-light p-3 text-center">
-            <p className="text-xs text-gray-500">{label}</p>
-            <p className={`text-sm font-semibold ${color}`}>{value}</p>
-            <p className="text-[10px] text-gray-600">{tokenLabel}</p>
-          </div>
-        ))}
       </div>
 
-      {/* Next unlock countdown or Fully Vested */}
-      {!escrow.isTriggered && (
-        <div className="mt-4 rounded-xl bg-surface-light p-3">
-          {allVested ? (
-            <div className="flex items-center justify-center gap-2">
-              <svg className="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm font-medium text-emerald-400">Fully Vested</span>
-            </div>
-          ) : nextMilestone ? (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-500">Next Unlock</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {formatBps(nextMilestone.basisPoints)} cumulative
-                  {nextUnlockTokens !== null && (
-                    <span className="text-gray-500">
-                      {" "}({nextUnlockTokens.toFixed(2)} {tokenLabel})
-                    </span>
-                  )}
-                </p>
-              </div>
-              <Countdown targetTs={parseInt(nextMilestone.timestamp)} />
-            </div>
-          ) : vestingEndTime && vestingEndTime > 0 ? (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-500">Full Vesting</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {formatDate(vestingEndTime)}
-                </p>
-              </div>
-              <Countdown targetTs={vestingEndTime} />
-            </div>
-          ) : (
-            <p className="text-xs text-gray-500 text-center">No vesting schedule</p>
-          )}
-        </div>
-      )}
-
-      {/* Horizontal vesting timeline */}
-      {sortedMilestones && sortedMilestones.length > 0 && createdAt > 0 && (
-        <HorizontalTimeline milestones={sortedMilestones} createdAt={createdAt} lockDuration={lockDuration} />
-      )}
-
-      {/* Escrow dates */}
-      {createdAt > 0 && (
-        <div className="mt-4 border-t border-subtle pt-3 space-y-1">
-          <div className="flex justify-between text-xs">
-            <span className="text-gray-500">Created</span>
-            <span className="text-gray-400">
-              {formatDate(createdAt)}{" "}
-              <span className="text-gray-600">({timeAgo(createdAt)})</span>
-            </span>
+      {/* Triggered warning */}
+      {escrow.isTriggered && (
+        <div className="mx-6 mb-4 flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+          <svg className="h-5 w-5 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+          <div>
+            <p className="text-sm font-medium text-red-700">Trigger activated</p>
+            <p className="text-xs text-red-600/70">Escrowed funds have been redistributed.</p>
           </div>
-          {fullUnlockTs > 0 && (
-            <div className="flex justify-between text-xs">
-              <span className="text-gray-500">Full Unlock</span>
-              <span className="text-gray-400">
-                {formatDate(fullUnlockTs)}{" "}
-                <span className="text-gray-600">
-                  ({Math.round(lockDuration / 86400)}d from creation)
-                </span>
-              </span>
-            </div>
+        </div>
+      )}
+
+      {/* Progress bar + stats */}
+      <div className="px-6 pb-4">
+        {/* Big number */}
+        <div className="flex items-end justify-between mb-4">
+          <div>
+            <p className="text-3xl font-bold text-gray-900 tabular-nums">{progress.toFixed(1)}%</p>
+            <p className="text-xs text-gray-400 mt-0.5">vested so far</p>
+          </div>
+          {!escrow.isTriggered && nextMilestone && (
+            <Countdown targetTs={parseInt(nextMilestone.timestamp)} label="Next unlock in" />
           )}
-          {vestingEndTime && vestingEndTime > 0 && (
-            <div className="flex justify-between text-xs">
-              <span className="text-gray-500">Vesting End</span>
-              <span className="text-gray-400">
-                {formatDate(vestingEndTime)}{" "}
-                {createdAt > 0 && (
-                  <span className="text-gray-600">
-                    ({Math.round((vestingEndTime - createdAt) / 86400)}d from creation)
-                  </span>
-                )}
-              </span>
+          {!escrow.isTriggered && allVested && (
+            <div className="text-right">
+              <div className="flex items-center gap-1.5 justify-end">
+                <svg className="h-5 w-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-semibold text-emerald-600">All milestones reached</span>
+              </div>
             </div>
           )}
         </div>
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-3 gap-3 mb-1">
+          {[
+            { label: "Total Locked", value: total.toFixed(2), color: "text-gray-900", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
+            { label: "Released", value: released.toFixed(2), color: "text-emerald-600", icon: "M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+            { label: "Remaining", value: remaining.toFixed(2), color: "text-bastion-600", icon: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" },
+          ].map(({ label, value, color, icon }) => (
+            <div key={label} className="rounded-xl bg-gray-50 p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
+                </svg>
+                <p className="text-[11px] text-gray-400">{label}</p>
+              </div>
+              <p className={`text-base font-bold ${color} tabular-nums`}>{value}</p>
+              <p className="text-[10px] text-gray-400">{tokenLabel}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Full-width timeline */}
+      {!escrow.isTriggered && sortedMilestones && sortedMilestones.length > 0 && createdAt > 0 && (
+        <div className="border-t border-subtle bg-gray-50/50 px-6 py-5">
+          <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1">
+            Escrow Timeline
+          </p>
+          <VestingTimeline
+            milestones={sortedMilestones}
+            createdAt={createdAt}
+            lockDuration={lockDuration}
+            vestingEndTime={vestingEndTime}
+            total={total}
+            tokenLabel={tokenLabel}
+          />
+        </div>
       )}
-    </Card>
+
+      {/* Milestone list */}
+      {!escrow.isTriggered && sortedMilestones && sortedMilestones.length > 0 && (
+        <div className="border-t border-subtle px-6 py-4">
+          <MilestoneList milestones={sortedMilestones} total={total} tokenLabel={tokenLabel} />
+        </div>
+      )}
+
+      {/* Fallback: vesting end time from chain if no milestones */}
+      {!escrow.isTriggered && (!sortedMilestones || sortedMilestones.length === 0) && vestingEndTime && vestingEndTime > 0 && (
+        <div className="border-t border-subtle px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-gray-400">Full Vesting</p>
+              <p className="text-sm text-gray-600 mt-0.5">{formatDate(vestingEndTime)}</p>
+            </div>
+            <Countdown targetTs={vestingEndTime} />
+          </div>
+        </div>
+      )}
+
+      {/* Dates footer */}
+      {createdAt > 0 && (
+        <div className="border-t border-subtle px-6 py-3 flex items-center justify-between text-[11px] text-gray-400">
+          <span>Created {formatDate(createdAt)}</span>
+          {vestingEndTime && vestingEndTime > 0 && (
+            <span>Ends {formatDate(vestingEndTime)}</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

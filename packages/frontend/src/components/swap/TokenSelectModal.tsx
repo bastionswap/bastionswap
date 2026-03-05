@@ -55,15 +55,15 @@ export function TokenSelectModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-md glass-card p-6 mx-4 animate-in fade-in duration-200">
+      <div className="w-full max-w-md glass-card p-6 mx-4 animate-in fade-in duration-200 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Select Token</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Select Token</h3>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-gray-500 hover:bg-surface-light hover:text-white transition-colors"
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -86,17 +86,17 @@ export function TokenSelectModal({
                 onSelect(token);
                 onClose();
               }}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 hover:bg-surface-light transition-colors"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 hover:bg-gray-50 transition-colors"
             >
               <TokenIcon address={token.address} size={36} />
               <div className="text-left">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">{token.symbol}</span>
+                  <span className="font-medium text-gray-900">{token.symbol}</span>
                   {isProtected(token.address) && (
                     <Badge variant="protected">Protected</Badge>
                   )}
                 </div>
-                <span className="text-xs text-gray-500">{token.name}</span>
+                <span className="text-xs text-gray-400">{token.name}</span>
               </div>
             </button>
           ))}
@@ -110,19 +110,19 @@ export function TokenSelectModal({
                 });
                 onClose();
               }}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 hover:bg-surface-light transition-colors"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 hover:bg-gray-50 transition-colors"
             >
               <TokenIcon address={search} size={36} />
               <div className="text-left">
-                <span className="font-medium">Import Token</span>
-                <p className="text-xs text-gray-500">
+                <span className="font-medium text-gray-900">Import Token</span>
+                <p className="text-xs text-gray-400">
                   {search.slice(0, 10)}...{search.slice(-8)}
                 </p>
               </div>
             </button>
           )}
           {filtered.length === 0 && !isValidAddress && search && (
-            <p className="py-8 text-center text-sm text-gray-500">
+            <p className="py-8 text-center text-sm text-gray-400">
               No tokens found
             </p>
           )}

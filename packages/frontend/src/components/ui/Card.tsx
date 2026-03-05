@@ -10,16 +10,16 @@ interface CardProps {
 }
 
 const glowStyles = {
-  emerald: "hover:shadow-[0_0_20px_rgba(16,185,129,0.08)] hover:border-emerald-500/20",
-  red: "border-red-500/20 shadow-[0_0_20px_rgba(239,68,68,0.06)]",
-  amber: "border-amber-500/20 shadow-[0_0_20px_rgba(245,158,11,0.06)]",
+  emerald: "hover:shadow-[0_2px_12px_rgba(5,150,105,0.1)] border-emerald-200",
+  red: "border-red-200 shadow-[0_2px_12px_rgba(239,68,68,0.08)]",
+  amber: "border-amber-200 shadow-[0_2px_12px_rgba(245,158,11,0.08)]",
   none: "",
 };
 
 export function Card({ children, className = "", onClick, glow = "none" }: CardProps) {
   return (
     <div
-      className={`glass-card p-6 ${onClick ? "cursor-pointer hover:border-gray-600 transition-all duration-200" : ""} ${glowStyles[glow]} ${className}`}
+      className={`glass-card p-6 ${onClick ? "cursor-pointer hover:shadow-card-hover transition-all duration-200" : ""} ${glowStyles[glow]} ${className}`}
       onClick={onClick}
     >
       {children}

@@ -14,13 +14,13 @@ const ShieldIcon = () => (
 
 const variants = {
   protected:
-    "bg-emerald-500/15 text-emerald-400 border-emerald-500/25 shadow-[0_0_8px_rgba(16,185,129,0.1)]",
-  standard: "bg-gray-500/15 text-gray-400 border-gray-500/25",
+    "bg-emerald-50 text-emerald-700 border-emerald-200",
+  standard: "bg-gray-50 text-gray-500 border-gray-200",
   triggered:
-    "bg-red-500/15 text-red-400 border-red-500/25 shadow-[0_0_8px_rgba(239,68,68,0.1)]",
+    "bg-red-50 text-red-700 border-red-200",
   pending:
-    "bg-amber-500/15 text-amber-400 border-amber-500/25 shadow-[0_0_8px_rgba(245,158,11,0.1)]",
-  info: "bg-bastion-500/15 text-bastion-300 border-bastion-500/25",
+    "bg-amber-50 text-amber-700 border-amber-200",
+  info: "bg-bastion-50 text-bastion-700 border-bastion-200",
 };
 
 export function Badge({ variant, children }: BadgeProps) {

@@ -2,7 +2,7 @@
 
 import { useReadContract } from "wagmi";
 import { baseSepolia } from "wagmi/chains";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
 import { shortenAddress, explorerUrl, formatBps, formatDuration } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
 import { ReputationEngineABI } from "@/config/abis";
@@ -22,31 +22,31 @@ interface IssuerInfoProps {
   } | null;
 }
 
-// Default commitment values from the protocol
 const DEFAULTS = {
-  dailyWithdrawLimit: 500, // 5% in bps
-  lockDuration: 7_776_000, // 90 days
-  maxSellPercent: 300, // 3% in bps
+  dailyWithdrawLimit: 500,
+  lockDuration: 7_776_000,
+  maxSellPercent: 300,
 };
 
 function SemiCircleGauge({ score }: { score: number }) {
   const pct = Math.min(score / 1000, 1);
   let color: string;
-  if (score < 200) color = "#EF4444";
-  else if (score < 500) color = "#F59E0B";
-  else if (score < 800) color = "#10B981";
-  else color = "#34D399";
+  let label: string;
+  if (score < 200) { color = "#DC2626"; label = "Low"; }
+  else if (score < 500) { color = "#D97706"; label = "Medium"; }
+  else if (score < 800) { color = "#059669"; label = "Good"; }
+  else { color = "#10B981"; label = "Excellent"; }
 
   const r = 50;
   const c = Math.PI * r;
   const offset = c - pct * c;
 
   return (
-    <div className="relative mx-auto h-20 w-36">
+    <div className="relative mx-auto h-24 w-40">
       <svg className="h-full w-full" viewBox="0 0 120 70">
         <path
           d="M 10 65 A 50 50 0 0 1 110 65"
-          fill="none" stroke="#1E293B" strokeWidth="8" strokeLinecap="round"
+          fill="none" stroke="#E2E8F0" strokeWidth="8" strokeLinecap="round"
         />
         <path
           d="M 10 65 A 50 50 0 0 1 110 65"
@@ -57,8 +57,8 @@ function SemiCircleGauge({ score }: { score: number }) {
         />
       </svg>
       <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center">
-        <span className="text-xl font-bold" style={{ color }}>{score}</span>
-        <p className="text-[10px] text-gray-500">/ 1000</p>
+        <span className="text-2xl font-bold" style={{ color }}>{score}</span>
+        <p className="text-[10px] text-gray-400">{label}</p>
       </div>
     </div>
   );
@@ -73,11 +73,11 @@ function CommitmentTag({ value, defaultValue, isLowerBetter }: {
   const isStricter = isLowerBetter ? value < defaultValue : value > defaultValue;
 
   if (isDefault) {
-    return <span className="text-[10px] text-gray-600 ml-1.5">Default</span>;
+    return <span className="text-[10px] text-gray-400 ml-1.5 px-1.5 py-0.5 rounded bg-gray-100">Default</span>;
   }
   if (isStricter) {
     return (
-      <span className="text-[10px] text-emerald-500 ml-1.5 flex items-center gap-0.5">
+      <span className="text-[10px] text-emerald-600 ml-1.5 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50">
         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
         </svg>
@@ -85,13 +85,12 @@ function CommitmentTag({ value, defaultValue, isLowerBetter }: {
       </span>
     );
   }
-  return <span className="text-[10px] text-amber-500 ml-1.5">Relaxed</span>;
+  return <span className="text-[10px] text-amber-600 ml-1.5 px-1.5 py-0.5 rounded bg-amber-50">Relaxed</span>;
 }
 
 function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   const contracts = getContracts(baseSepolia.id);
 
-  // Use encodeScoreData to get breakdown data
   const { data: encodedData } = useReadContract({
     address: contracts?.ReputationEngine as `0x${string}`,
     abi: ReputationEngineABI,
@@ -100,7 +99,6 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
     query: { enabled: !!contracts },
   });
 
-  // Decode the encoded data
   const { data: decoded } = useReadContract({
     address: contracts?.ReputationEngine as `0x${string}`,
     abi: ReputationEngineABI,
@@ -117,7 +115,7 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
 
   return (
     <div className="mt-3 space-y-1.5">
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Score Components</p>
+      <p className="text-[10px] text-gray-400 uppercase tracking-wider">Score Components</p>
       {[
         { label: "Pools Created", value: poolsCreated },
         { label: "Escrows Completed", value: escrowsCompleted },
@@ -125,8 +123,8 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
         { label: "Token Diversity", value: uniqueTokens },
       ].map(({ label, value, negative }) => (
         <div key={label} className="flex items-center justify-between text-[11px]">
-          <span className="text-gray-500">{label}</span>
-          <span className={negative && value > 0 ? "text-red-400" : "text-gray-400"}>
+          <span className="text-gray-400">{label}</span>
+          <span className={negative && value > 0 ? "text-red-600 font-medium" : "text-gray-600"}>
             {value}
           </span>
         </div>
@@ -143,51 +141,56 @@ export function IssuerInfo({ issuer, commitment }: IssuerInfoProps) {
   const successRate = created > 0 ? ((completed / created) * 100).toFixed(0) : "—";
 
   return (
-    <Card>
-      <CardHeader>
-        <h3 className="text-lg font-semibold">Issuer Profile</h3>
-      </CardHeader>
-
-      <div className="mb-4 flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-light text-xs font-bold text-bastion-300">
-          {issuer.id.slice(2, 4).toUpperCase()}
+    <div className="glass-card p-0 overflow-hidden">
+      {/* Header */}
+      <div className="px-6 pt-5 pb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bastion-50">
+            <svg className="h-5 w-5 text-bastion-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Issuer Profile</h3>
+            <a
+              href={explorerUrl(issuer.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-bastion-600 hover:text-bastion-700 transition-colors"
+            >
+              {shortenAddress(issuer.id)} &#8599;
+            </a>
+          </div>
         </div>
-        <a
-          href={explorerUrl(issuer.id)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-bastion-300 hover:text-bastion-200 transition-colors"
-        >
-          {shortenAddress(issuer.id)}
-          <span className="ml-1 text-gray-600">&#8599;</span>
-        </a>
       </div>
 
       {/* Reputation Gauge */}
-      <SemiCircleGauge score={score} />
-
-      {/* Score Breakdown */}
-      <ScoreBreakdown issuerAddress={issuer.id} />
+      <div className="px-6 pb-4">
+        <SemiCircleGauge score={score} />
+        <ScoreBreakdown issuerAddress={issuer.id} />
+      </div>
 
       {/* History Grid */}
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        {[
-          { label: "Created", value: created, color: "text-gray-100" },
-          { label: "Completed", value: completed, color: "text-emerald-400" },
-          { label: "Triggers", value: triggers, color: "text-red-400" },
-          { label: "Success", value: `${successRate}%`, color: "text-bastion-300" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-lg bg-surface-light p-2.5 text-center">
-            <p className={`text-base font-semibold ${color}`}>{value}</p>
-            <p className="text-[10px] text-gray-500">{label}</p>
-          </div>
-        ))}
+      <div className="border-t border-subtle px-6 py-4">
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { label: "Created", value: created, color: "text-gray-900" },
+            { label: "Completed", value: completed, color: "text-emerald-600" },
+            { label: "Triggers", value: triggers, color: "text-red-600" },
+            { label: "Success", value: `${successRate}%`, color: "text-bastion-600" },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="rounded-xl bg-gray-50 p-2.5 text-center">
+              <p className={`text-base font-semibold ${color} tabular-nums`}>{value}</p>
+              <p className="text-[10px] text-gray-400">{label}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Commitment Parameters */}
       {commitment ? (
-        <div className="mt-4 border-t border-subtle pt-4">
-          <p className="text-xs text-gray-500 mb-3">Commitments</p>
+        <div className="border-t border-subtle px-6 py-4">
+          <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">Commitments</p>
           <div className="space-y-2.5">
             {[
               {
@@ -213,9 +216,9 @@ export function IssuerInfo({ issuer, commitment }: IssuerInfoProps) {
               },
             ].map(({ label, value, raw, default_, lowerBetter }) => (
               <div key={label} className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">{label}</span>
+                <span className="text-gray-400">{label}</span>
                 <div className="flex items-center">
-                  <span className="font-medium tabular-nums">{value}</span>
+                  <span className="font-medium text-gray-900 tabular-nums">{value}</span>
                   <CommitmentTag
                     value={raw}
                     defaultValue={default_}
@@ -227,11 +230,11 @@ export function IssuerInfo({ issuer, commitment }: IssuerInfoProps) {
           </div>
         </div>
       ) : (
-        <div className="mt-4 border-t border-subtle pt-4">
-          <p className="text-xs text-gray-500 mb-2">Commitments</p>
-          <p className="text-xs text-gray-600">No custom commitments (using defaults)</p>
+        <div className="border-t border-subtle px-6 py-4">
+          <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-2">Commitments</p>
+          <p className="text-xs text-gray-400">Using default parameters</p>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
