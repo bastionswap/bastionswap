@@ -8,8 +8,13 @@ import { Badge } from "@/components/ui/Badge";
 import { useCreateBastionPool } from "@/hooks/useCreatePool";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatBps, formatDuration } from "@/lib/formatters";
+import { getContracts } from "@/config/contracts";
+import { PoolManagerABI } from "@/config/abis";
+import { baseSepolia } from "wagmi/chains";
 
 type Step = 1 | 2 | 3 | 4;
+
+const SQRT_PRICE_1_1 = 79228162514264337593543950336n;
 
 const DEFAULT_COMMITMENT = {
   dailyWithdrawLimit: 500, // 5% in bps
@@ -18,14 +23,44 @@ const DEFAULT_COMMITMENT = {
 };
 
 export default function CreatePoolPage() {
-  const { isConnected } = useAccount();
+  const { isConnected, address } = useAccount();
   const [step, setStep] = useState<Step>(1);
   const [tokenAddress, setTokenAddress] = useState("");
   const [ethAmount, setEthAmount] = useState("");
   const [tokenAmount, setTokenAmount] = useState("");
   const [commitment, setCommitment] = useState(DEFAULT_COMMITMENT);
-  const { isWriting, isConfirming, isSuccess, hash, error } =
+  const { createPool, isWriting, isConfirming, isSuccess, hash, error } =
     useCreateBastionPool();
+  const contracts = getContracts(baseSepolia.id);
+
+  const handleCreatePool = () => {
+    if (!contracts || !address) return;
+    const hookAddr = contracts.BastionHook as `0x${string}`;
+    const tokenAddr = tokenAddress as `0x${string}`;
+    // WETH on Base
+    const weth = "0x4200000000000000000000000000000000000006" as `0x${string}`;
+    // Sort currencies for PoolKey (currency0 < currency1)
+    const [currency0, currency1] =
+      tokenAddr.toLowerCase() < weth.toLowerCase()
+        ? [tokenAddr, weth]
+        : [weth, tokenAddr];
+
+    createPool({
+      address: contracts.PoolManager as `0x${string}`,
+      abi: PoolManagerABI,
+      functionName: "initialize",
+      args: [
+        {
+          currency0,
+          currency1,
+          fee: 3000,
+          tickSpacing: 60,
+          hooks: hookAddr,
+        },
+        SQRT_PRICE_1_1,
+      ],
+    });
+  };
 
   const trustLevel =
     commitment.lockDuration >= 7776000 && commitment.maxSellPercent <= 300
@@ -292,7 +327,10 @@ export default function CreatePoolPage() {
           )}
           {isSuccess && hash && (
             <div className="mt-3 rounded-lg bg-emerald-500/10 p-3 text-center text-sm text-emerald-400">
-              Pool created! Tx: {hash.slice(0, 10)}...
+              Pool initialized! Tx: {hash.slice(0, 10)}...
+              <p className="mt-1 text-xs text-emerald-400/70">
+                Add initial liquidity via CLI to activate escrow protection.
+              </p>
             </div>
           )}
 
@@ -305,6 +343,7 @@ export default function CreatePoolPage() {
               Back
             </button>
             <button
+              onClick={handleCreatePool}
               disabled={isWriting || isConfirming || isSuccess}
               className="btn-primary flex-1 py-3 disabled:opacity-40"
             >

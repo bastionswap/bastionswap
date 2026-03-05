@@ -3,10 +3,39 @@
 [![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.26-363636.svg)](https://soliditylang.org/)
 [![Foundry](https://img.shields.io/badge/Built%20with-Foundry-FFDB1C.svg)](https://book.getfoundry.sh/)
+[![Base Sepolia](https://img.shields.io/badge/Testnet-Base%20Sepolia-0052FF.svg)](https://sepolia.basescan.org)
 
 BastionSwap is a **Uniswap V4 Hook-based** decentralized exchange protocol that protects traders from rug-pulls and token exploits through **mandatory escrow vesting**, **on-chain trigger detection**, and **per-token insurance pools**.
 
 When a token issuer creates a liquidity pool, their LP tokens are automatically locked in a time-vested escrow. If malicious behavior is detected — rug-pull, issuer dump, honeypot, hidden tax — the escrow funds are redistributed to an insurance pool from which affected token holders can claim pro-rata compensation.
+
+## Live Testnet
+
+| Resource | Link |
+|----------|------|
+| Frontend | _Deploy to Vercel (see [Deployment](#vercel-deployment))_ |
+| Subgraph Playground | [Studio Explorer](https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest) |
+| Block Explorer | [BaseScan (Sepolia)](https://sepolia.basescan.org) |
+
+## Contract Addresses (Base Sepolia)
+
+All contracts are deployed and **verified** on BaseScan at block `38450218`.
+
+| Contract | Address |
+|----------|---------|
+| BastionHook | [`0x248B92269Bb935d76D871D5E271f29879A144AC0`](https://sepolia.basescan.org/address/0x248B92269Bb935d76D871D5E271f29879A144AC0) |
+| EscrowVault | [`0x2C01998931380d7F4f3F292aa1023B51CDeA9dcD`](https://sepolia.basescan.org/address/0x2C01998931380d7F4f3F292aa1023B51CDeA9dcD) |
+| InsurancePool | [`0x4EFE9E50d5bA7774459bea20f656aBBFd1887a98`](https://sepolia.basescan.org/address/0x4EFE9E50d5bA7774459bea20f656aBBFd1887a98) |
+| TriggerOracle | [`0x04D369129F5722E8d4a9621F0AE8247BE487Ec82`](https://sepolia.basescan.org/address/0x04D369129F5722E8d4a9621F0AE8247BE487Ec82) |
+| ReputationEngine | [`0x0a5a7346c64FC65Ce1AdFA21eA98931bd4A38b4E`](https://sepolia.basescan.org/address/0x0a5a7346c64FC65Ce1AdFA21eA98931bd4A38b4E) |
+
+**External Dependencies:**
+
+| Contract | Address |
+|----------|---------|
+| Uniswap V4 PoolManager | `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408` |
+| WETH (Base) | `0x4200000000000000000000000000000000000006` |
+| Permit2 | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
 
 ## Architecture
 
@@ -24,29 +53,40 @@ graph TB
         RE[ReputationEngine]
     end
 
-    subgraph "External Actors"
+    subgraph "Frontend & Indexing"
+        FE[Next.js Frontend]
+        SG[The Graph Subgraph]
+    end
+
+    subgraph "Actors"
         IS[Token Issuer]
         TR[Trader]
-        BOT[Off-chain Bot]
         CL[Token Holder]
     end
 
-    IS -->|addLiquidity| PM
+    IS -->|addLiquidity + hookData| PM
     TR -->|swap| PM
     PM -->|hook callbacks| BH
 
     BH -->|createEscrow| EV
     BH -->|depositFee| IP
-    BH -->|reportLPRemoval\nreportIssuerSale| TO
+    BH -->|reportLPRemoval / reportIssuerSale| TO
     BH -->|recordEvent| RE
 
     TO -->|triggerRedistribution| EV
     TO -->|executePayout| IP
-    BOT -->|submitProof| TO
 
     EV -.->|remaining funds on trigger| IP
     CL -->|claimCompensation| IP
     IS -->|releaseVested| EV
+
+    SG -->|indexes events| BH
+    SG -->|indexes events| EV
+    SG -->|indexes events| IP
+    SG -->|indexes events| TO
+    SG -->|indexes events| RE
+    FE -->|queries| SG
+    FE -->|contract calls| PM
 
     style BH fill:#4f46e5,color:#fff
     style EV fill:#0891b2,color:#fff
@@ -54,22 +94,24 @@ graph TB
     style TO fill:#dc2626,color:#fff
     style RE fill:#7c3aed,color:#fff
     style PM fill:#f59e0b,color:#fff
+    style FE fill:#171717,color:#fff
+    style SG fill:#6747ed,color:#fff
 ```
 
 ### Contract Roles
 
 | Contract | Role |
-|---|---|
+|----------|------|
 | **BastionHook** | V4 Hook entry point. Intercepts `beforeAddLiquidity`, `beforeRemoveLiquidity`, and `afterSwap` to orchestrate escrow locking, insurance fee collection, and rug-pull monitoring. |
 | **EscrowVault** | Manages time-locked vesting of issuer LP funds with daily withdrawal limits and issuer commitments. Redistributes remaining funds to InsurancePool on trigger. |
 | **InsurancePool** | Collects swap fees on buy-side trades and distributes pro-rata compensation to holders when a trigger fires. 30-day claim window. |
-| **TriggerOracle** | Detects 6 types of malicious behavior on-chain (rug-pull, issuer dump, honeypot, hidden tax, slow rug, commitment breach) with a 1-hour grace period before execution. |
-| **ReputationEngine** | Computes informational reputation scores (0–1000) for token issuers based on on-chain history. Non-blocking — never prevents transactions. |
+| **TriggerOracle** | Detects 6 types of malicious behavior on-chain with a 1-hour grace period before execution. |
+| **ReputationEngine** | Computes informational reputation scores (0-1000) for token issuers based on on-chain history. Non-blocking. |
 
 ### Trigger Types
 
 | Type | Detection | Default Threshold |
-|---|---|---|
+|------|-----------|-------------------|
 | RUG_PULL | On-chain: single LP removal | >50% of total LP |
 | ISSUER_DUMP | On-chain: cumulative issuer sales | >30% of supply in 24h |
 | HONEYPOT | Off-chain: bot proof submission | Proof-based |
@@ -81,111 +123,121 @@ graph TB
 
 ### Prerequisites
 
+- [Node.js](https://nodejs.org/) >= 18
+- [pnpm](https://pnpm.io/) >= 8
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) (forge, cast, anvil)
-- Git
 
-### Build
-
-```bash
-git clone https://github.com/bastion-swap/bastion-swap.git
-cd bastion-swap
-forge install
-make build
-```
-
-### Test
+### Install
 
 ```bash
-make test          # Run all tests (unit + integration + invariant)
-make test-gas      # Run tests with gas report
+git clone https://github.com/your-username/bastionswap.git
+cd bastionswap
+pnpm install
 ```
 
-### Deploy
+### Build & Test (Contracts)
 
-1. Copy `.env.example` to `.env` and configure:
-   ```
-   DEPLOYER_PRIVATE_KEY=0x...
-   BASE_SEPOLIA_RPC=https://sepolia.base.org
-   ETHERSCAN_API_KEY=...
-   ```
+```bash
+cd packages/contracts
+forge build
+forge test -vvv                          # 285 tests, all passing
+FOUNDRY_PROFILE=deploy forge build --sizes  # All contracts < 24KB
+```
 
-2. Dry-run (local simulation):
-   ```bash
-   make deploy-testnet-dry
-   ```
+### Run Frontend Locally
 
-3. Deploy to Base Sepolia:
-   ```bash
-   make deploy-testnet
-   ```
+```bash
+cd packages/frontend
+cp .env.local.example .env.local  # or create manually
+pnpm dev                          # http://localhost:3000
+```
 
-4. Deploy to Base Mainnet:
-   ```bash
-   make deploy-mainnet
-   ```
+### Build Subgraph
 
-Deployment output is written to `deployments/{chainId}.json`.
+```bash
+cd packages/subgraph
+pnpm codegen
+pnpm build
+```
 
-## Contract Addresses
+### Deploy Contracts
 
-### Base Sepolia Testnet (Chain ID: 84532)
+```bash
+cd packages/contracts
+cp .env.example .env  # Fill in DEPLOYER_PRIVATE_KEY, BASE_SEPOLIA_RPC, ETHERSCAN_API_KEY
+make deploy-testnet-dry   # Simulation
+make deploy-testnet       # Broadcast + verify
+```
 
-| Contract | Address |
-|---|---|
-| BastionHook | `0x243bD148C9DFeE05584182d420f319e234D80AC0` |
-| EscrowVault | `0xC36E784E1dff616bDae4EAc7B310F0934FaF04a4` |
-| InsurancePool | `0xB98E0Fb673e5a0C6e15F1D0a9f36E7dA954A0D5E` |
-| TriggerOracle | `0xD2BD10D3f2e3a057F0040663B1EEbf4d1874fEAB` |
-| ReputationEngine | `0x78dA752e9dBD73a9b0C0F5ddD15e854D2B879524` |
-
-> **Note**: These addresses were generated via local anvil fork simulation (deployer nonce 16271). Actual on-chain addresses will differ when deployed to Base Sepolia.
-
-### External Dependencies
-
-| Contract | Network | Address |
-|---|---|---|
-| Uniswap V4 PoolManager | Base Sepolia | `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408` |
-| Uniswap V4 PoolManager | Base Mainnet | `0x498581fF718922c3f8e6A244956aF099B2652b2b` |
-| Permit2 | All chains | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
-| WETH | Base | `0x4200000000000000000000000000000000000006` |
+Deployment output: `deployments/{chainId}.json`
 
 ## Project Structure
 
 ```
-src/
-  hooks/
-    BastionHook.sol          # Uniswap V4 Hook (entry point)
-  core/
-    EscrowVault.sol          # Time-locked vesting management
-    InsurancePool.sol        # Per-token insurance fund
-    TriggerOracle.sol        # On-chain rug-pull detection
-    ReputationEngine.sol     # Issuer reputation scoring
-  interfaces/                # Contract interfaces (IEscrowVault, IInsurancePool, etc.)
-script/
-  Deploy.s.sol               # Production deployment script
-  BastionDeployer.sol        # CREATE2 deployer factory
-  HookMiner.sol              # Hook address salt miner
-test/
-  unit/                      # Unit tests per contract
-  integration/               # Integration & E2E scenario tests
-  invariant/                 # Invariant/fuzz tests
-docs/
-  ARCHITECTURE.md            # Detailed architecture documentation
-  SECURITY.md                # Security considerations & audit checklist
+bastionswap/
+├── packages/
+│   ├── contracts/              # Foundry smart contracts
+│   │   ├── src/
+│   │   │   ├── hooks/BastionHook.sol
+│   │   │   ├── core/           # EscrowVault, InsurancePool, TriggerOracle, ReputationEngine
+│   │   │   └── interfaces/     # Contract interfaces
+│   │   ├── test/
+│   │   │   ├── unit/           # Unit tests per contract
+│   │   │   ├── integration/    # Integration & E2E scenario tests
+│   │   │   └── invariant/      # Invariant/fuzz tests (10k runs, depth 50)
+│   │   ├── script/             # Deploy.s.sol, E2ESimulation.s.sol
+│   │   └── deployments/        # Chain-specific deployment records
+│   │
+│   ├── subgraph/               # The Graph protocol indexer
+│   │   ├── schema.graphql      # Entity definitions
+│   │   ├── subgraph.yaml       # Data source config
+│   │   └── src/mappings/       # Event handlers (5 data sources)
+│   │
+│   └── frontend/               # Next.js 14 web application
+│       ├── src/app/            # Pages: home, swap, create, pools, pool detail
+│       ├── src/hooks/          # wagmi + subgraph custom hooks
+│       ├── src/components/     # UI components (escrow, insurance, issuer, triggers)
+│       └── src/config/         # Contracts, ABIs, wagmi, subgraph config
+│
+├── docs/
+│   ├── ARCHITECTURE.md         # Protocol design & contract interactions
+│   └── SECURITY.md             # Threat model & audit checklist
+│
+├── pnpm-workspace.yaml
+└── turbo.json
 ```
-
-## Documentation
-
-- **[Architecture](docs/ARCHITECTURE.md)** — Detailed protocol design, contract interactions, trigger mechanisms, and deployment strategy
-- **[Security](docs/SECURITY.md)** — Threat model, known attack vectors, mitigations, and audit checklist
 
 ## Tech Stack
 
-- **Solidity** 0.8.26 (EVM target: Cancun)
-- **Foundry** (Forge, Cast, Anvil)
-- **Uniswap V4** (v4-core, v4-periphery)
-- **OpenZeppelin** (ReentrancyGuard via v4-core)
-- **Target Chains**: Base (primary), Arbitrum, Optimism
+| Layer | Technology |
+|-------|------------|
+| Smart Contracts | Solidity 0.8.26, Foundry, Uniswap V4 |
+| Indexing | The Graph (Subgraph Studio) |
+| Frontend | Next.js 14, React 18, TypeScript |
+| Wallet | wagmi v2, ConnectKit, viem |
+| Styling | Tailwind CSS (custom dark theme) |
+| Data Fetching | graphql-request, @tanstack/react-query |
+| Target Chain | Base (EVM Cancun) |
+
+## Vercel Deployment
+
+1. Import the GitHub repo on [vercel.com](https://vercel.com)
+2. Configure:
+   - **Root Directory**: `packages/frontend`
+   - **Framework Preset**: Next.js
+   - **Build Command**: `pnpm build`
+3. Set environment variables:
+   ```
+   NEXT_PUBLIC_SUBGRAPH_URL=https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest
+   NEXT_PUBLIC_CHAIN_ID=84532
+   NEXT_PUBLIC_WC_PROJECT_ID=<your-walletconnect-project-id>
+   ```
+4. Deploy
+
+## Documentation
+
+- **[Architecture](docs/ARCHITECTURE.md)** — Protocol design, contract interactions, trigger mechanisms, deployment strategy
+- **[Security](docs/SECURITY.md)** — Threat model, 12 known attack vectors, mitigations, audit checklist
 
 ## License
 
@@ -194,5 +246,3 @@ Licensed under the [Business Source License 1.1](LICENSE) (BUSL-1.1).
 - **Licensed Work**: BastionSwap Protocol
 - **Change Date**: March 4, 2030
 - **Change License**: GPL-2.0-or-later
-
-See [LICENSE](LICENSE) for full terms.

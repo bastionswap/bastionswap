@@ -188,18 +188,17 @@ export function SwapCard() {
               Enter Amount
             </button>
           ) : (
-            <button
-              disabled={isWriting || isConfirming}
-              className="btn-primary w-full py-4 text-base"
-            >
-              {isWriting
-                ? "Confirming..."
-                : isConfirming
-                  ? "Processing..."
-                  : isSuccess
-                    ? "Swapped!"
-                    : "Swap"}
-            </button>
+            <div>
+              <button
+                disabled
+                className="w-full rounded-xl bg-surface-light py-4 text-base font-semibold text-gray-500 cursor-not-allowed"
+              >
+                Swap (Testnet Coming Soon)
+              </button>
+              <p className="mt-2 text-center text-xs text-gray-600">
+                Swap router deployment in progress. Use CLI for testnet swaps.
+              </p>
+            </div>
           )}
         </div>
 

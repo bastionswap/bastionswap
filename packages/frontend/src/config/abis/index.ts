@@ -3,6 +3,7 @@ import EscrowVaultABI from "./EscrowVault.json";
 import InsurancePoolABI from "./InsurancePool.json";
 import TriggerOracleABI from "./TriggerOracle.json";
 import ReputationEngineABI from "./ReputationEngine.json";
+import PoolManagerABI from "./PoolManager.json";
 
 export {
   BastionHookABI,
@@ -10,4 +11,5 @@ export {
   InsurancePoolABI,
   TriggerOracleABI,
   ReputationEngineABI,
+  PoolManagerABI,
 };
