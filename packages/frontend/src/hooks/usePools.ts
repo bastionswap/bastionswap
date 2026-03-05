@@ -236,3 +236,42 @@ export function usePool(id: string) {
     enabled: !!id,
   });
 }
+
+const POOL_BY_TOKENS_QUERY = gql`
+  query PoolByTokens($token0: String!, $token1: String!) {
+    pools(
+      where: { token0: $token0, token1: $token1 }
+      first: 1
+    ) {
+      id
+      reserve0
+      reserve1
+    }
+  }
+`;
+
+/**
+ * Fetch pool reserves for a token pair (sorted by address).
+ * Returns reserve0 and reserve1 as raw strings from the subgraph.
+ */
+export function usePoolReserves(
+  tokenA: string | undefined,
+  tokenB: string | undefined
+) {
+  const [token0, token1] =
+    tokenA && tokenB && tokenA.toLowerCase() < tokenB.toLowerCase()
+      ? [tokenA.toLowerCase(), tokenB.toLowerCase()]
+      : [tokenB?.toLowerCase(), tokenA?.toLowerCase()];
+
+  return useQuery({
+    queryKey: ["poolReserves", token0, token1],
+    queryFn: () =>
+      graphClient.request<{ pools: { id: string; reserve0: string | null; reserve1: string | null }[] }>(
+        POOL_BY_TOKENS_QUERY,
+        { token0, token1 }
+      ),
+    select: (data) => data.pools[0] ?? null,
+    enabled: !!token0 && !!token1,
+    staleTime: 15_000,
+  });
+}

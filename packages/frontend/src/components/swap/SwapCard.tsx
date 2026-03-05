@@ -19,6 +19,7 @@ import {
   useSwapQuote,
   FAUCETS,
 } from "@/hooks/useSwap";
+import { usePoolReserves } from "@/hooks/usePools";
 import { getContracts } from "@/config/contracts";
 import { explorerUrl } from "@/lib/formatters";
 
@@ -137,14 +138,8 @@ export function SwapCard() {
 
   const { data: quotedOut, isLoading: isQuoteLoading } = useSwapQuote(quoteParams);
 
-  // Spot price quote: use a tiny amount to determine the current exchange rate
-  const SPOT_AMOUNT = parseUnits("0.001", 18); // small reference amount
-  const spotParams = useMemo(() => {
-    if (!poolKey) return null;
-    return { ...poolKey, amountIn: SPOT_AMOUNT };
-  }, [poolKey]);
-
-  const { data: spotQuotedOut } = useSwapQuote(spotParams);
+  // Pool reserves for spot price calculation
+  const { data: poolReserves } = usePoolReserves(tokenIn?.address, tokenOut?.address);
 
   // Queries must be loaded before allowing swap
   const queriesLoading = !tokenInIsNative && tokenIn && address && (allowance === undefined || tokenInBalance === undefined);
@@ -158,17 +153,31 @@ export function SwapCard() {
     ? (quotedOut * BigInt(10000 - slippageBps)) / 10000n
     : 0n;
 
-  // Price impact: compare effective price vs spot price from a tiny trade
+  // Price impact: compare effective price vs spot price from reserves
   const priceImpact = useMemo(() => {
-    if (!quotedOut || !spotQuotedOut || parsedAmountIn <= 0n || spotQuotedOut <= 0n) return 0;
-    // Spot rate: spotQuotedOut / SPOT_AMOUNT
-    // Effective rate: quotedOut / parsedAmountIn
-    // Price impact = 1 - (effectiveRate / spotRate)
-    const spotRate = Number(spotQuotedOut) / Number(SPOT_AMOUNT);
+    if (!quotedOut || !poolReserves || parsedAmountIn <= 0n) return 0;
+
+    const r0 = parseFloat(poolReserves.reserve0 || "0");
+    const r1 = parseFloat(poolReserves.reserve1 || "0");
+    if (r0 <= 0 || r1 <= 0) return 0;
+
+    // Spot price = reserveOut / reserveIn
+    // Determine which reserve is "in" and which is "out" based on sort order
+    const tokenInAddr = tokenIn?.address.toLowerCase() ?? "";
+    const tokenOutAddr = tokenOut?.address.toLowerCase() ?? "";
+    const token0Addr = tokenInAddr < tokenOutAddr ? tokenInAddr : tokenOutAddr;
+    const isZeroForOne = tokenInAddr === token0Addr;
+
+    const reserveIn = isZeroForOne ? r0 : r1;
+    const reserveOut = isZeroForOne ? r1 : r0;
+    const spotRate = reserveOut / reserveIn;
+
+    // Effective rate from the actual quote
     const effectiveRate = Number(quotedOut) / Number(parsedAmountIn);
+
     const impact = (1 - effectiveRate / spotRate) * 100;
-    return Math.max(impact, 0); // clamp to 0 if slightly negative due to rounding
-  }, [quotedOut, spotQuotedOut, parsedAmountIn]);
+    return Math.max(impact, 0);
+  }, [quotedOut, poolReserves, parsedAmountIn, tokenIn?.address, tokenOut?.address]);
 
   const handleApprove = () => {
     if (!tokenIn || !routerAddr) return;
