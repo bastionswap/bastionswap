@@ -263,6 +263,17 @@ export default function PoolDetailPage() {
   const { isLoading: isClaimConfirming, isSuccess: claimSuccess } =
     useWaitForTransactionReceipt({ hash: claimHash });
 
+  // Compute ETH equivalent for escrow LP display
+  // token0 = native ETH, token1 = issued token in Bastion pools
+  const escrowEthAmount = useMemo(() => {
+    if (!pool?.escrow || !pool.reserve0 || !pool.reserve1) return 0;
+    const r0 = parseFloat(pool.reserve0) / Math.pow(10, token0Info.decimals ?? 18); // ETH
+    const r1 = parseFloat(pool.reserve1) / Math.pow(10, token1Info.decimals ?? 18); // token
+    const escrowTokens = parseFloat(pool.escrow.totalLocked);
+    if (r1 === 0 || escrowTokens === 0) return 0;
+    return escrowTokens * (r0 / r1);
+  }, [pool?.escrow, pool?.reserve0, pool?.reserve1, token0Info.decimals, token1Info.decimals]);
+
   const handleClaim = () => {
     if (!contracts || !address || !holderBalance) return;
     writeContract({
@@ -318,17 +329,6 @@ export default function PoolDetailPage() {
   const token1Label = token1Info.displayName;
   const issuedTokenLabel = issuedTokenInfo.symbol || (pool.issuedToken ? shortenAddress(pool.issuedToken, 3) : "tokens");
   const poolAge = pool.createdAt ? timeAgo(parseInt(pool.createdAt)) : null;
-
-  // Compute ETH equivalent for escrow LP display
-  // token0 = native ETH, token1 = issued token in Bastion pools
-  const escrowEthAmount = useMemo(() => {
-    if (!pool.escrow || !pool.reserve0 || !pool.reserve1) return 0;
-    const r0 = parseFloat(pool.reserve0) / Math.pow(10, token0Info.decimals ?? 18); // ETH
-    const r1 = parseFloat(pool.reserve1) / Math.pow(10, token1Info.decimals ?? 18); // token
-    const escrowTokens = parseFloat(pool.escrow.totalLocked);
-    if (r1 === 0 || escrowTokens === 0) return 0;
-    return escrowTokens * (r0 / r1);
-  }, [pool.escrow, pool.reserve0, pool.reserve1, token0Info.decimals, token1Info.decimals]);
 
   return (
     <div className="max-w-6xl mx-auto">
