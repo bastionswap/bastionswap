@@ -13,14 +13,15 @@ interface Token {
 
 const POPULAR_TOKENS: Token[] = [
   {
-    address: "0x0000000000000000000000000000000000000000",
-    symbol: "ETH",
-    name: "Ether",
+    address: "0x1Afed1eC73e27a7ffbc24fE40Bcc6c3442D8709e",
+    symbol: "BTT",
+    name: "Bastion Test Token",
+    isProtected: true,
   },
   {
-    address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    symbol: "USDC",
-    name: "USD Coin",
+    address: "0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21",
+    symbol: "BTST",
+    name: "Base Test Token",
   },
 ];
 

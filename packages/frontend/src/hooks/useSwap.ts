@@ -1,10 +1,143 @@
-import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  useWriteContract,
+  useWaitForTransactionReceipt,
+  useReadContract,
+  useBalance,
+} from "wagmi";
 import { baseSepolia } from "wagmi/chains";
-import { parseUnits } from "viem";
+import { parseUnits, formatUnits } from "viem";
 import { getContracts } from "@/config/contracts";
 import { BastionRouterABI } from "@/config/abis";
 
 const contracts = getContracts(baseSepolia.id);
+
+const ERC20_ABI = [
+  {
+    type: "function",
+    name: "allowance",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    outputs: [{ type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "approve",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ type: "bool" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
+const FAUCET_ABI = [
+  {
+    type: "function",
+    name: "claim",
+    inputs: [],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "canClaim",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ type: "bool" }],
+    stateMutability: "view",
+  },
+] as const;
+
+// ─── Token Allowance ──────────────────────────────────
+
+export function useTokenAllowance(
+  token: `0x${string}` | undefined,
+  owner: `0x${string}` | undefined,
+  spender: `0x${string}` | undefined
+) {
+  const isNative = token === "0x0000000000000000000000000000000000000000";
+  const { data, refetch } = useReadContract({
+    address: token,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: owner && spender ? [owner, spender] : undefined,
+    query: { enabled: !!token && !!owner && !!spender && !isNative },
+  });
+
+  return {
+    allowance: isNative ? undefined : (data as bigint | undefined),
+    isNative,
+    refetch,
+  };
+}
+
+// ─── Token Balance ──────────────────────────────────
+
+export function useTokenBalance(
+  token: `0x${string}` | undefined,
+  account: `0x${string}` | undefined
+) {
+  const isNative = token === "0x0000000000000000000000000000000000000000";
+
+  const { data: ethBalance } = useBalance({
+    address: account,
+    query: { enabled: !!account && isNative },
+  });
+
+  const { data: erc20Balance, refetch } = useReadContract({
+    address: token,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: account ? [account] : undefined,
+    query: { enabled: !!token && !!account && !isNative },
+  });
+
+  return {
+    balance: isNative ? ethBalance?.value : (erc20Balance as bigint | undefined),
+    refetch,
+  };
+}
+
+// ─── Approve ──────────────────────────────────
+
+export function useApprove() {
+  const {
+    writeContract,
+    data: hash,
+    isPending,
+    error,
+    reset,
+  } = useWriteContract();
+
+  const { isLoading: isConfirming, isSuccess } =
+    useWaitForTransactionReceipt({ hash });
+
+  const approve = (token: `0x${string}`, spender: `0x${string}`, amount: bigint) => {
+    writeContract({
+      address: token,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [spender, amount],
+    });
+  };
+
+  return { approve, hash, isPending, isConfirming, isSuccess, error, reset };
+}
+
+// ─── Swap ──────────────────────────────────
 
 export interface SwapConfig {
   currency0: `0x${string}`;
@@ -16,7 +149,7 @@ export interface SwapConfig {
   amountIn: bigint;
   minAmountOut: bigint;
   deadline: bigint;
-  value?: bigint; // ETH to send if selling native ETH
+  value?: bigint;
 }
 
 export function useExecuteSwap() {
@@ -66,17 +199,76 @@ export function useExecuteSwap() {
   };
 }
 
+// ─── Faucet ──────────────────────────────────
+
+export const FAUCETS: Record<string, `0x${string}`> = {
+  "0x1Afed1eC73e27a7ffbc24fE40Bcc6c3442D8709e": "0x9B76963C1e78a4480d97d5a119024eCa6B41081a",
+  "0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21": "0x43B1ca77024007e33D84911368070B6a772aE92A",
+};
+
+export function useFaucet(faucetAddress: `0x${string}` | undefined, account: `0x${string}` | undefined) {
+  const { data: canClaimData } = useReadContract({
+    address: faucetAddress,
+    abi: FAUCET_ABI,
+    functionName: "canClaim",
+    args: account ? [account] : undefined,
+    query: { enabled: !!faucetAddress && !!account },
+  });
+
+  const {
+    writeContract,
+    data: hash,
+    isPending,
+    error,
+    reset,
+  } = useWriteContract();
+
+  const { isLoading: isConfirming, isSuccess } =
+    useWaitForTransactionReceipt({ hash });
+
+  const claim = () => {
+    if (!faucetAddress) return;
+    writeContract({
+      address: faucetAddress,
+      abi: FAUCET_ABI,
+      functionName: "claim",
+    });
+  };
+
+  return {
+    canClaim: canClaimData as boolean | undefined,
+    claim,
+    hash,
+    isPending,
+    isConfirming,
+    isSuccess,
+    error,
+    reset,
+  };
+}
+
+// ─── Quote (placeholder) ──────────────────────────────────
+
 export function useSwapQuote(
   _tokenIn: string | undefined,
   _tokenOut: string | undefined,
   _amountIn: string
 ) {
-  // Placeholder — in production this would simulate via eth_call or use a quoter
-  const amountIn = _amountIn || "0";
-  const parsedAmount = amountIn && parseFloat(amountIn) > 0 ? amountIn : "0";
+  const [debouncedAmount, setDebouncedAmount] = useState(_amountIn);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAmount(_amountIn), 500);
+    return () => clearTimeout(timer);
+  }, [_amountIn]);
+
+  // Without an on-chain quoter, we estimate 1:1 for same-decimal tokens
+  // This is a rough approximation — real production would use a Quoter contract
+  const amount = debouncedAmount && parseFloat(debouncedAmount) > 0
+    ? debouncedAmount
+    : "0";
 
   return {
-    data: parsedAmount !== "0" ? parsedAmount : undefined,
+    data: amount !== "0" ? amount : undefined,
     isLoading: false,
     error: null,
   };

@@ -22,7 +22,9 @@
     "baseToken": "0xC1fC9E68901525a75a44a6e3B0bF0Af6c4227C21",
     "lpRouter": "0x6c1760dFDb8406a39829f9c671946bD81CDAb310",
     "swapRouter": "0x5c85610a3b98221c203B4f615196601f2282a668",
-    "testPoolId": "0x86faed6bb090dc8c4f13903862010bd13308e7abe103046ef54cb5846e86e94e"
+    "testPoolId": "0x86faed6bb090dc8c4f13903862010bd13308e7abe103046ef54cb5846e86e94e",
+    "bttFaucet": "0x9B76963C1e78a4480d97d5a119024eCa6B41081a",
+    "btstFaucet": "0x43B1ca77024007e33D84911368070B6a772aE92A"
   },
   "e2e": {
     "status": "PASSED",
