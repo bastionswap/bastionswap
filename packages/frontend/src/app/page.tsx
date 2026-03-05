@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useChainId } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
 import { gql } from "graphql-request";
 import { graphClient } from "@/config/subgraph";
+import { useBastionPools } from "@/hooks/usePools";
 
 const PROTOCOL_STATS_QUERY = gql`
   query ProtocolStats {
@@ -24,10 +26,23 @@ interface Stats {
 }
 
 function useProtocolStats() {
+  const chainId = useChainId();
+  const { data: pools } = useBastionPools();
+
   return useQuery({
-    queryKey: ["protocolStats"],
-    queryFn: () =>
-      graphClient.request<{ protocolStats: Stats | null }>(PROTOCOL_STATS_QUERY),
+    queryKey: ["protocolStats", chainId, pools?.length, pools?.[0]?.escrow?.totalLocked],
+    queryFn: () => {
+      if (chainId === 31337 && pools) {
+        const stats: Stats = {
+          totalBastionPools: pools.length,
+          totalEscrowLocked: pools.reduce((sum, p) => sum + parseFloat(p.escrow?.totalLocked ?? "0"), 0).toString(),
+          totalInsuranceBalance: pools.reduce((sum, p) => sum + parseFloat(p.insurancePool?.balance ?? "0"), 0).toString(),
+          totalCompensationPaid: "0",
+        };
+        return { protocolStats: stats };
+      }
+      return graphClient.request<{ protocolStats: Stats | null }>(PROTOCOL_STATS_QUERY);
+    },
     select: (d) => d.protocolStats,
   });
 }
