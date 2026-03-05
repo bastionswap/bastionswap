@@ -5,16 +5,17 @@ import { useAccount, useChainId } from "wagmi";
 import { ConnectKitButton } from "connectkit";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { useCreateBastionPool } from "@/hooks/useCreatePool";
+import {
+  useCreateBastionPool,
+  DEFAULT_TRIGGER_CONFIG,
+  type CreatePoolStep,
+} from "@/hooks/useCreatePool";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatBps, formatDuration } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
-import { PoolManagerABI } from "@/config/abis";
 import { VestingChart } from "@/components/ui/VestingChart";
 
 type Step = 1 | 2 | 3 | 4;
-
-const SQRT_PRICE_1_1 = 79228162514264337593543950336n;
 
 const DEFAULT_COMMITMENT = {
   dailyWithdrawLimit: 500, // 5% in bps
@@ -91,12 +92,41 @@ function computeStrictnessLevel(
 
 const STEP_LABELS = ["Token", "Liquidity", "Commitment", "Confirm"];
 
+function getStepLabel(poolStep: CreatePoolStep): string {
+  switch (poolStep) {
+    case "approving-hook":
+    case "confirming-hook-approval":
+      return "Approve Escrow Tokens (1/3)";
+    case "approving-router":
+    case "confirming-router-approval":
+      return "Approve LP Tokens (2/3)";
+    case "creating":
+    case "confirming-creation":
+      return "Creating Pool (3/3)";
+    case "done":
+      return "Pool Created!";
+    case "error":
+      return "Error";
+    default:
+      return "Create Bastion Pool";
+  }
+}
+
+function isStepConfirming(poolStep: CreatePoolStep): boolean {
+  return [
+    "confirming-hook-approval",
+    "confirming-router-approval",
+    "confirming-creation",
+  ].includes(poolStep);
+}
+
 export default function CreatePoolPage() {
   const { isConnected, address } = useAccount();
   const [step, setStep] = useState<Step>(1);
   const [tokenAddress, setTokenAddress] = useState("");
   const [ethAmount, setEthAmount] = useState("");
   const [tokenAmount, setTokenAmount] = useState("");
+  const [escrowAmount, setEscrowAmount] = useState("");
   const [commitment, setCommitment] = useState(DEFAULT_COMMITMENT);
   const [vestingMode, setVestingMode] = useState<VestingMode>("standard");
   const [customMilestones, setCustomMilestones] = useState<Milestone[]>([
@@ -119,35 +149,38 @@ export default function CreatePoolPage() {
     }
     return true;
   }, [activeMilestones]);
-  const { createPool, isWriting, isConfirming, isSuccess, hash, error } =
-    useCreateBastionPool();
+
+  const {
+    step: poolStep,
+    error,
+    hash,
+    startCreation,
+    reset: resetPool,
+    isActive,
+  } = useCreateBastionPool();
+
   const chainId = useChainId();
   const contracts = getContracts(chainId);
 
   const handleCreatePool = () => {
     if (!contracts || !address) return;
-    const hookAddr = contracts.BastionHook as `0x${string}`;
     const tokenAddr = tokenAddress as `0x${string}`;
-    const weth = "0x4200000000000000000000000000000000000006" as `0x${string}`;
-    const [currency0, currency1] =
-      tokenAddr.toLowerCase() < weth.toLowerCase()
-        ? [tokenAddr, weth]
-        : [weth, tokenAddr];
 
-    createPool({
-      address: contracts.PoolManager as `0x${string}`,
-      abi: PoolManagerABI,
-      functionName: "initialize",
-      args: [
-        {
-          currency0,
-          currency1,
-          fee: 3000,
-          tickSpacing: 60,
-          hooks: hookAddr,
-        },
-        SQRT_PRICE_1_1,
-      ],
+    startCreation({
+      tokenAddress: tokenAddr,
+      ethAmount,
+      tokenAmount,
+      escrowAmount,
+      vestingSchedule: activeMilestones.map((m) => ({
+        timeOffset: m.days * 86400,
+        basisPoints: m.bps,
+      })),
+      commitment: {
+        dailyWithdrawLimit: commitment.dailyWithdrawLimit,
+        lockDuration: commitment.lockDuration,
+        maxSellPercent: commitment.maxSellPercent,
+      },
+      triggerConfig: DEFAULT_TRIGGER_CONFIG,
     });
   };
 
@@ -262,7 +295,7 @@ export default function CreatePoolPage() {
         </Card>
       )}
 
-      {/* Step 2: Liquidity */}
+      {/* Step 2: Liquidity + Escrow */}
       {step === 2 && (
         <Card>
           <div className="flex items-center gap-3 mb-5">
@@ -272,9 +305,9 @@ export default function CreatePoolPage() {
               </svg>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Initial Liquidity</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Liquidity & Escrow</h2>
               <p className="text-sm text-gray-500">
-                Set the initial token and ETH amounts
+                Set initial liquidity amounts and escrow protection
               </p>
             </div>
           </div>
@@ -299,6 +332,22 @@ export default function CreatePoolPage() {
                 className="input-base text-lg"
               />
             </div>
+            <hr className="border-gray-200" />
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                Escrow Amount (tokens for protection)
+              </label>
+              <p className="text-xs text-gray-400 mb-2">
+                Tokens locked in escrow as a trust signal. Released according to the vesting schedule.
+              </p>
+              <input
+                type="number"
+                value={escrowAmount}
+                onChange={(e) => setEscrowAmount(e.target.value)}
+                placeholder="0"
+                className="input-base text-lg"
+              />
+            </div>
           </div>
           <div className="mt-5 flex gap-3">
             <button
@@ -309,7 +358,7 @@ export default function CreatePoolPage() {
             </button>
             <button
               onClick={() => setStep(3)}
-              disabled={!ethAmount || !tokenAmount}
+              disabled={!ethAmount || !tokenAmount || !escrowAmount}
               className="btn-primary flex-1 py-3.5 disabled:opacity-40"
             >
               Continue
@@ -664,6 +713,10 @@ export default function CreatePoolPage() {
               <span className="text-gray-500">Token Liquidity</span>
               <span className="text-gray-900 font-medium">{tokenAmount}</span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Escrow Amount</span>
+              <span className="text-gray-900 font-medium">{escrowAmount} tokens</span>
+            </div>
             <hr className="border-gray-200" />
             <div className="flex justify-between">
               <span className="text-gray-500">Vesting Schedule</span>
@@ -710,44 +763,72 @@ export default function CreatePoolPage() {
               </p>
             </div>
           )}
-          {isSuccess && hash && (
+
+          {poolStep === "done" && hash && (
             <div className="mt-4 rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center">
               <svg className="h-8 w-8 text-emerald-600 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <p className="text-sm font-medium text-emerald-700">Pool initialized!</p>
+              <p className="text-sm font-medium text-emerald-700">Pool created with full Bastion protection!</p>
               <p className="text-xs text-emerald-600/70 mt-1 font-mono">
                 {hash.slice(0, 10)}...{hash.slice(-8)}
               </p>
-              <p className="mt-2 text-xs text-gray-500">
-                Add initial liquidity via CLI to activate escrow protection.
-              </p>
+            </div>
+          )}
+
+          {/* Multi-step progress indicator */}
+          {isActive && (
+            <div className="mt-4 rounded-xl bg-bastion-50 border border-bastion-200 px-4 py-3">
+              <div className="flex items-center gap-3 mb-3">
+                <LoadingSpinner size="sm" />
+                <span className="text-sm font-medium text-bastion-700">
+                  {getStepLabel(poolStep)}
+                </span>
+              </div>
+              <div className="flex gap-1.5">
+                {[1, 2, 3].map((s) => {
+                  const stepNum = poolStep.includes("hook") ? 1
+                    : poolStep.includes("router") ? 2
+                    : 3;
+                  return (
+                    <div
+                      key={s}
+                      className={`h-1.5 flex-1 rounded-full transition-colors ${
+                        s < stepNum ? "bg-bastion-600"
+                        : s === stepNum ? (isStepConfirming(poolStep) ? "bg-bastion-400 animate-pulse" : "bg-bastion-600")
+                        : "bg-bastion-200"
+                      }`}
+                    />
+                  );
+                })}
+              </div>
             </div>
           )}
 
           <div className="mt-5 flex gap-3">
             <button
-              onClick={() => setStep(3)}
-              disabled={isWriting || isConfirming}
+              onClick={() => {
+                resetPool();
+                setStep(3);
+              }}
+              disabled={isActive}
               className="btn-secondary flex-1 py-3.5 disabled:opacity-40"
             >
               Back
             </button>
             <button
               onClick={handleCreatePool}
-              disabled={isWriting || isConfirming || isSuccess}
+              disabled={isActive || poolStep === "done"}
               className="btn-primary flex-1 py-3.5 disabled:opacity-40 text-base"
             >
-              {isWriting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <LoadingSpinner size="sm" /> Confirm...
-                </span>
-              ) : isConfirming ? (
-                <span className="flex items-center justify-center gap-2">
-                  <LoadingSpinner size="sm" /> Processing...
-                </span>
-              ) : isSuccess ? (
+              {poolStep === "done" ? (
                 "Created!"
+              ) : isActive ? (
+                <span className="flex items-center justify-center gap-2">
+                  <LoadingSpinner size="sm" /> {getStepLabel(poolStep)}
+                </span>
+              ) : poolStep === "error" ? (
+                "Retry"
               ) : (
                 "Create Bastion Pool"
               )}

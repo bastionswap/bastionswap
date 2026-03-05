@@ -4,21 +4,33 @@ pragma solidity =0.8.26;
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 
 /// @title BastionRouter
-/// @notice Minimal swap router for Uniswap V4 pools with BastionHook.
-///         Handles the unlock → callback pattern so users can swap in a single tx.
+/// @notice Minimal router for Uniswap V4 pools with BastionHook.
+///         Handles swaps and full pool creation (initialize + LP + hook registration) in a single tx.
 contract BastionRouter is IUnlockCallback {
     using CurrencyLibrary for Currency;
     using TransientStateLibrary for IPoolManager;
 
     IPoolManager public immutable poolManager;
+
+    uint8 private constant ACTION_SWAP = 0;
+    uint8 private constant ACTION_CREATE_POOL = 1;
+
+    struct CreatePoolParams {
+        PoolKey key;
+        uint160 sqrtPriceX96;
+        uint256 amount0Max;  // max currency0 for LP
+        uint256 amount1Max;  // max currency1 for LP
+        bytes hookData;      // abi.encode(issuer, token, escrowAmt, vesting, commitment, triggerConfig)
+    }
 
     error Expired();
     error OnlyPoolManager();
@@ -30,16 +42,17 @@ contract BastionRouter is IUnlockCallback {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  PUBLIC SWAP FUNCTIONS
+    //  PUBLIC FUNCTIONS
     // ═══════════════════════════════════════════════════════════════
 
+    /// @notice Create a pool with initial liquidity and BastionHook registration in one tx.
+    /// @param params Pool creation parameters including key, price, amounts, and hookData.
+    function createPool(CreatePoolParams calldata params) external payable {
+        poolManager.unlock(abi.encode(ACTION_CREATE_POOL, msg.sender, params));
+        _refundETH();
+    }
+
     /// @notice Swap exact input amount for as many output tokens as possible.
-    /// @param key       Pool key identifying the pool.
-    /// @param zeroForOne Direction: true = sell currency0 for currency1.
-    /// @param amountIn   Exact input amount (must be > 0).
-    /// @param minAmountOut Minimum output amount (slippage protection).
-    /// @param deadline   Timestamp after which the tx reverts.
-    /// @return amountOut Actual output amount received.
     function swapExactInput(
         PoolKey calldata key,
         bool zeroForOne,
@@ -58,11 +71,10 @@ contract BastionRouter is IUnlockCallback {
         });
 
         BalanceDelta delta = abi.decode(
-            poolManager.unlock(abi.encode(msg.sender, key, params)),
+            poolManager.unlock(abi.encode(ACTION_SWAP, msg.sender, key, params)),
             (BalanceDelta)
         );
 
-        // Output is the positive delta
         amountOut = zeroForOne
             ? uint256(int256(delta.amount1()))
             : uint256(int256(delta.amount0()));
@@ -73,12 +85,6 @@ contract BastionRouter is IUnlockCallback {
     }
 
     /// @notice Swap for exact output amount, spending at most maxAmountIn.
-    /// @param key       Pool key identifying the pool.
-    /// @param zeroForOne Direction: true = sell currency0 for currency1.
-    /// @param amountOut  Exact output amount desired (must be > 0).
-    /// @param maxAmountIn Maximum input amount (slippage protection).
-    /// @param deadline   Timestamp after which the tx reverts.
-    /// @return amountIn Actual input amount spent.
     function swapExactOutput(
         PoolKey calldata key,
         bool zeroForOne,
@@ -97,11 +103,10 @@ contract BastionRouter is IUnlockCallback {
         });
 
         BalanceDelta delta = abi.decode(
-            poolManager.unlock(abi.encode(msg.sender, key, params)),
+            poolManager.unlock(abi.encode(ACTION_SWAP, msg.sender, key, params)),
             (BalanceDelta)
         );
 
-        // Input is the negative delta
         amountIn = zeroForOne
             ? uint256(-int256(delta.amount0()))
             : uint256(-int256(delta.amount1()));
@@ -118,13 +123,71 @@ contract BastionRouter is IUnlockCallback {
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert OnlyPoolManager();
 
-        (address sender, PoolKey memory key, SwapParams memory params) =
-            abi.decode(data, (address, PoolKey, SwapParams));
+        uint8 action = abi.decode(data, (uint8));
+
+        if (action == ACTION_SWAP) {
+            return _handleSwap(data);
+        } else if (action == ACTION_CREATE_POOL) {
+            return _handleCreatePool(data);
+        }
+
+        revert("Unknown action");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  INTERNAL HANDLERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function _handleSwap(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, SwapParams memory params) =
+            abi.decode(data, (uint8, address, PoolKey, SwapParams));
 
         BalanceDelta delta = poolManager.swap(key, params, "");
 
         _settle(key.currency0, sender, delta.amount0());
         _settle(key.currency1, sender, delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleCreatePool(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, CreatePoolParams memory params) =
+            abi.decode(data, (uint8, address, CreatePoolParams));
+
+        // 1. Initialize the pool
+        poolManager.initialize(params.key, params.sqrtPriceX96);
+
+        // 2. Compute full-range ticks aligned to tickSpacing
+        int24 tickSpacing = params.key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+
+        // 3. Compute liquidity from amounts
+        uint160 sqrtPriceAX96 = TickMath.getSqrtPriceAtTick(tickLower);
+        uint160 sqrtPriceBX96 = TickMath.getSqrtPriceAtTick(tickUpper);
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            params.sqrtPriceX96,
+            sqrtPriceAX96,
+            sqrtPriceBX96,
+            params.amount0Max,
+            params.amount1Max
+        );
+
+        // 4. Add liquidity with hookData to trigger BastionHook registration
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            params.key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: int256(uint256(liquidity)),
+                salt: 0
+            }),
+            params.hookData
+        );
+
+        // 5. Settle token deltas
+        _settle(params.key.currency0, sender, delta.amount0());
+        _settle(params.key.currency1, sender, delta.amount1());
 
         return abi.encode(delta);
     }
@@ -135,13 +198,10 @@ contract BastionRouter is IUnlockCallback {
 
     function _settle(Currency currency, address sender, int128 amount) internal {
         if (amount < 0) {
-            // User owes tokens to the pool
             uint256 amountToSend = uint256(uint128(-amount));
             if (currency.isAddressZero()) {
-                // Native ETH — pay from contract balance (forwarded via msg.value)
                 poolManager.settle{value: amountToSend}();
             } else {
-                // ERC20 — pull from sender (requires prior approval to this router)
                 poolManager.sync(currency);
                 IERC20Minimal(Currency.unwrap(currency)).transferFrom(
                     sender, address(poolManager), amountToSend
@@ -149,13 +209,12 @@ contract BastionRouter is IUnlockCallback {
                 poolManager.settle();
             }
         } else if (amount > 0) {
-            // Pool owes tokens to the user
             uint256 amountToReceive = uint256(uint128(amount));
             poolManager.take(currency, sender, amountToReceive);
         }
     }
 
-    /// @dev Refund any excess ETH left in the contract after a swap.
+    /// @dev Refund any excess ETH left in the contract.
     function _refundETH() internal {
         uint256 bal = address(this).balance;
         if (bal > 0) {

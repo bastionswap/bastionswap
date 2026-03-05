@@ -16,6 +16,73 @@
   },
   {
     "type": "function",
+    "name": "createPool",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct BastionRouter.CreatePoolParams",
+        "components": [
+          {
+            "name": "key",
+            "type": "tuple",
+            "internalType": "struct PoolKey",
+            "components": [
+              {
+                "name": "currency0",
+                "type": "address",
+                "internalType": "Currency"
+              },
+              {
+                "name": "currency1",
+                "type": "address",
+                "internalType": "Currency"
+              },
+              {
+                "name": "fee",
+                "type": "uint24",
+                "internalType": "uint24"
+              },
+              {
+                "name": "tickSpacing",
+                "type": "int24",
+                "internalType": "int24"
+              },
+              {
+                "name": "hooks",
+                "type": "address",
+                "internalType": "contract IHooks"
+              }
+            ]
+          },
+          {
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "internalType": "uint160"
+          },
+          {
+            "name": "amount0Max",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amount1Max",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "hookData",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
     "name": "poolManager",
     "inputs": [],
     "outputs": [
