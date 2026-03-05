@@ -30,12 +30,12 @@ function useProtocolStats() {
   const { data: pools } = useBastionPools();
 
   return useQuery({
-    queryKey: ["protocolStats", chainId, pools?.length, pools?.[0]?.escrow?.totalLocked],
+    queryKey: ["protocolStats", chainId, pools?.length, pools?.[0]?.escrow?.totalLiquidity],
     queryFn: () => {
       if (chainId === 31337 && pools) {
         const stats: Stats = {
           totalBastionPools: pools.length,
-          totalEscrowLocked: pools.reduce((sum, p) => sum + parseFloat(p.escrow?.totalLocked ?? "0"), 0).toString(),
+          totalEscrowLocked: pools.reduce((sum, p) => sum + parseFloat(p.escrow?.totalLiquidity ?? "0"), 0).toString(),
           totalInsuranceBalance: pools.reduce((sum, p) => sum + parseFloat(p.insurancePool?.balance ?? "0"), 0).toString(),
           totalCompensationPaid: "0",
         };

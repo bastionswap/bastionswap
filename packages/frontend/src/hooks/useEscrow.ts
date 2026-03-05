@@ -29,17 +29,17 @@ export function useVestingEndTime(poolId: `0x${string}` | undefined) {
 }
 
 export function useVestingProgress(escrow: {
-  totalLocked: string;
-  released: string;
-  remaining: string;
+  totalLiquidity: string;
+  removedLiquidity: string;
+  remainingLiquidity: string;
 } | null) {
-  if (!escrow) return { progress: 0, remaining: "0", released: "0" };
-  const total = parseFloat(escrow.totalLocked);
-  const released = parseFloat(escrow.released);
-  const progress = total > 0 ? (released / total) * 100 : 0;
+  if (!escrow) return { progress: 0, remaining: "0", removed: "0" };
+  const total = parseFloat(escrow.totalLiquidity);
+  const removed = parseFloat(escrow.removedLiquidity);
+  const progress = total > 0 ? (removed / total) * 100 : 0;
   return {
     progress: Math.min(progress, 100),
-    remaining: escrow.remaining,
-    released: escrow.released,
+    remaining: escrow.remainingLiquidity,
+    removed: escrow.removedLiquidity,
   };
 }

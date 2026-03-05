@@ -84,12 +84,12 @@ dataSources:
         - name: EscrowVault
           file: ../contracts/out/EscrowVault.sol/EscrowVault.json
       eventHandlers:
-        - event: EscrowCreated(indexed uint256,indexed bytes32,indexed address,uint256)
+        - event: EscrowCreated(indexed uint256,indexed bytes32,indexed address,uint128)
           handler: handleEscrowVaultCreated
-        - event: VestedReleased(indexed uint256,uint256)
-          handler: handleVestedReleased
-        - event: Redistributed(indexed uint256,indexed uint8,uint256)
-          handler: handleRedistributed
+        - event: LPRemovalRecorded(indexed uint256,uint128)
+          handler: handleLPRemovalRecorded
+        - event: Lockdown(indexed uint256,indexed uint8)
+          handler: handleLockdown
         - event: CommitmentSet(indexed uint256,(uint16,uint40,uint16))
           handler: handleCommitmentSet
       file: ./src/mappings/escrowVault.ts

@@ -450,7 +450,7 @@
     "name": "beforeAddLiquidity",
     "inputs": [
       {
-        "name": "",
+        "name": "sender",
         "type": "address",
         "internalType": "address"
       },
@@ -655,7 +655,7 @@
     "name": "beforeRemoveLiquidity",
     "inputs": [
       {
-        "name": "",
+        "name": "sender",
         "type": "address",
         "internalType": "address"
       },
@@ -719,7 +719,7 @@
         ]
       },
       {
-        "name": "",
+        "name": "hookData",
         "type": "bytes",
         "internalType": "bytes"
       }
@@ -1176,12 +1176,33 @@
   },
   {
     "type": "error",
+    "name": "ExceedsVestedAmount",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "removable",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "HookNotImplemented",
     "inputs": []
   },
   {
     "type": "error",
     "name": "InvalidHookData",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MustIdentifyUser",
     "inputs": []
   },
   {

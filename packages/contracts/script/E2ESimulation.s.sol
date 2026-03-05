@@ -177,8 +177,6 @@ contract E2ESimulation is Script {
         baseToken.approve(address(lpRouter), type(uint256).max);
         issuedToken.approve(address(swapRouter), type(uint256).max);
         baseToken.approve(address(swapRouter), type(uint256).max);
-        issuedToken.approve(address(hook), type(uint256).max);
-
         console2.log("Minted 1M tokens each, approvals set");
     }
 
@@ -225,7 +223,7 @@ contract E2ESimulation is Script {
         });
 
         bytes memory hookData = abi.encode(
-            deployer, address(issuedToken), ESCROW_AMOUNT, vesting, commitment, triggerConfig
+            deployer, address(issuedToken), vesting, commitment, triggerConfig
         );
 
         lpRouter.modifyLiquidity(
@@ -296,10 +294,10 @@ contract E2ESimulation is Script {
 
         // 3. EscrowStatus
         IEscrowVault.EscrowStatus memory es = escrowVault.getEscrowStatus(escrowId);
-        require(es.totalLocked == ESCROW_AMOUNT, "FAIL: escrow totalLocked mismatch");
-        require(es.remaining == ESCROW_AMOUNT, "FAIL: escrow remaining mismatch");
-        require(es.released == 0, "FAIL: escrow released should be 0");
-        console2.log("  EscrowStatus: totalLocked=%d, remaining=%d", es.totalLocked, es.remaining);
+        require(es.totalLiquidity > 0, "FAIL: escrow totalLiquidity should be > 0");
+        require(es.remainingLiquidity == es.totalLiquidity, "FAIL: escrow remainingLiquidity mismatch");
+        require(es.removedLiquidity == 0, "FAIL: escrow removedLiquidity should be 0");
+        console2.log("  EscrowStatus: totalLiquidity=%d, remainingLiquidity=%d", uint256(es.totalLiquidity), uint256(es.remainingLiquidity));
 
         // 4. InsurancePool status
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(poolId);

@@ -15,8 +15,6 @@ const erc20Abi = parseAbi([
 
 export type CreatePoolStep =
   | "idle"
-  | "approving-hook"
-  | "confirming-hook-approval"
   | "approving-router"
   | "confirming-router-approval"
   | "creating"
@@ -28,7 +26,7 @@ export interface CreatePoolInput {
   tokenAddress: `0x${string}`;
   ethAmount: string;       // in ETH (e.g. "1.5")
   tokenAmount: string;     // in token units (e.g. "1000000")
-  // escrowAmount is automatic: equals tokenAmount (full token LP goes to escrow)
+  // LP position is automatically locked via EscrowVault (no token escrow needed)
   vestingSchedule: { timeOffset: number; basisPoints: number }[];
   commitment: {
     dailyWithdrawLimit: number;
@@ -87,20 +85,7 @@ export function useCreateBastionPool() {
   const [error, setError] = useState<Error | null>(null);
   const [input, setInput] = useState<CreatePoolInput | null>(null);
 
-  // Step 1: Approve token → BastionHook (for escrow transfer)
-  const {
-    writeContract: writeApproveHook,
-    data: approveHookHash,
-    isPending: isApproveHookPending,
-    error: approveHookError,
-    reset: resetApproveHook,
-  } = useWriteContract();
-
-  const { isSuccess: isApproveHookConfirmed } = useWaitForTransactionReceipt({
-    hash: approveHookHash,
-  });
-
-  // Step 2: Approve token → BastionRouter (for LP settlement)
+  // Step 1: Approve token → BastionRouter (for LP settlement)
   const {
     writeContract: writeApproveRouter,
     data: approveRouterHash,
@@ -112,7 +97,7 @@ export function useCreateBastionPool() {
   const { isSuccess: isApproveRouterConfirmed } =
     useWaitForTransactionReceipt({ hash: approveRouterHash });
 
-  // Step 3: Create pool
+  // Step 2: Create pool
   const {
     writeContract: writeCreatePool,
     data: createPoolHash,
@@ -125,20 +110,6 @@ export function useCreateBastionPool() {
     hash: createPoolHash,
   });
 
-  // Chain: hook approval confirmed → start router approval
-  useEffect(() => {
-    if (isApproveHookConfirmed && step === "confirming-hook-approval" && input && contracts) {
-      setStep("approving-router");
-      const totalTokenNeeded = parseEther(input.tokenAmount);
-      writeApproveRouter({
-        address: input.tokenAddress,
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [contracts.BastionRouter as `0x${string}`, totalTokenNeeded],
-      });
-    }
-  }, [isApproveHookConfirmed, step, input, contracts, writeApproveRouter]);
-
   // Chain: router approval confirmed → create pool
   useEffect(() => {
     if (isApproveRouterConfirmed && step === "confirming-router-approval" && input && contracts && address) {
@@ -146,14 +117,13 @@ export function useCreateBastionPool() {
 
       const ethWei = parseEther(input.ethAmount);
       const tokenWei = parseEther(input.tokenAmount);
-      const escrowWei = tokenWei; // Escrow = full token LP amount (automatic)
       const sqrtPriceX96 = computeSqrtPriceX96(ethWei, tokenWei);
 
+      // hookData: no escrow amount — EscrowVault records liquidity from LP params
       const hookData = encodeAbiParameters(
         parseAbiParameters([
           "address",
           "address",
-          "uint256",
           "(uint40,uint16)[]",
           "(uint16,uint40,uint16)",
           "(uint16,uint16,uint40,uint16,uint40,uint16)",
@@ -161,7 +131,6 @@ export function useCreateBastionPool() {
         [
           address,
           input.tokenAddress,
-          escrowWei,
           input.vestingSchedule.map((s) =>
             [s.timeOffset, s.basisPoints] as const
           ),
@@ -217,12 +186,6 @@ export function useCreateBastionPool() {
 
   // Track pending → confirming transitions
   useEffect(() => {
-    if (approveHookHash && step === "approving-hook") {
-      setStep("confirming-hook-approval");
-    }
-  }, [approveHookHash, step]);
-
-  useEffect(() => {
     if (approveRouterHash && step === "approving-router") {
       setStep("confirming-router-approval");
     }
@@ -236,12 +199,12 @@ export function useCreateBastionPool() {
 
   // Error handling
   useEffect(() => {
-    const err = approveHookError || approveRouterError || createPoolError;
+    const err = approveRouterError || createPoolError;
     if (err) {
       setError(err);
       setStep("error");
     }
-  }, [approveHookError, approveRouterError, createPoolError]);
+  }, [approveRouterError, createPoolError]);
 
   const isPoolAlreadyExists =
     step === "error" &&
@@ -254,30 +217,28 @@ export function useCreateBastionPool() {
 
       setInput(params);
       setError(null);
-      setStep("approving-hook");
-      resetApproveHook();
+      setStep("approving-router");
       resetApproveRouter();
       resetCreatePool();
 
-      const escrowWei = parseEther(params.tokenAmount); // Escrow = full token amount
-      writeApproveHook({
+      const totalTokenNeeded = parseEther(params.tokenAmount);
+      writeApproveRouter({
         address: params.tokenAddress,
         abi: erc20Abi,
         functionName: "approve",
-        args: [contracts.BastionHook as `0x${string}`, escrowWei],
+        args: [contracts.BastionRouter as `0x${string}`, totalTokenNeeded],
       });
     },
-    [contracts, writeApproveHook, resetApproveHook, resetApproveRouter, resetCreatePool],
+    [contracts, writeApproveRouter, resetApproveRouter, resetCreatePool],
   );
 
   const reset = useCallback(() => {
     setStep("idle");
     setError(null);
     setInput(null);
-    resetApproveHook();
     resetApproveRouter();
     resetCreatePool();
-  }, [resetApproveHook, resetApproveRouter, resetCreatePool]);
+  }, [resetApproveRouter, resetCreatePool]);
 
   return {
     step,

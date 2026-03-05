@@ -5,17 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {EscrowVault} from "../../src/core/EscrowVault.sol";
 import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-// ─── Mock Token ───────────────────────────────────────────────────────────────
-
-contract MockERC20 is ERC20 {
-    constructor() ERC20("Mock", "MCK", 18) {}
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-}
+// ─── Mock ReputationEngine ───────────────────────────────────────────────────
 
 contract MockReputationEngine {
     function recordEvent(address, uint8, bytes calldata) external {}
@@ -26,35 +17,26 @@ contract MockReputationEngine {
 
 contract EscrowVaultTest is Test {
     EscrowVault public vault;
-    MockERC20 public token;
 
     address public hook;
     address public oracle;
-    address public insurancePool;
     address public issuer;
 
     PoolId public defaultPoolId;
     uint256 public defaultEscrowId;
 
-    uint256 constant ESCROW_AMOUNT = 100 ether;
+    uint128 constant ESCROW_LIQUIDITY = 100e18;
 
     function setUp() public {
         hook = makeAddr("hook");
         oracle = makeAddr("oracle");
-        insurancePool = makeAddr("insurancePool");
         issuer = makeAddr("issuer");
 
         MockReputationEngine mockReputation = new MockReputationEngine();
-        vault = new EscrowVault(hook, oracle, insurancePool, address(mockReputation));
-        token = new MockERC20();
+        vault = new EscrowVault(hook, oracle, address(mockReputation));
 
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
         defaultEscrowId = _computeEscrowId(defaultPoolId, issuer);
-
-        // Mint tokens to hook and approve vault
-        token.mint(hook, 1000 ether);
-        vm.prank(hook);
-        token.approve(address(vault), type(uint256).max);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────
@@ -82,7 +64,7 @@ contract EscrowVaultTest is Test {
     function _createDefaultEscrow() internal returns (uint256) {
         vm.prank(hook);
         return vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), _defaultCommitment()
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), _defaultCommitment()
         );
     }
 
@@ -94,31 +76,30 @@ contract EscrowVaultTest is Test {
         uint256 escrowId = _createDefaultEscrow();
 
         assertEq(escrowId, defaultEscrowId);
-        assertEq(token.balanceOf(address(vault)), ESCROW_AMOUNT);
 
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
-        assertEq(status.totalLocked, ESCROW_AMOUNT);
-        assertEq(status.released, 0);
-        assertEq(status.remaining, ESCROW_AMOUNT);
+        assertEq(status.totalLiquidity, ESCROW_LIQUIDITY);
+        assertEq(status.removedLiquidity, 0);
+        assertEq(status.remainingLiquidity, ESCROW_LIQUIDITY);
     }
 
     function test_createEscrow_emitsEvent() public {
         vm.expectEmit(true, true, true, true);
-        emit IEscrowVault.EscrowCreated(defaultEscrowId, defaultPoolId, issuer, ESCROW_AMOUNT);
+        emit IEscrowVault.EscrowCreated(defaultEscrowId, defaultPoolId, issuer, ESCROW_LIQUIDITY);
         _createDefaultEscrow();
     }
 
     function test_createEscrow_revertsNotHook() public {
         vm.expectRevert(EscrowVault.OnlyHook.selector);
         vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), _defaultCommitment()
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), _defaultCommitment()
         );
     }
 
     function test_createEscrow_revertsZeroAmount() public {
         vm.prank(hook);
         vm.expectRevert(EscrowVault.ZeroAmount.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), 0, _defaultSchedule(), _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, 0, _defaultSchedule(), _defaultCommitment());
     }
 
     function test_createEscrow_revertsDuplicate() public {
@@ -127,7 +108,7 @@ contract EscrowVaultTest is Test {
         vm.prank(hook);
         vm.expectRevert(EscrowVault.EscrowAlreadyExists.selector);
         vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), _defaultCommitment()
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), _defaultCommitment()
         );
     }
 
@@ -136,7 +117,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.EmptySchedule.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, empty, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, empty, _defaultCommitment());
     }
 
     function test_createEscrow_revertsScheduleTimesNotIncreasing() public {
@@ -146,7 +127,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.ScheduleTimesNotIncreasing.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_createEscrow_revertsScheduleBpsNotIncreasing() public {
@@ -156,7 +137,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.ScheduleBpsNotIncreasing.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_createEscrow_revertsScheduleBpsExceedsMax() public {
@@ -165,7 +146,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.ScheduleBpsExceedsMax.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_createEscrow_revertsScheduleFinalBpsNot10000() public {
@@ -174,7 +155,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.ScheduleFinalBpsNot10000.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_createEscrow_revertsScheduleTooLong() public {
@@ -190,53 +171,57 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.ScheduleTooLong.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  VESTING & RELEASE TESTS
+    //  VESTING CALCULATION TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_calculateVestedAmount_beforeFirstStep() public {
+    function test_calculateVestedLiquidity_beforeFirstStep() public {
         _createDefaultEscrow();
 
         // Before any vesting step
         vm.warp(block.timestamp + 3 days);
-        assertEq(vault.calculateVestedAmount(defaultEscrowId), 0);
+        assertEq(vault.calculateVestedLiquidity(defaultEscrowId), 0);
     }
 
-    function test_calculateVestedAmount_atFirstStep() public {
+    function test_calculateVestedLiquidity_atFirstStep() public {
         _createDefaultEscrow();
 
         vm.warp(block.timestamp + 7 days);
-        // 10% of 100 ether = 10 ether
-        assertEq(vault.calculateVestedAmount(defaultEscrowId), 10 ether);
+        // 10% of 100e18 = 10e18
+        assertEq(vault.calculateVestedLiquidity(defaultEscrowId), 10e18);
     }
 
-    function test_calculateVestedAmount_atSecondStep() public {
+    function test_calculateVestedLiquidity_atSecondStep() public {
         _createDefaultEscrow();
 
         vm.warp(block.timestamp + 30 days);
-        // 30% of 100 ether = 30 ether
-        assertEq(vault.calculateVestedAmount(defaultEscrowId), 30 ether);
+        // 30% of 100e18 = 30e18
+        assertEq(vault.calculateVestedLiquidity(defaultEscrowId), 30e18);
     }
 
-    function test_calculateVestedAmount_atFinalStep() public {
+    function test_calculateVestedLiquidity_atFinalStep() public {
         _createDefaultEscrow();
 
         vm.warp(block.timestamp + 90 days);
-        assertEq(vault.calculateVestedAmount(defaultEscrowId), 100 ether);
+        assertEq(vault.calculateVestedLiquidity(defaultEscrowId), 100e18);
     }
 
-    function test_calculateVestedAmount_betweenSteps() public {
+    function test_calculateVestedLiquidity_betweenSteps() public {
         _createDefaultEscrow();
 
         // Between step 1 (7d) and step 2 (30d) - should still be 10%
         vm.warp(block.timestamp + 15 days);
-        assertEq(vault.calculateVestedAmount(defaultEscrowId), 10 ether);
+        assertEq(vault.calculateVestedLiquidity(defaultEscrowId), 10e18);
     }
 
-    function test_releaseVested_happyPath() public {
+    // ═══════════════════════════════════════════════════════════════════
+    //  RECORD LP REMOVAL TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_recordLPRemoval_happyPath() public {
         // Use no daily limit for simpler test
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
@@ -246,22 +231,21 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), commitment
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
         );
 
         vm.warp(block.timestamp + 7 days);
 
-        vm.prank(issuer);
-        uint256 released = vault.releaseVested(escrowId);
-        assertEq(released, 10 ether);
-        assertEq(token.balanceOf(issuer), 10 ether);
+        // 10e18 vested, remove 10e18
+        vm.prank(hook);
+        vault.recordLPRemoval(escrowId, 10e18);
 
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
-        assertEq(status.released, 10 ether);
-        assertEq(status.remaining, 90 ether);
+        assertEq(status.removedLiquidity, 10e18);
+        assertEq(status.remainingLiquidity, 90e18);
     }
 
-    function test_releaseVested_multiStepRelease() public {
+    function test_recordLPRemoval_multiStepRemoval() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
             lockDuration: 0,
@@ -270,86 +254,102 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), commitment
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
         );
 
-        // Release at 7 days
+        // Remove at 7 days (10% vested = 10e18)
         vm.warp(block.timestamp + 7 days);
-        vm.prank(issuer);
-        vault.releaseVested(escrowId);
-        assertEq(token.balanceOf(issuer), 10 ether);
+        vm.prank(hook);
+        vault.recordLPRemoval(escrowId, 10e18);
 
-        // Release at 30 days (should release an additional 20 ether)
+        IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
+        assertEq(status.removedLiquidity, 10e18);
+
+        // Remove at 30 days (30% vested = 30e18, already removed 10e18, removable = 20e18)
         vm.warp(block.timestamp + 23 days);
-        vm.prank(issuer);
-        uint256 released = vault.releaseVested(escrowId);
-        assertEq(released, 20 ether);
-        assertEq(token.balanceOf(issuer), 30 ether);
+        vm.prank(hook);
+        vault.recordLPRemoval(escrowId, 20e18);
+
+        status = vault.getEscrowStatus(escrowId);
+        assertEq(status.removedLiquidity, 30e18);
     }
 
-    function test_releaseVested_revertsNothingToRelease() public {
+    function test_recordLPRemoval_revertsNothingToRelease() public {
         _createDefaultEscrow();
 
         // Before any vesting
-        vm.prank(issuer);
+        vm.prank(hook);
         vm.expectRevert(EscrowVault.NothingToRelease.selector);
-        vault.releaseVested(defaultEscrowId);
+        vault.recordLPRemoval(defaultEscrowId, 1);
     }
 
-    function test_releaseVested_byNonIssuer_reverts() public {
+    function test_recordLPRemoval_revertsNotHook() public {
         _createDefaultEscrow();
 
         vm.warp(block.timestamp + 7 days);
 
-        address nonIssuer = makeAddr("nonIssuer");
-        vm.prank(nonIssuer);
-        vm.expectRevert(EscrowVault.OnlyIssuer.selector);
-        vault.releaseVested(defaultEscrowId);
+        vm.expectRevert(EscrowVault.OnlyHook.selector);
+        vault.recordLPRemoval(defaultEscrowId, 10e18);
     }
 
-    function test_releaseVested_revertsWhenTriggered() public {
+    function test_recordLPRemoval_revertsWhenTriggered() public {
         _createDefaultEscrow();
 
         vm.warp(block.timestamp + 7 days);
 
-        // Trigger redistribution first
+        // Trigger lockdown first
         vm.prank(oracle);
-        vault.triggerRedistribution(defaultEscrowId, 1);
+        vault.triggerLockdown(defaultEscrowId, 1);
 
-        vm.prank(issuer);
+        vm.prank(hook);
         vm.expectRevert(EscrowVault.EscrowTriggered.selector);
-        vault.releaseVested(defaultEscrowId);
+        vault.recordLPRemoval(defaultEscrowId, 10e18);
     }
 
-    function test_releaseVested_revertsNotFound() public {
-        vm.prank(issuer);
+    function test_recordLPRemoval_revertsNotFound() public {
+        vm.prank(hook);
         vm.expectRevert(EscrowVault.EscrowNotFound.selector);
-        vault.releaseVested(999);
+        vault.recordLPRemoval(999, 1);
     }
 
-    function test_releaseVested_roundingDown() public {
-        // Use an amount that doesn't divide evenly by 10000
-        uint256 oddAmount = 33;
-
-        token.mint(hook, oddAmount);
-
+    function test_recordLPRemoval_emitsEvent() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
             lockDuration: 0,
             maxSellPercent: 200
         });
 
-        PoolId poolId2 = PoolId.wrap(bytes32(uint256(42)));
-
         vm.prank(hook);
-        uint256 escrowId = vault.createEscrow(poolId2, issuer, address(token), oddAmount, _defaultSchedule(), commitment);
+        uint256 escrowId = vault.createEscrow(
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
+        );
 
         vm.warp(block.timestamp + 7 days);
 
-        // 10% of 33 = 3.3 => should round down to 3
-        vm.prank(issuer);
-        uint256 released = vault.releaseVested(escrowId);
-        assertEq(released, 3);
+        vm.expectEmit(true, false, false, true);
+        emit IEscrowVault.LPRemovalRecorded(escrowId, 10e18);
+
+        vm.prank(hook);
+        vault.recordLPRemoval(escrowId, 10e18);
+    }
+
+    function test_recordLPRemoval_exceedsRemovable_reverts() public {
+        IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
+            dailyWithdrawLimit: 0,
+            lockDuration: 0,
+            maxSellPercent: 200
+        });
+
+        vm.prank(hook);
+        uint256 escrowId = vault.createEscrow(
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
+        );
+
+        vm.warp(block.timestamp + 7 days);
+        // 10e18 vested, try to remove 11e18
+        vm.prank(hook);
+        vm.expectRevert(EscrowVault.NothingToRelease.selector);
+        vault.recordLPRemoval(escrowId, 11e18);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -359,13 +359,15 @@ contract EscrowVaultTest is Test {
     function test_dailyLimit_withinLimit() public {
         _createDefaultEscrow();
 
-        // dailyWithdrawLimit = 500 bps = 5% = 5 ether of 100 ether
+        // dailyWithdrawLimit = 500 bps = 5% = 5e18 of 100e18
         vm.warp(block.timestamp + 7 days);
 
-        // 10 ether vested, but daily limit is 5 ether
-        vm.prank(issuer);
-        uint256 released = vault.releaseVested(defaultEscrowId);
-        assertEq(released, 5 ether);
+        // 10e18 vested, but daily limit is 5e18
+        vm.prank(hook);
+        vault.recordLPRemoval(defaultEscrowId, 5e18);
+
+        IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(defaultEscrowId);
+        assertEq(status.removedLiquidity, 5e18);
     }
 
     function test_dailyLimit_exceedsLimit() public {
@@ -373,14 +375,14 @@ contract EscrowVaultTest is Test {
 
         vm.warp(block.timestamp + 7 days);
 
-        // First release: 5 ether (daily max)
-        vm.prank(issuer);
-        vault.releaseVested(defaultEscrowId);
+        // First removal: 5e18 (daily max)
+        vm.prank(hook);
+        vault.recordLPRemoval(defaultEscrowId, 5e18);
 
-        // Second release same day: should revert
-        vm.prank(issuer);
+        // Second removal same day: should revert
+        vm.prank(hook);
         vm.expectRevert(EscrowVault.DailyLimitExceeded.selector);
-        vault.releaseVested(defaultEscrowId);
+        vault.recordLPRemoval(defaultEscrowId, 1);
     }
 
     function test_dailyLimit_resetsNextDay() public {
@@ -388,34 +390,71 @@ contract EscrowVaultTest is Test {
 
         vm.warp(block.timestamp + 7 days);
 
-        // First day: release 5 ether
-        vm.prank(issuer);
-        vault.releaseVested(defaultEscrowId);
-        assertEq(token.balanceOf(issuer), 5 ether);
+        // First day: remove 5e18
+        vm.prank(hook);
+        vault.recordLPRemoval(defaultEscrowId, 5e18);
 
-        // Next day: can release another 5 ether
+        IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(defaultEscrowId);
+        assertEq(status.removedLiquidity, 5e18);
+
+        // Next day: can remove another 5e18
         vm.warp(block.timestamp + 1 days);
-        vm.prank(issuer);
-        vault.releaseVested(defaultEscrowId);
-        assertEq(token.balanceOf(issuer), 10 ether);
+        vm.prank(hook);
+        vault.recordLPRemoval(defaultEscrowId, 5e18);
+
+        status = vault.getEscrowStatus(defaultEscrowId);
+        assertEq(status.removedLiquidity, 10e18);
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  TRIGGER REDISTRIBUTION TESTS
+    //  TRIGGER LOCKDOWN TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_triggerRedistribution_fullAmount() public {
+    function test_triggerLockdown_setsTriggered() public {
         _createDefaultEscrow();
 
         vm.prank(oracle);
-        uint256 redistributed = vault.triggerRedistribution(defaultEscrowId, 1);
+        vault.triggerLockdown(defaultEscrowId, 1);
 
-        assertEq(redistributed, ESCROW_AMOUNT);
-        assertEq(token.balanceOf(insurancePool), ESCROW_AMOUNT);
-        assertEq(token.balanceOf(address(vault)), 0);
+        // getRemovableLiquidity should return 0
+        assertEq(vault.getRemovableLiquidity(defaultEscrowId), 0);
     }
 
-    function test_triggerRedistribution_afterPartialRelease() public {
+    function test_triggerLockdown_emitsEvent() public {
+        _createDefaultEscrow();
+
+        vm.expectEmit(true, true, false, false);
+        emit IEscrowVault.Lockdown(defaultEscrowId, 1);
+
+        vm.prank(oracle);
+        vault.triggerLockdown(defaultEscrowId, 1);
+    }
+
+    function test_triggerLockdown_revertsNotOracle() public {
+        _createDefaultEscrow();
+
+        vm.expectRevert(EscrowVault.OnlyTriggerOracle.selector);
+        vault.triggerLockdown(defaultEscrowId, 1);
+    }
+
+    function test_triggerLockdown_revertsAlreadyTriggered() public {
+        _createDefaultEscrow();
+
+        vm.prank(oracle);
+        vault.triggerLockdown(defaultEscrowId, 1);
+
+        vm.prank(oracle);
+        vm.expectRevert(EscrowVault.EscrowTriggered.selector);
+        vault.triggerLockdown(defaultEscrowId, 2);
+    }
+
+    function test_triggerLockdown_revertsNotFound() public {
+        vm.prank(oracle);
+        vm.expectRevert(EscrowVault.EscrowNotFound.selector);
+        vault.triggerLockdown(999, 1);
+    }
+
+    function test_triggerLockdown_blocksRemoval() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
             lockDuration: 0,
@@ -424,54 +463,89 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), commitment
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
         );
 
-        // Release 10 ether at 7 days
         vm.warp(block.timestamp + 7 days);
-        vm.prank(issuer);
-        vault.releaseVested(escrowId);
 
-        // Trigger - should redistribute remaining 90 ether
+        // Trigger lockdown
         vm.prank(oracle);
-        uint256 redistributed = vault.triggerRedistribution(escrowId, 2);
+        vault.triggerLockdown(escrowId, 1);
 
-        assertEq(redistributed, 90 ether);
-        assertEq(token.balanceOf(insurancePool), 90 ether);
-    }
-
-    function test_triggerRedistribution_emitsEvent() public {
-        _createDefaultEscrow();
-
-        vm.expectEmit(true, false, false, true);
-        emit IEscrowVault.Redistributed(defaultEscrowId, 1, ESCROW_AMOUNT);
-
-        vm.prank(oracle);
-        vault.triggerRedistribution(defaultEscrowId, 1);
-    }
-
-    function test_triggerRedistribution_revertsNotOracle() public {
-        _createDefaultEscrow();
-
-        vm.expectRevert(EscrowVault.OnlyTriggerOracle.selector);
-        vault.triggerRedistribution(defaultEscrowId, 1);
-    }
-
-    function test_triggerRedistribution_revertsAlreadyTriggered() public {
-        _createDefaultEscrow();
-
-        vm.prank(oracle);
-        vault.triggerRedistribution(defaultEscrowId, 1);
-
-        vm.prank(oracle);
+        // Attempt removal — should fail
+        vm.prank(hook);
         vm.expectRevert(EscrowVault.EscrowTriggered.selector);
-        vault.triggerRedistribution(defaultEscrowId, 2);
+        vault.recordLPRemoval(escrowId, 10e18);
     }
 
-    function test_triggerRedistribution_revertsNotFound() public {
+    // ═══════════════════════════════════════════════════════════════════
+    //  GET REMOVABLE LIQUIDITY TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_getRemovableLiquidity_beforeVesting() public {
+        _createDefaultEscrow();
+        assertEq(vault.getRemovableLiquidity(defaultEscrowId), 0);
+    }
+
+    function test_getRemovableLiquidity_afterVesting() public {
+        IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
+            dailyWithdrawLimit: 0,
+            lockDuration: 0,
+            maxSellPercent: 200
+        });
+
+        vm.prank(hook);
+        uint256 escrowId = vault.createEscrow(
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
+        );
+
+        vm.warp(block.timestamp + 7 days);
+        assertEq(vault.getRemovableLiquidity(escrowId), 10e18);
+    }
+
+    function test_getRemovableLiquidity_afterPartialRemoval() public {
+        IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
+            dailyWithdrawLimit: 0,
+            lockDuration: 0,
+            maxSellPercent: 200
+        });
+
+        vm.prank(hook);
+        uint256 escrowId = vault.createEscrow(
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
+        );
+
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(hook);
+        vault.recordLPRemoval(escrowId, 5e18);
+
+        assertEq(vault.getRemovableLiquidity(escrowId), 5e18);
+    }
+
+    function test_getRemovableLiquidity_zeroAfterTrigger() public {
+        _createDefaultEscrow();
+
+        vm.warp(block.timestamp + 90 days);
+
         vm.prank(oracle);
-        vm.expectRevert(EscrowVault.EscrowNotFound.selector);
-        vault.triggerRedistribution(999, 1);
+        vault.triggerLockdown(defaultEscrowId, 1);
+
+        assertEq(vault.getRemovableLiquidity(defaultEscrowId), 0);
+    }
+
+    function test_getRemovableLiquidity_zeroForNonexistent() public view {
+        assertEq(vault.getRemovableLiquidity(999), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  VAULT HOLDS NO ASSETS TEST
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_vaultHoldsNoAssets() public {
+        _createDefaultEscrow();
+
+        // EscrowVault should have zero ETH balance
+        assertEq(address(vault).balance, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -544,7 +618,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId =
-            vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), commitment);
+            vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment);
 
         IEscrowVault.IssuerCommitment memory looser = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 500,
@@ -586,7 +660,7 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         vm.prank(oracle);
-        vault.triggerRedistribution(defaultEscrowId, 1);
+        vault.triggerLockdown(defaultEscrowId, 1);
 
         IEscrowVault.IssuerCommitment memory stricter = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 300,
@@ -608,7 +682,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId =
-            vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), commitment);
+            vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment);
 
         // Tighten lock to 3 days
         IEscrowVault.IssuerCommitment memory stricter = IEscrowVault.IssuerCommitment({
@@ -622,11 +696,11 @@ contract EscrowVaultTest is Test {
 
         // At 7 days: effectiveElapsed = 7-3 = 4 days < 7 days first step
         vm.warp(block.timestamp + 7 days);
-        assertEq(vault.calculateVestedAmount(escrowId), 0);
+        assertEq(vault.calculateVestedLiquidity(escrowId), 0);
 
         // At 10 days: effectiveElapsed = 10-3 = 7 days >= 7 days first step => 10%
         vm.warp(block.timestamp + 3 days);
-        assertEq(vault.calculateVestedAmount(escrowId), 10 ether);
+        assertEq(vault.calculateVestedLiquidity(escrowId), 10e18);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -637,14 +711,14 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(defaultEscrowId);
-        assertEq(status.totalLocked, ESCROW_AMOUNT);
-        assertEq(status.released, 0);
-        assertEq(status.remaining, ESCROW_AMOUNT);
+        assertEq(status.totalLiquidity, ESCROW_LIQUIDITY);
+        assertEq(status.removedLiquidity, 0);
+        assertEq(status.remainingLiquidity, ESCROW_LIQUIDITY);
         // Next unlock should be at createdAt + 7 days (first step)
         assertEq(status.nextUnlockTime, block.timestamp + 7 days);
     }
 
-    function test_getEscrowStatus_afterPartialRelease() public {
+    function test_getEscrowStatus_afterPartialRemoval() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
             lockDuration: 0,
@@ -653,18 +727,17 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), commitment
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
         );
 
         vm.warp(block.timestamp + 7 days);
-        vm.prank(issuer);
-        vault.releaseVested(escrowId);
+        vm.prank(hook);
+        vault.recordLPRemoval(escrowId, 10e18);
 
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
-        assertEq(status.totalLocked, ESCROW_AMOUNT);
-        assertEq(status.released, 10 ether);
-        assertEq(status.remaining, 90 ether);
-        // Next unlock is at 30 days from creation
+        assertEq(status.totalLiquidity, ESCROW_LIQUIDITY);
+        assertEq(status.removedLiquidity, 10e18);
+        assertEq(status.remainingLiquidity, 90e18);
     }
 
     function test_getEscrowStatus_fullyVested() public {
@@ -676,7 +749,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), commitment
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), commitment
         );
 
         vm.warp(block.timestamp + 90 days);
@@ -689,10 +762,10 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         vm.prank(oracle);
-        vault.triggerRedistribution(defaultEscrowId, 1);
+        vault.triggerLockdown(defaultEscrowId, 1);
 
         IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(defaultEscrowId);
-        assertEq(status.remaining, 0);
+        assertEq(status.remainingLiquidity, 0);
         assertEq(status.nextUnlockTime, 0);
     }
 
@@ -705,13 +778,13 @@ contract EscrowVaultTest is Test {
     //  isFullyVested TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_isFullyVested_falseBeforeFullRelease() public {
+    function test_isFullyVested_falseBeforeFullRemoval() public {
         _createDefaultEscrow();
         assertFalse(vault.isFullyVested(defaultPoolId));
     }
 
-    function test_isFullyVested_trueAfterFullRelease() public {
-        // Use no daily limit so we can release everything at once
+    function test_isFullyVested_trueAfterFullRemoval() public {
+        // Use no daily limit so we can remove everything at once
         IEscrowVault.IssuerCommitment memory noDailyLimit = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
             lockDuration: 0,
@@ -719,13 +792,13 @@ contract EscrowVaultTest is Test {
         });
         PoolId pid = PoolId.wrap(bytes32(uint256(42)));
         vm.prank(hook);
-        uint256 escrowId = vault.createEscrow(pid, issuer, address(token), ESCROW_AMOUNT, _defaultSchedule(), noDailyLimit);
+        uint256 escrowId = vault.createEscrow(pid, issuer, ESCROW_LIQUIDITY, _defaultSchedule(), noDailyLimit);
 
         // Warp past all vesting (90 days schedule, no lock)
         vm.warp(block.timestamp + 90 days + 1);
 
-        vm.prank(issuer);
-        vault.releaseVested(escrowId);
+        vm.prank(hook);
+        vault.recordLPRemoval(escrowId, ESCROW_LIQUIDITY);
 
         assertTrue(vault.isFullyVested(pid));
     }
@@ -756,7 +829,7 @@ contract EscrowVaultTest is Test {
             maxSellPercent: 200
         });
         vm.prank(hook);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, commitment);
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, commitment);
 
         uint256 endTime = vault.getVestingEndTime(defaultPoolId);
         assertEq(endTime, startTs + 30 days + 90 days);
@@ -776,7 +849,7 @@ contract EscrowVaultTest is Test {
         schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 10000});
 
         vm.prank(hook);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
         // Should succeed — exactly 7 days
     }
 
@@ -786,7 +859,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.VestingBelowMinDuration.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_CustomVesting_1Day_Reverts() public {
@@ -795,7 +868,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         vm.expectRevert(EscrowVault.VestingBelowMinDuration.selector);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -808,7 +881,7 @@ contract EscrowVaultTest is Test {
         schedule[1] = IEscrowVault.VestingStep({timeOffset: 14 days, basisPoints: 10000});
 
         vm.prank(hook);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_CustomVesting_LooserThanDefault_Allowed() public {
@@ -817,7 +890,7 @@ contract EscrowVaultTest is Test {
         schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 10000});
 
         vm.prank(hook);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_CustomVesting_LongerThanDefault_Allowed() public {
@@ -827,7 +900,7 @@ contract EscrowVaultTest is Test {
         schedule[2] = IEscrowVault.VestingStep({timeOffset: 180 days, basisPoints: 10000});
 
         vm.prank(hook);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_CustomVesting_SingleMilestone_Allowed() public {
@@ -835,7 +908,7 @@ contract EscrowVaultTest is Test {
         schedule[0] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 10000});
 
         vm.prank(hook);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     function test_CustomVesting_ManyMilestones_Allowed() public {
@@ -848,7 +921,7 @@ contract EscrowVaultTest is Test {
         schedule[5] = IEscrowVault.VestingStep({timeOffset: 180 days, basisPoints: 10000});
 
         vm.prank(hook);
-        vault.createEscrow(defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment());
+        vault.createEscrow(defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment());
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -870,7 +943,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment()
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment()
         );
 
         assertTrue(vault.isStricterThanDefault(escrowId));
@@ -884,7 +957,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment()
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment()
         );
 
         assertFalse(vault.isStricterThanDefault(escrowId));
@@ -899,7 +972,7 @@ contract EscrowVaultTest is Test {
 
         vm.prank(hook);
         uint256 escrowId = vault.createEscrow(
-            defaultPoolId, issuer, address(token), ESCROW_AMOUNT, schedule, _defaultCommitment()
+            defaultPoolId, issuer, ESCROW_LIQUIDITY, schedule, _defaultCommitment()
         );
 
         assertFalse(vault.isStricterThanDefault(escrowId));

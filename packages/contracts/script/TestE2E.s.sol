@@ -109,8 +109,7 @@ contract TestE2E is Script {
         console2.log("");
         console2.log("=== Step 3: Approvals ===");
 
-        // issuedToken: approve to hook (escrow transfer) + lpRouter (LP)
-        issuedToken.approve(address(hook), type(uint256).max);
+        // issuedToken: approve to lpRouter (LP)
         issuedToken.approve(address(lpRouter), type(uint256).max);
         // baseToken: approve to lpRouter (LP) + swapRouter (swap)
         baseToken.approve(address(lpRouter), type(uint256).max);
@@ -206,10 +205,10 @@ contract TestE2E is Script {
 
         // 8c. Escrow status
         IEscrowVault.EscrowStatus memory es = escrowVault.getEscrowStatus(escrowId);
-        require(es.totalLocked == ESCROW_AMOUNT, "FAIL: escrow totalLocked mismatch");
-        require(es.remaining == ESCROW_AMOUNT, "FAIL: escrow remaining mismatch");
-        require(es.released == 0, "FAIL: escrow released should be 0");
-        console2.log("  Escrow: totalLocked=%d, remaining=%d", es.totalLocked, es.remaining);
+        require(es.totalLiquidity > 0, "FAIL: escrow totalLiquidity should be > 0");
+        require(es.remainingLiquidity == es.totalLiquidity, "FAIL: escrow remainingLiquidity mismatch");
+        require(es.removedLiquidity == 0, "FAIL: escrow removedLiquidity should be 0");
+        console2.log("  Escrow: totalLiquidity=%d, remainingLiquidity=%d", uint256(es.totalLiquidity), uint256(es.remainingLiquidity));
 
         // 8d. Insurance pool
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(poolId);
@@ -222,7 +221,7 @@ contract TestE2E is Script {
         console2.log("  Reputation score:", score);
 
         // 8f. Vesting (should be 0 — within first vesting period)
-        uint256 vested = escrowVault.calculateVestedAmount(escrowId);
+        uint256 vested = escrowVault.calculateVestedLiquidity(escrowId);
         console2.log("  Vested amount:", vested);
 
         // ==========================================
@@ -236,7 +235,7 @@ contract TestE2E is Script {
         console2.log("Test Token (BTT):", address(issuedToken));
         console2.log("Base Token (BTST):", address(baseToken));
         console2.log("Pool ID:", vm.toString(PoolId.unwrap(poolId)));
-        console2.log("Escrow Locked:", es.totalLocked);
+        console2.log("Escrow Locked:", uint256(es.totalLiquidity));
         console2.log("Insurance Balance:", ps.balance);
         console2.log("Reputation Score:", score);
         console2.log("Deployer ETH remaining:", deployer.balance);
@@ -304,7 +303,7 @@ contract TestE2E is Script {
         });
 
         return abi.encode(
-            deployer, address(issuedToken), ESCROW_AMOUNT, vesting, commitment, triggerConfig
+            deployer, address(issuedToken), vesting, commitment, triggerConfig
         );
     }
 }

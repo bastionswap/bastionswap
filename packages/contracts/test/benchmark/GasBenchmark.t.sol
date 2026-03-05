@@ -48,8 +48,6 @@ contract GasBenchmarkTest is Test, Deployers {
     PoolKey public poolKey;
     PoolId public poolId;
 
-    uint256 constant ESCROW_AMOUNT = 100 ether;
-
     function setUp() public {
         issuerAddr = makeAddr("issuer");
         guardian = makeAddr("guardian");
@@ -72,7 +70,7 @@ contract GasBenchmarkTest is Test, Deployers {
         address insuranceAddr = vm.computeCreateAddress(address(this), nonce + 1);
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
-        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr, reputationAddr);
+        escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
 
@@ -107,7 +105,6 @@ contract GasBenchmarkTest is Test, Deployers {
         baseToken.approve(address(swapRouter), type(uint256).max);
 
         vm.startPrank(issuerAddr);
-        issuedToken.approve(address(hook), type(uint256).max);
         issuedToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         vm.stopPrank();
@@ -128,7 +125,7 @@ contract GasBenchmarkTest is Test, Deployers {
 
     function _encodeIssuerHookData() internal view returns (bytes memory) {
         return abi.encode(
-            issuerAddr, address(issuedToken), ESCROW_AMOUNT,
+            issuerAddr, address(issuedToken),
             _defaultVestingSchedule(),
             IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, lockDuration: 0, maxSellPercent: 200}),
             ITriggerOracle.TriggerConfig({
@@ -263,11 +260,14 @@ contract GasBenchmarkTest is Test, Deployers {
             ""
         );
 
+        // Must pass hookData with user address since modifyLiquidityRouter == _issuerLPOwner
+        bytes memory hookData = abi.encode(address(this));
+
         uint256 gasBefore = gasleft();
         modifyLiquidityRouter.modifyLiquidity(
             poolKey,
             ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: -5e18, salt: 0}),
-            ""
+            hookData
         );
         uint256 gasUsed = gasBefore - gasleft();
         console.log("beforeRemoveLiquidity (with oracle report):", gasUsed);
@@ -389,15 +389,18 @@ contract GasBenchmarkTest is Test, Deployers {
         console.log("BASELINE removeLiquidity (no hook):", gasUsed);
     }
 
-    function test_gasBenchmark_releaseVested() public {
+    function test_gasBenchmark_recordLPRemoval() public {
         _initPoolWithIssuer();
 
         vm.warp(block.timestamp + 30 days);
 
+        uint256 escrowId = uint256(keccak256(abi.encode(poolId, issuerAddr)));
+        uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
+
         uint256 gasBefore = gasleft();
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(uint256(keccak256(abi.encode(poolId, issuerAddr))));
+        vm.prank(address(hook));
+        escrowVault.recordLPRemoval(escrowId, removable);
         uint256 gasUsed = gasBefore - gasleft();
-        console.log("releaseVested:", gasUsed);
+        console.log("recordLPRemoval:", gasUsed);
     }
 }

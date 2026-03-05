@@ -87,8 +87,8 @@ export function PoolCard({ pool }: PoolCardProps) {
             },
             {
               label: "LP Escrowed",
-              value: pool.escrow ? `${parseFloat(pool.escrow.totalLocked).toFixed(2)}` : "—",
-              sub: pool.escrow ? `${issuedLabel} · ${(parseFloat(pool.escrow.released) / parseFloat(pool.escrow.totalLocked) * 100 || 0).toFixed(0)}% vested` : issuedLabel,
+              value: pool.escrow ? `${parseFloat(pool.escrow.totalLiquidity).toFixed(2)}` : "—",
+              sub: pool.escrow ? `LP · ${(parseFloat(pool.escrow.removedLiquidity) / parseFloat(pool.escrow.totalLiquidity) * 100 || 0).toFixed(0)}% removed` : "LP",
             },
             {
               label: "Insurance",

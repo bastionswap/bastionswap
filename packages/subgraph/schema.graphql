@@ -24,9 +24,9 @@ type Escrow @entity {
   id: ID! # escrowId (uint256 hex)
   pool: Pool!
   issuer: Bytes!
-  totalLocked: BigDecimal!
-  released: BigDecimal!
-  remaining: BigDecimal!
+  totalLiquidity: BigDecimal!
+  removedLiquidity: BigDecimal!
+  remainingLiquidity: BigDecimal!
   vestingSchedule: [VestingMilestone!]! @derivedFrom(field: "escrow")
   commitment: Commitment
   isTriggered: Boolean!
@@ -68,7 +68,7 @@ type TriggerEvent @entity {
   triggerTypeName: String!
   timestamp: BigInt!
   transactionHash: Bytes!
-  escrowRedistributed: BigDecimal
+  escrowLockedDown: Boolean!
   insurancePayout: BigDecimal
   withMerkleRoot: Boolean!
 }

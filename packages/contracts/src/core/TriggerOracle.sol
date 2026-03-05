@@ -325,9 +325,9 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         address issuer = _poolIssuers[key];
         if (issuer != address(0)) {
             uint256 escrowId = _computeEscrowId(poolId, issuer);
-            try IEscrowVault(ESCROW_VAULT).triggerRedistribution(escrowId, uint8(triggerType)) {}
+            try IEscrowVault(ESCROW_VAULT).triggerLockdown(escrowId, uint8(triggerType)) {}
             catch {
-                emit ExternalCallFailed("EscrowVault.triggerRedistribution", poolId);
+                emit ExternalCallFailed("EscrowVault.triggerLockdown", poolId);
             }
         }
 

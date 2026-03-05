@@ -13,16 +13,15 @@ contract MockEscrowVault {
     uint8 public lastTriggerType;
     bool public triggerCalled;
 
-    function triggerRedistribution(uint256 escrowId, uint8 triggerType) external returns (uint256) {
+    function triggerLockdown(uint256 escrowId, uint8 triggerType) external {
         lastEscrowId = escrowId;
         lastTriggerType = triggerType;
         triggerCalled = true;
-        return 100 ether;
     }
 }
 
 contract RevertingEscrowVault {
-    function triggerRedistribution(uint256, uint8) external pure returns (uint256) {
+    function triggerLockdown(uint256, uint8) external pure {
         revert("escrow vault revert");
     }
 }
@@ -757,7 +756,7 @@ contract TriggerOracleTest is Test {
         vm.warp(block.timestamp + 1 hours + 24 hours);
 
         vm.expectEmit(false, true, false, true);
-        emit TriggerOracle.ExternalCallFailed("EscrowVault.triggerRedistribution", defaultPoolId);
+        emit TriggerOracle.ExternalCallFailed("EscrowVault.triggerLockdown", defaultPoolId);
         oracleWithBadEscrow.executeTrigger(defaultPoolId);
 
         assertTrue(oracleWithBadEscrow.checkTrigger(defaultPoolId).triggered);

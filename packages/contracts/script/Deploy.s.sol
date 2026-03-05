@@ -59,7 +59,7 @@ contract Deploy is Script {
         require(address(factory) == a.factory, "Factory address mismatch");
 
         // 2. Deploy EscrowVault (nonce N+1)
-        EscrowVault escrowVault = new EscrowVault(a.hook, a.trigger, a.insurance, a.reputation);
+        EscrowVault escrowVault = new EscrowVault(a.hook, a.trigger, a.reputation);
         require(address(escrowVault) == a.escrow, "EscrowVault address mismatch");
 
         // 3. Deploy InsurancePool (nonce N+2)

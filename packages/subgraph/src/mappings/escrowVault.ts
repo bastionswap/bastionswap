@@ -1,8 +1,8 @@
 import { BigDecimal, BigInt } from "@graphprotocol/graph-ts";
 import {
   EscrowCreated,
-  VestedReleased,
-  Redistributed,
+  LPRemovalRecorded,
+  Lockdown,
   CommitmentSet,
 } from "../../generated/EscrowVault/EscrowVault";
 import {
@@ -26,9 +26,9 @@ export function handleEscrowVaultCreated(event: EscrowCreated): void {
   let escrow = new Escrow(escrowId);
   escrow.pool = poolId;
   escrow.issuer = event.params.issuer;
-  escrow.totalLocked = toDecimal(event.params.amount);
-  escrow.released = ZERO_BD;
-  escrow.remaining = toDecimal(event.params.amount);
+  escrow.totalLiquidity = toDecimal(BigInt.fromI64(event.params.liquidity));
+  escrow.removedLiquidity = ZERO_BD;
+  escrow.remainingLiquidity = toDecimal(BigInt.fromI64(event.params.liquidity));
   escrow.isTriggered = false;
   escrow.createdAt = event.block.timestamp;
   escrow.save();
@@ -52,28 +52,28 @@ export function handleEscrowVaultCreated(event: EscrowCreated): void {
   // Update protocol stats
   let stats = getOrCreateProtocolStats();
   stats.totalEscrowLocked = stats.totalEscrowLocked.plus(
-    toDecimal(event.params.amount)
+    toDecimal(BigInt.fromI64(event.params.liquidity))
   );
   stats.save();
 }
 
-export function handleVestedReleased(event: VestedReleased): void {
+export function handleLPRemovalRecorded(event: LPRemovalRecorded): void {
   let escrowId = event.params.escrowId.toHexString();
   let escrow = Escrow.load(escrowId);
   if (escrow != null) {
-    let releasedAmount = toDecimal(event.params.releasedAmount);
-    escrow.released = escrow.released.plus(releasedAmount);
-    escrow.remaining = escrow.totalLocked.minus(escrow.released);
+    let removedAmount = toDecimal(BigInt.fromI64(event.params.liquidityRemoved));
+    escrow.removedLiquidity = escrow.removedLiquidity.plus(removedAmount);
+    escrow.remainingLiquidity = escrow.totalLiquidity.minus(escrow.removedLiquidity);
     escrow.save();
   }
 }
 
-export function handleRedistributed(event: Redistributed): void {
+export function handleLockdown(event: Lockdown): void {
   let escrowId = event.params.escrowId.toHexString();
   let escrow = Escrow.load(escrowId);
   if (escrow != null) {
     escrow.isTriggered = true;
-    escrow.remaining = ZERO_BD;
+    escrow.remainingLiquidity = ZERO_BD;
     escrow.save();
 
     // Update issuer stats

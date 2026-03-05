@@ -92,15 +92,12 @@ const STEP_LABELS = ["Token", "Liquidity", "Commitment", "Confirm"];
 
 function getStepLabel(poolStep: CreatePoolStep): string {
   switch (poolStep) {
-    case "approving-hook":
-    case "confirming-hook-approval":
-      return "Approve Escrow (1/3)";
     case "approving-router":
     case "confirming-router-approval":
-      return "Approve LP Tokens (2/3)";
+      return "Approve LP Tokens (1/2)";
     case "creating":
     case "confirming-creation":
-      return "Creating Pool (3/3)";
+      return "Creating Pool (2/2)";
     case "done":
       return "Pool Created!";
     case "error":
@@ -112,7 +109,6 @@ function getStepLabel(poolStep: CreatePoolStep): string {
 
 function isStepConfirming(poolStep: CreatePoolStep): boolean {
   return [
-    "confirming-hook-approval",
     "confirming-router-approval",
     "confirming-creation",
   ].includes(poolStep);
@@ -126,12 +122,8 @@ function formatCompact(n: number): string {
   return n.toFixed(4);
 }
 
-function formatLPAtBps(tokenAmount: string, ethAmount: string, bps: number): string {
-  const tokenNum = parseFloat(tokenAmount) || 0;
-  const ethNum = parseFloat(ethAmount) || 0;
-  const tokenPart = (tokenNum * bps) / 10000;
-  const ethPart = (ethNum * bps) / 10000;
-  return `${formatCompact(tokenPart)} tokens + ${formatCompact(ethPart)} ETH`;
+function formatLPPct(bps: number): string {
+  return `${(bps / 100).toFixed(0)}% of LP`;
 }
 
 export default function CreatePoolPage() {
@@ -363,8 +355,7 @@ export default function CreatePoolPage() {
                   <p className="text-sm font-semibold text-emerald-800">Escrow Protection</p>
                   {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 ? (
                     <p className="text-sm text-emerald-700 mt-1">
-                      Your liquidity position ({tokenAmount} tokens + {ethAmount} ETH) will be held in escrow.
-                      You can withdraw your LP according to the vesting schedule below.
+                      Your LP position will be locked. You can remove LP according to the vesting schedule below.
                       This protects token buyers and cannot be disabled.
                     </p>
                   ) : (
@@ -391,7 +382,7 @@ export default function CreatePoolPage() {
                         {m.bps / 100}%
                       </span>
                       <span className="text-sm text-gray-500 tabular-nums text-right">
-                        ({formatLPAtBps(tokenAmount, ethAmount, m.bps)})
+                        ({formatLPPct(m.bps)})
                       </span>
                     </div>
                   ))}
@@ -565,7 +556,7 @@ export default function CreatePoolPage() {
                       <span className="font-medium text-gray-900 tabular-nums">{m.bps / 100}% unlocked</span>
                       {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
                         <span className="text-gray-400 tabular-nums text-xs">
-                          ({formatLPAtBps(tokenAmount, ethAmount, m.bps)})
+                          ({formatLPPct(m.bps)})
                         </span>
                       )}
                     </div>
@@ -787,7 +778,7 @@ export default function CreatePoolPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Escrowed LP</span>
-              <span className="text-gray-900 font-medium">{tokenAmount} tokens + {ethAmount} ETH</span>
+              <span className="text-gray-900 font-medium">100% of initial liquidity</span>
             </div>
             <hr className="border-gray-200" />
             <div className="flex justify-between">
@@ -819,8 +810,8 @@ export default function CreatePoolPage() {
           {/* Escrow Disclosure */}
           <div className="mt-4 rounded-xl bg-bastion-50 border border-bastion-200 p-4">
             <p className="text-sm text-bastion-800">
-              By creating this pool, your full LP position (<span className="font-semibold">{tokenAmount} tokens + {ethAmount} ETH</span>) will be held in escrow.
-              You can withdraw LP according to the vesting schedule:
+              By creating this pool, your LP position will be locked in escrow.
+              You can remove LP according to the vesting schedule:
             </p>
             <div className="mt-3 space-y-1.5">
               {activeMilestones.map((m, i) => (
@@ -831,15 +822,14 @@ export default function CreatePoolPage() {
                   <span className="text-bastion-700">
                     Day {m.days}: up to {m.bps / 100}% LP
                     {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
-                      <span className="text-bastion-500"> ({formatLPAtBps(tokenAmount, ethAmount, m.bps)})</span>
+                      <span className="text-bastion-500"> ({formatLPPct(m.bps)})</span>
                     )}
                   </span>
                 </div>
               ))}
             </div>
             <p className="mt-3 text-xs text-bastion-600/70">
-              If a rug pull is detected, remaining escrowed LP will be redistributed to token holders.
-              Actual amounts at withdrawal may differ due to AMM price changes.
+              If a rug pull is detected, the issuer&apos;s LP will be permanently locked down.
             </p>
           </div>
 
@@ -892,10 +882,8 @@ export default function CreatePoolPage() {
                 </span>
               </div>
               <div className="flex gap-1.5">
-                {[1, 2, 3].map((s) => {
-                  const stepNum = poolStep.includes("hook") ? 1
-                    : poolStep.includes("router") ? 2
-                    : 3;
+                {[1, 2].map((s) => {
+                  const stepNum = poolStep.includes("router") ? 1 : 2;
                   return (
                     <div
                       key={s}

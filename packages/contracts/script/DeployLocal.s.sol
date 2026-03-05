@@ -96,7 +96,7 @@ contract DeployLocal is Script {
         BastionDeployer factory = new BastionDeployer();
         require(address(factory) == a.factory, "Factory address mismatch");
 
-        EscrowVault escrowVault = new EscrowVault(a.hook, a.trigger, a.insurance, a.reputation);
+        EscrowVault escrowVault = new EscrowVault(a.hook, a.trigger, a.reputation);
         require(address(escrowVault) == a.escrow, "EscrowVault address mismatch");
 
         InsurancePool insurancePool = new InsurancePool(a.hook, a.trigger, deployer, a.escrow, deployer);
@@ -138,7 +138,6 @@ contract DeployLocal is Script {
         TestToken btt = TestToken(d.btt);
         btt.approve(d.lpRouter, type(uint256).max);
         btt.approve(d.swapRouter, type(uint256).max);
-        btt.approve(d.hook, type(uint256).max);
         btt.approve(d.router, type(uint256).max);
 
         bytes memory hookData = _buildHookData(deployer, d.btt);
@@ -175,8 +174,6 @@ contract DeployLocal is Script {
     }
 
     function _buildHookData(address deployer, address token) internal pure returns (bytes memory) {
-        uint256 escrowAmount = 100_000e18;
-
         IEscrowVault.VestingStep[] memory vesting = new IEscrowVault.VestingStep[](3);
         vesting[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
         vesting[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
@@ -197,7 +194,7 @@ contract DeployLocal is Script {
             slowRugCumulativeThreshold: 8000
         });
 
-        return abi.encode(deployer, token, escrowAmount, vesting, commitment, triggerConfig);
+        return abi.encode(deployer, token, vesting, commitment, triggerConfig);
     }
 
     function _printSummary(Addresses memory a, Deployed memory d) internal pure {

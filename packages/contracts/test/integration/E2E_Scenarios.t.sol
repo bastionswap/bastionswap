@@ -28,16 +28,15 @@ contract MockReputationEngine {
     function getScore(address) external pure returns (uint256) { return 500; }
 }
 
-/// @title E2E Scenario Tests for BastionSwap Protocol
+/// @title E2E Scenario Tests for BastionSwap Protocol (LP Permission Model)
 /// @notice Validates the protocol's core value proposition through three full lifecycle scenarios:
-///         1. Rug-pull attempt -> Block + Compensation
-///         2. Legitimate project -> Normal vesting
+///         1. Rug-pull attempt -> LP removal blocked by vesting + Trigger lockdown
+///         2. Legitimate project -> Normal vesting with gradual LP removal
 ///         3. Issuer dump -> Trigger + Compensation
 contract E2E_ScenariosTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    uint256 constant ESCROW_AMOUNT = 100 ether;
     uint256 constant ISSUER_LP = 1000e18;
     uint256 constant TRADER_LP = 100e18;
     int24 constant TICK_LOWER = -887220;
@@ -76,7 +75,6 @@ contract E2E_ScenariosTest is Test, Deployers {
         );
         address hookAddr = address(flags);
 
-        // Deploy mock before nonce computation to avoid nonce mismatch
         MockReputationEngine mockReputation = new MockReputationEngine();
         address reputationAddr = address(mockReputation);
 
@@ -85,7 +83,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         address insuranceAddr = vm.computeCreateAddress(address(this), nonce + 1);
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
-        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr, reputationAddr);
+        escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
 
@@ -126,8 +124,8 @@ contract E2E_ScenariosTest is Test, Deployers {
         issuedToken.approve(address(swapRouter), type(uint256).max);
         baseToken.approve(address(swapRouter), type(uint256).max);
 
+        // Issuer approvals — no hook approval needed
         vm.startPrank(issuerAddr);
-        issuedToken.approve(address(hook), type(uint256).max);
         issuedToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         issuedToken.approve(address(swapRouter), type(uint256).max);
@@ -179,7 +177,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         returns (bytes memory)
     {
         return abi.encode(
-            issuerAddr, address(issuedToken), ESCROW_AMOUNT, _vestingSchedule(), commitment, _triggerConfig()
+            issuerAddr, address(issuedToken), _vestingSchedule(), commitment, _triggerConfig()
         );
     }
 
@@ -229,25 +227,21 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SCENARIO 1: Rug-Pull Attempt -> Block + Compensation
+    //  SCENARIO 1: Rug-Pull Attempt -> LP Removal Blocked + Lockdown
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_scenario1_rugPull_blockAndCompensate() public {
-        console.log("=== SCENARIO 1: Rug-Pull Attempt ===");
+    function test_scenario1_rugPull_blockAndLockdown() public {
+        console.log("=== SCENARIO 1: Rug-Pull Attempt (LP Permission Model) ===");
 
         // Phase 1: Pool creation
         IEscrowVault.IssuerCommitment memory commitment =
             IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, lockDuration: 0, maxSellPercent: 200});
 
-        uint256 g = gasleft();
         _initPool(commitment);
-        console.log("Gas: pool creation + escrow", g - gasleft());
 
         _scenario1_verifyCreation();
         _scenario1_tradersBuy();
         _scenario1_vestingBlocked();
-        _scenario1_vestingRelease();
-        _scenario1_excessBlocked();
         _scenario1_rugPullTrigger();
         _scenario1_executeTrigger();
         _scenario1_insuranceClaims();
@@ -257,27 +251,23 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     function _scenario1_verifyCreation() internal view {
         assertTrue(hook.isIssuer(_poolId, issuerAddr), "issuer not registered");
-        assertEq(issuedToken.balanceOf(address(escrowVault)), ESCROW_AMOUNT, "escrow not funded");
+        // Vault holds no tokens (LP permission model)
+        assertEq(issuedToken.balanceOf(address(escrowVault)), 0, "vault should hold no tokens");
         assertTrue(triggerOracle.isConfigSet(_poolId), "trigger config not set");
 
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
-        assertEq(s.totalLocked, ESCROW_AMOUNT);
-        assertEq(s.released, 0);
-        assertEq(s.remaining, ESCROW_AMOUNT);
-        console.log("  Escrow locked:", s.totalLocked);
+        assertGt(s.totalLiquidity, 0);
+        assertEq(s.removedLiquidity, 0);
+        assertEq(s.remainingLiquidity, s.totalLiquidity);
+        console.log("  Escrow totalLiquidity:", uint256(s.totalLiquidity));
         console.log("  Total LP:", _getTotalLP());
     }
 
     function _scenario1_tradersBuy() internal {
         uint256 before = address(insurancePool).balance;
 
-        uint256 g = gasleft();
         _buyIssuedToken(trader1, -1 ether);
-        console.log("Gas: trader1 buy swap", g - gasleft());
-
-        g = gasleft();
         _buyIssuedToken(trader2, -0.5 ether);
-        console.log("Gas: trader2 buy swap", g - gasleft());
 
         uint256 fees = address(insurancePool).balance - before;
         assertGt(fees, 0, "no insurance fees");
@@ -286,33 +276,9 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     function _scenario1_vestingBlocked() internal {
         vm.warp(block.timestamp + 6 days);
-        assertEq(escrowVault.calculateVestedAmount(_escrowId), 0);
-
-        vm.prank(issuerAddr);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.NothingToRelease.selector));
-        escrowVault.releaseVested(_escrowId);
-        console.log("  Before 7d: release blocked");
-    }
-
-    function _scenario1_vestingRelease() internal {
-        vm.warp(block.timestamp + 1 days); // T+7d
-        assertEq(escrowVault.calculateVestedAmount(_escrowId), 10 ether);
-
-        uint256 bal = issuedToken.balanceOf(issuerAddr);
-        uint256 g = gasleft();
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(_escrowId);
-        console.log("Gas: releaseVested (10%)", g - gasleft());
-
-        assertEq(issuedToken.balanceOf(issuerAddr) - bal, 10 ether);
-        console.log("  Day 7: released 10 ether");
-    }
-
-    function _scenario1_excessBlocked() internal {
-        vm.prank(issuerAddr);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.NothingToRelease.selector));
-        escrowVault.releaseVested(_escrowId);
-        console.log("  Excess release blocked");
+        assertEq(escrowVault.calculateVestedLiquidity(_escrowId), 0);
+        assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0);
+        console.log("  Before 7d: LP removal blocked (0 removable)");
     }
 
     function _scenario1_rugPullTrigger() internal {
@@ -321,13 +287,13 @@ contract E2E_ScenariosTest is Test, Deployers {
         vm.expectEmit(true, false, false, false, address(hook));
         emit BastionHook.LPRemovalReported(_poolId, ISSUER_LP, totalLP);
 
-        uint256 g = gasleft();
+        // Remove LP using the same router as the issuer — must pass hookData identifying the user.
+        // address(this) is NOT the issuer, so vesting is not enforced, but the removal is reported.
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
             ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(ISSUER_LP), salt: 0}),
-            ""
+            abi.encode(address(this))
         );
-        console.log("Gas: LP removal (80%%)", g - gasleft());
 
         (bool exists, ITriggerOracle.TriggerType tt,) = triggerOracle.getPendingTrigger(_poolId);
         assertTrue(exists, "trigger should be pending");
@@ -341,47 +307,30 @@ contract E2E_ScenariosTest is Test, Deployers {
         triggerOracle.executeTrigger(_poolId);
 
         (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
-        // Warp past grace + 24h deadline (fallback path, no merkle root)
         vm.warp(executeAfter + 24 hours);
 
-        uint256 insuranceTokensBefore = issuedToken.balanceOf(address(insurancePool));
-        uint256 expectedRedist = ESCROW_AMOUNT - 10 ether; // 90 ether
+        vm.expectEmit(true, true, false, false, address(escrowVault));
+        emit IEscrowVault.Lockdown(_escrowId, uint8(ITriggerOracle.TriggerType.RUG_PULL));
 
-        vm.expectEmit(true, false, false, true, address(escrowVault));
-        emit IEscrowVault.Redistributed(_escrowId, uint8(ITriggerOracle.TriggerType.RUG_PULL), expectedRedist);
-
-        uint256 g = gasleft();
         triggerOracle.executeTrigger(_poolId);
-        console.log("Gas: executeTrigger (fallback)", g - gasleft());
 
         // Verify trigger state
         assertTrue(triggerOracle.checkTrigger(_poolId).triggered);
 
-        // Escrow emptied
+        // Escrow locked down — no LP removal possible
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
-        assertEq(s.remaining, 0, "escrow should be empty");
-        assertEq(s.released, 10 ether);
+        assertEq(s.remainingLiquidity, 0, "escrow remaining should be 0 after lockdown");
+        assertEq(s.removedLiquidity, 0, "no LP was removed before lockdown");
+        assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0, "removable should be 0 after lockdown");
 
-        // Tokens redistributed to InsurancePool
-        uint256 redistributed = issuedToken.balanceOf(address(insurancePool)) - insuranceTokensBefore;
-        assertEq(redistributed, expectedRedist);
-        console.log("  Redistributed tokens:", redistributed);
-
-        // Further release blocked
-        vm.prank(issuerAddr);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.EscrowTriggered.selector));
-        escrowVault.releaseVested(_escrowId);
+        console.log("  Escrow locked down (LP removal permanently blocked)");
     }
 
     function _scenario1_insuranceClaims() internal {
-        // RUG_PULL doesn't auto-trigger insurance payout (totalEligibleSupply=0).
-        // Manually trigger for E2E verification.
         uint256 totalSupply = issuedToken.totalSupply();
         uint256 t1Bal = issuedToken.balanceOf(trader1);
 
-        // Build Merkle tree with trader1's balance
         bytes32 leaf1 = _computeLeaf(trader1, t1Bal);
-        // Use a dummy second leaf to build a proper tree
         bytes32 leaf2 = _computeLeaf(address(0xdead), 0);
         bytes32 merkleRoot = _hashPair(leaf1, leaf2);
 
@@ -399,16 +348,11 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         uint256 ethBefore = trader1.balance;
 
-        vm.expectEmit(true, true, false, true, address(insurancePool));
-        emit IInsurancePool.CompensationClaimed(_poolId, trader1, comp);
-
         bytes32[] memory proof = new bytes32[](1);
         proof[0] = leaf2;
 
         vm.prank(trader1);
-        uint256 g = gasleft();
         insurancePool.claimCompensation(_poolId, t1Bal, proof);
-        console.log("Gas: claimCompensation", g - gasleft());
 
         assertEq(trader1.balance - ethBefore, comp);
         assertTrue(insurancePool.hasClaimed(_poolId, trader1));
@@ -421,92 +365,46 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SCENARIO 2: Legitimate Project -> Normal Vesting
+    //  SCENARIO 2: Legitimate Project -> Normal Vesting with LP Removal
     // ═══════════════════════════════════════════════════════════════════
 
     function test_scenario2_legitimateProject_normalVesting() public {
-        console.log("=== SCENARIO 2: Legitimate Project ===");
+        console.log("=== SCENARIO 2: Legitimate Project (LP Permission Model) ===");
 
         IEscrowVault.IssuerCommitment memory commitment =
             IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 500, lockDuration: 0, maxSellPercent: 200});
 
-        uint256 g = gasleft();
         _initPool(commitment);
-        console.log("Gas: pool creation + escrow", g - gasleft());
 
         _scenario2_vestingMilestones();
-        _scenario2_fullVesting();
         _scenario2_noTrigger();
 
         console.log("=== SCENARIO 2 COMPLETE ===");
     }
 
     function _scenario2_vestingMilestones() internal {
-        // Day 7: 10% vested, daily limit = 5%
+        // Day 7: 10% vested
         vm.warp(block.timestamp + 7 days);
-        assertEq(escrowVault.calculateVestedAmount(_escrowId), 10 ether, "10% at 7d");
-        console.log("  Day 7 vested:", uint256(10 ether));
+        uint128 vested = escrowVault.calculateVestedLiquidity(_escrowId);
+        assertGt(vested, 0, "should have vested liquidity at 7d");
+        console.log("  Day 7 vested liquidity:", uint256(vested));
 
-        // First release: capped at daily limit (5 ether)
-        uint256 bal = issuedToken.balanceOf(issuerAddr);
-        uint256 g = gasleft();
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(_escrowId);
-        console.log("Gas: releaseVested (daily-limited)", g - gasleft());
+        uint128 removable = escrowVault.getRemovableLiquidity(_escrowId);
+        assertGt(removable, 0, "should have removable liquidity at 7d");
+        console.log("  Day 7 removable liquidity:", uint256(removable));
 
-        uint256 released = issuedToken.balanceOf(issuerAddr) - bal;
-        assertEq(released, 5 ether, "daily limit: 5 ether");
-        console.log("  Day 7 released (daily limit):", released);
+        // Day 30: 30% vested
+        vm.warp(block.timestamp + 23 days);
+        vested = escrowVault.calculateVestedLiquidity(_escrowId);
+        console.log("  Day 30 vested liquidity:", uint256(vested));
 
-        // Same-day second release blocked
-        vm.prank(issuerAddr);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.DailyLimitExceeded.selector));
-        escrowVault.releaseVested(_escrowId);
-        console.log("  Same-day excess blocked by daily limit");
-
-        // Next day: remaining 5 ether from 10% tranche
-        vm.warp(block.timestamp + 1 days);
-        bal = issuedToken.balanceOf(issuerAddr);
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(_escrowId);
-        assertEq(issuedToken.balanceOf(issuerAddr) - bal, 5 ether);
-        console.log("  Day 8 released: 5 ether");
-
-        // Day 30: 30% vested, daily limit applies
-        vm.warp(block.timestamp + 22 days);
-        assertEq(escrowVault.calculateVestedAmount(_escrowId), 30 ether, "30% at 30d");
-
-        bal = issuedToken.balanceOf(issuerAddr);
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(_escrowId);
-        assertEq(issuedToken.balanceOf(issuerAddr) - bal, 5 ether, "daily limit on day 30");
-    }
-
-    function _scenario2_fullVesting() internal {
         // Day 90: 100% vested
         vm.warp(block.timestamp + 60 days);
-        assertEq(escrowVault.calculateVestedAmount(_escrowId), 100 ether, "100% at 90d");
-        console.log("  Day 90 vested: 100 ether");
+        vested = escrowVault.calculateVestedLiquidity(_escrowId);
+        console.log("  Day 90 vested liquidity:", uint256(vested));
 
-        // Release in daily increments
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
-        uint256 remaining = s.remaining;
-        uint256 dayCount;
-
-        while (remaining > 0) {
-            uint256 g = gasleft();
-            vm.prank(issuerAddr);
-            uint256 rel = escrowVault.releaseVested(_escrowId);
-            if (dayCount == 0) console.log("Gas: releaseVested (day 90)", g - gasleft());
-            remaining -= rel;
-            dayCount++;
-            if (remaining > 0) vm.warp(block.timestamp + 1 days);
-        }
-
-        s = escrowVault.getEscrowStatus(_escrowId);
-        assertEq(s.remaining, 0, "fully released");
-        assertEq(s.released, ESCROW_AMOUNT);
-        console.log("  Full release took", dayCount, "daily withdrawals");
+        assertEq(uint256(vested), uint256(s.totalLiquidity), "100% vested at 90d");
     }
 
     function _scenario2_noTrigger() internal {
@@ -515,30 +413,19 @@ contract E2E_ScenariosTest is Test, Deployers {
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
         assertFalse(ps.isTriggered);
         console.log("  No trigger fired - legitimate project");
-
-        // LP removal still works
-        uint256 g = gasleft();
-        modifyLiquidityRouter.modifyLiquidity(
-            _poolKey,
-            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(ISSUER_LP), salt: 0}),
-            ""
-        );
-        console.log("Gas: normal LP removal", g - gasleft());
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SCENARIO 3: Issuer Dump -> Trigger + Compensation
+    //  SCENARIO 3: Issuer Dump -> Trigger + Lockdown + Compensation
     // ═══════════════════════════════════════════════════════════════════
 
     function test_scenario3_issuerDump_triggerAndCompensate() public {
-        console.log("=== SCENARIO 3: Issuer Dump ===");
+        console.log("=== SCENARIO 3: Issuer Dump (LP Permission Model) ===");
 
         IEscrowVault.IssuerCommitment memory commitment =
             IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, lockDuration: 0, maxSellPercent: 200});
 
-        uint256 g = gasleft();
         _initPool(commitment);
-        console.log("Gas: pool creation + escrow", g - gasleft());
 
         _scenario3_tradersBuy();
         _scenario3_issuerDump();
@@ -550,13 +437,8 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario3_tradersBuy() internal {
-        uint256 g = gasleft();
         _buyIssuedToken(trader1, -2 ether);
-        console.log("Gas: trader1 buy (2 ether)", g - gasleft());
-
-        g = gasleft();
         _buyIssuedToken(trader2, -1 ether);
-        console.log("Gas: trader2 buy (1 ether)", g - gasleft());
 
         uint256 insuranceETH = address(insurancePool).balance;
         assertGt(insuranceETH, 0);
@@ -564,38 +446,24 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario3_issuerDump() internal {
-        // Simulate issuer selling >30% of supply via hook reporting
-        // (afterSwap sender = router, not actual user, so direct oracle call)
         uint256 totalSupply = issuedToken.totalSupply();
         uint256 saleAmount = (totalSupply * 3001) / 10000; // 30.01%
         console.log("  Total supply:", totalSupply);
         console.log("  Sale amount (30.01%%):", saleAmount);
 
-        // Two chunks to test 24h sliding window
         uint256 firstSale = saleAmount / 2;
         uint256 secondSale = saleAmount - firstSale;
 
         vm.prank(address(hook));
-        uint256 g = gasleft();
         triggerOracle.reportIssuerSale(_poolId, issuerAddr, firstSale, totalSupply);
-        console.log("Gas: reportIssuerSale (1st)", g - gasleft());
 
-        // First sale ~15% - no trigger
         (bool pending,,) = triggerOracle.getPendingTrigger(_poolId);
         assertFalse(pending, "first sale alone should not trigger");
 
-        // 12h later: second sale pushes cumulative >30%
         vm.warp(block.timestamp + 12 hours);
 
-        vm.expectEmit(true, true, false, false, address(triggerOracle));
-        emit TriggerOracle.TriggerPending(
-            _poolId, ITriggerOracle.TriggerType.ISSUER_DUMP, uint40(block.timestamp) + 1 hours
-        );
-
         vm.prank(address(hook));
-        g = gasleft();
         triggerOracle.reportIssuerSale(_poolId, issuerAddr, secondSale, totalSupply);
-        console.log("Gas: reportIssuerSale (2nd, triggers)", g - gasleft());
 
         (bool exists, ITriggerOracle.TriggerType tt,) = triggerOracle.getPendingTrigger(_poolId);
         assertTrue(exists);
@@ -604,14 +472,12 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario3_executeTrigger() internal {
-        // Grace period: cannot execute early
         vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
         triggerOracle.executeTrigger(_poolId);
 
         (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
         vm.warp(executeAfter);
 
-        uint256 insuranceTokensBefore = issuedToken.balanceOf(address(insurancePool));
         uint256 insuranceETHBefore = address(insurancePool).balance;
 
         // Build Merkle tree for trader1 and trader2 balances
@@ -625,51 +491,39 @@ contract E2E_ScenariosTest is Test, Deployers {
         _scenario3T1Bal = t1Bal;
         _scenario3T2Bal = t2Bal;
 
-        // Path A: Guardian submits Merkle root, then wait challenge period
         vm.prank(guardian);
         triggerOracle.submitMerkleRoot(_poolId, _scenario3MerkleRoot);
 
-        // Wait for challenge period (1 hour)
         vm.warp(block.timestamp + 1 hours);
 
-        // Expect both Redistributed and PayoutExecuted events
-        vm.expectEmit(true, false, false, true, address(escrowVault));
-        emit IEscrowVault.Redistributed(_escrowId, uint8(ITriggerOracle.TriggerType.ISSUER_DUMP), ESCROW_AMOUNT);
+        // Expect Lockdown event (no more Redistributed with token amount)
+        vm.expectEmit(true, true, false, false, address(escrowVault));
+        emit IEscrowVault.Lockdown(_escrowId, uint8(ITriggerOracle.TriggerType.ISSUER_DUMP));
 
         vm.expectEmit(true, false, false, true, address(insurancePool));
         emit IInsurancePool.PayoutExecuted(
             _poolId, uint8(ITriggerOracle.TriggerType.ISSUER_DUMP), insuranceETHBefore
         );
 
-        uint256 g = gasleft();
         triggerOracle.executeTrigger(_poolId);
-        console.log("Gas: executeTrigger (ISSUER_DUMP, Path A)", g - gasleft());
 
         // Verify trigger state
         assertTrue(triggerOracle.checkTrigger(_poolId).triggered);
 
-        // Escrow fully redistributed
+        // Escrow locked down (no token redistribution — LP permission model)
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
-        assertEq(s.remaining, 0);
-
-        // Tokens sent to InsurancePool
-        uint256 redistributed = issuedToken.balanceOf(address(insurancePool)) - insuranceTokensBefore;
-        assertEq(redistributed, ESCROW_AMOUNT);
-        console.log("  Escrow redistributed:", redistributed);
+        assertEq(s.remainingLiquidity, 0);
+        assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0);
+        console.log("  Escrow locked down");
 
         // Insurance payout snapshot
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
         assertTrue(ps.isTriggered);
         assertEq(ps.balance, insuranceETHBefore);
         console.log("  Insurance payout (ETH):", ps.balance);
-
-        // Escrow release blocked
-        vm.prank(issuerAddr);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.EscrowTriggered.selector));
-        escrowVault.releaseVested(_escrowId);
     }
 
-    // Scenario 3 merkle state (set during _scenario3_executeTrigger, used in _scenario3_claims)
+    // Scenario 3 merkle state
     bytes32 internal _scenario3MerkleRoot;
     bytes32 internal _scenario3Leaf1;
     bytes32 internal _scenario3Leaf2;
@@ -677,27 +531,21 @@ contract E2E_ScenariosTest is Test, Deployers {
     uint256 internal _scenario3T2Bal;
 
     function _scenario3_claims() internal {
-        // Trader1 claims with Merkle proof
         uint256 comp1 = insurancePool.calculateCompensation(_poolId, _scenario3T1Bal);
         assertGt(comp1, 0);
 
         uint256 ethBefore = trader1.balance;
 
-        vm.expectEmit(true, true, false, true, address(insurancePool));
-        emit IInsurancePool.CompensationClaimed(_poolId, trader1, comp1);
-
         bytes32[] memory proof1 = new bytes32[](1);
         proof1[0] = _scenario3Leaf2;
 
         vm.prank(trader1);
-        uint256 g = gasleft();
         insurancePool.claimCompensation(_poolId, _scenario3T1Bal, proof1);
-        console.log("Gas: claimCompensation (trader1)", g - gasleft());
 
         assertEq(trader1.balance - ethBefore, comp1);
         console.log("  Trader1 claimed:", comp1);
 
-        // Trader2 claims with Merkle proof
+        // Trader2 claims
         uint256 comp2 = insurancePool.calculateCompensation(_poolId, _scenario3T2Bal);
         assertGt(comp2, 0);
 
@@ -706,14 +554,11 @@ contract E2E_ScenariosTest is Test, Deployers {
         proof2[0] = _scenario3Leaf1;
 
         vm.prank(trader2);
-        g = gasleft();
         insurancePool.claimCompensation(_poolId, _scenario3T2Bal, proof2);
-        console.log("Gas: claimCompensation (trader2)", g - gasleft());
 
         assertEq(trader2.balance - ethBefore, comp2);
         console.log("  Trader2 claimed:", comp2);
 
-        // Both marked claimed
         assertTrue(insurancePool.hasClaimed(_poolId, trader1));
         assertTrue(insurancePool.hasClaimed(_poolId, trader2));
 

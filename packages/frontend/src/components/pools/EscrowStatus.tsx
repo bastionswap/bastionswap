@@ -7,9 +7,9 @@ import { formatBps } from "@/lib/formatters";
 
 interface EscrowStatusProps {
   escrow: {
-    totalLocked: string;
-    released: string;
-    remaining: string;
+    totalLiquidity: string;
+    removedLiquidity: string;
+    remainingLiquidity: string;
     isTriggered: boolean;
     createdAt?: string;
     commitment?: {
@@ -25,7 +25,6 @@ interface EscrowStatusProps {
   };
   tokenLabel?: string;
   tokenSymbol?: string;
-  ethAmount?: number;
   vestingEndTime?: number;
 }
 
@@ -97,16 +96,15 @@ function formatCompact(n: number): string {
   return n.toFixed(4);
 }
 
-/** Format LP composition: "100 BTT + 10 ETH" */
-function formatLP(tokenAmount: number, ethAmount: number, tokenSymbol: string): string {
-  return `${formatCompact(tokenAmount)} ${tokenSymbol} + ${formatCompact(ethAmount)} ETH`;
+/** Format LP liquidity amount */
+function formatLP(amount: number): string {
+  return `${formatCompact(amount)} LP`;
 }
 
 /** Format LP at a specific bps proportion */
-function formatLPAtBps(totalToken: number, totalEth: number, bps: number, tokenSymbol: string): string {
-  const tokenPart = (totalToken * bps) / 10000;
-  const ethPart = (totalEth * bps) / 10000;
-  return `${formatCompact(tokenPart)} ${tokenSymbol} + ${formatCompact(ethPart)} ETH`;
+function formatLPAtBps(totalLiquidity: number, bps: number): string {
+  const part = (totalLiquidity * bps) / 10000;
+  return `${formatCompact(part)} LP`;
 }
 
 function Countdown({ targetTs, label }: { targetTs: number; label?: string }) {
@@ -163,16 +161,12 @@ function VestingTimeline({
   lockDuration,
   vestingEndTime,
   total,
-  totalEth,
-  tokenSymbol,
 }: {
   milestones: { id: string; timestamp: string; basisPoints: number }[];
   createdAt: number;
   lockDuration: number;
   vestingEndTime?: number;
   total: number;
-  totalEth: number;
-  tokenSymbol: string;
 }) {
   const [now, setNow] = useState(Math.floor(Date.now() / 1000));
   useEffect(() => {
@@ -301,7 +295,7 @@ function VestingTimeline({
               <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
                 <div className="bg-gray-900 text-white rounded-lg px-3 py-2 text-xs whitespace-nowrap shadow-lg">
                   <p className="font-medium">{formatBps(cumulativeBps)} LP vested</p>
-                  <p className="text-gray-400">{formatLPAtBps(total, totalEth, cumulativeBps, tokenSymbol)}</p>
+                  <p className="text-gray-400">{formatLPAtBps(total, cumulativeBps)}</p>
                   <p className="text-gray-400">{formatDate(ts)}</p>
                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
                 </div>
@@ -360,13 +354,9 @@ function VestingTimeline({
 function MilestoneList({
   milestones,
   total,
-  totalEth,
-  tokenSymbol,
 }: {
   milestones: { id: string; timestamp: string; basisPoints: number }[];
   total: number;
-  totalEth: number;
-  tokenSymbol: string;
 }) {
   const now = Math.floor(Date.now() / 1000);
   const sorted = milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
@@ -409,7 +399,7 @@ function MilestoneList({
                     {isNext && <span className="text-[10px] ml-1.5 text-emerald-600 font-semibold">NEXT</span>}
                   </p>
                   <p className="text-[11px] text-gray-400">
-                    {formatDate(ts)} &middot; {formatLPAtBps(total, totalEth, m.basisPoints, tokenSymbol)}
+                    {formatDate(ts)} &middot; {formatLPAtBps(total, m.basisPoints)}
                   </p>
                 </div>
                 {isPast && (
@@ -426,15 +416,11 @@ function MilestoneList({
   );
 }
 
-export function EscrowStatus({ escrow, tokenLabel = "tokens", tokenSymbol, ethAmount: ethAmountProp, vestingEndTime }: EscrowStatusProps) {
-  const total = parseFloat(escrow.totalLocked);
-  const released = parseFloat(escrow.released);
-  const remaining = parseFloat(escrow.remaining);
-  const progress = total > 0 ? (released / total) * 100 : 0;
-  const sym = tokenSymbol || tokenLabel;
-  const totalEth = ethAmountProp ?? 0;
-  const releasedEth = total > 0 ? totalEth * (released / total) : 0;
-  const remainingEth = total > 0 ? totalEth * (remaining / total) : 0;
+export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
+  const total = parseFloat(escrow.totalLiquidity);
+  const removed = parseFloat(escrow.removedLiquidity);
+  const remaining = parseFloat(escrow.remainingLiquidity);
+  const progress = total > 0 ? (removed / total) * 100 : 0;
 
   const now = Math.floor(Date.now() / 1000);
   const createdAt = escrow.createdAt ? parseInt(escrow.createdAt) : 0;
@@ -505,7 +491,7 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", tokenSymbol, ethAm
           <div>
             <p className="text-sm font-medium text-red-700">Trigger activated</p>
             <p className="text-xs text-red-600/70">
-              Remaining LP ({formatLP(remaining, remainingEth, sym)}) has been redistributed to token holders.
+              Remaining LP ({formatLP(remaining)}) has been locked down. The issuer can no longer remove LP.
             </p>
           </div>
         </div>
@@ -541,30 +527,27 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", tokenSymbol, ethAm
         <div className="grid grid-cols-3 gap-3 mb-1">
           {[
             {
-              label: "Total Locked LP",
-              tokenVal: formatCompact(total),
-              ethVal: formatCompact(totalEth),
+              label: "Total LP Locked",
+              val: formatCompact(total),
               pct: null as string | null,
               color: "text-gray-900",
               icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
             },
             {
-              label: "Released",
-              tokenVal: formatCompact(released),
-              ethVal: formatCompact(releasedEth),
+              label: "LP Removed",
+              val: formatCompact(removed),
               pct: `${progress.toFixed(0)}%`,
               color: "text-emerald-600",
               icon: "M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
             },
             {
-              label: "Remaining",
-              tokenVal: formatCompact(remaining),
-              ethVal: formatCompact(remainingEth),
+              label: "LP Remaining",
+              val: formatCompact(remaining),
               pct: `${(100 - progress).toFixed(0)}%`,
               color: "text-bastion-600",
               icon: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z",
             },
-          ].map(({ label, tokenVal, ethVal, pct, color, icon }) => (
+          ].map(({ label, val, pct, color, icon }) => (
             <div key={label} className="rounded-xl bg-gray-50 p-3">
               <div className="flex items-center gap-1.5 mb-1">
                 <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -573,13 +556,8 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", tokenSymbol, ethAm
                 <p className="text-[11px] text-gray-400">{label}</p>
               </div>
               <p className={`text-sm font-bold ${color} tabular-nums leading-tight`}>
-                {tokenVal} <span className="text-[10px] font-normal text-gray-400">{sym}</span>
+                {val} <span className="text-[10px] font-normal text-gray-400">LP</span>
               </p>
-              {totalEth > 0 && (
-                <p className={`text-sm font-bold ${color} tabular-nums leading-tight`}>
-                  {ethVal} <span className="text-[10px] font-normal text-gray-400">ETH</span>
-                </p>
-              )}
               {pct && <p className="text-[10px] text-gray-400 mt-0.5">{pct}</p>}
             </div>
           ))}
@@ -598,8 +576,6 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", tokenSymbol, ethAm
             lockDuration={lockDuration}
             vestingEndTime={vestingEndTime}
             total={total}
-            totalEth={totalEth}
-            tokenSymbol={sym}
           />
         </div>
       )}
@@ -622,7 +598,7 @@ export function EscrowStatus({ escrow, tokenLabel = "tokens", tokenSymbol, ethAm
             label="This pool"
             height={160}
           />
-          <MilestoneList milestones={sortedMilestones} total={total} totalEth={totalEth} tokenSymbol={sym} />
+          <MilestoneList milestones={sortedMilestones} total={total} />
         </div>
       )}
 

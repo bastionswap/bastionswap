@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useChainId } from "wagmi";
 import Link from "next/link";
 import { usePool } from "@/hooks/usePools";
@@ -263,17 +263,6 @@ export default function PoolDetailPage() {
   const { isLoading: isClaimConfirming, isSuccess: claimSuccess } =
     useWaitForTransactionReceipt({ hash: claimHash });
 
-  // Compute ETH equivalent for escrow LP display
-  // token0 = native ETH, token1 = issued token in Bastion pools
-  const escrowEthAmount = useMemo(() => {
-    if (!pool?.escrow || !pool.reserve0 || !pool.reserve1) return 0;
-    const r0 = parseFloat(pool.reserve0) / Math.pow(10, token0Info.decimals ?? 18); // ETH
-    const r1 = parseFloat(pool.reserve1) / Math.pow(10, token1Info.decimals ?? 18); // token
-    const escrowTokens = parseFloat(pool.escrow.totalLocked);
-    if (r1 === 0 || escrowTokens === 0) return 0;
-    return escrowTokens * (r0 / r1);
-  }, [pool?.escrow, pool?.reserve0, pool?.reserve1, token0Info.decimals, token1Info.decimals]);
-
   const handleClaim = () => {
     if (!contracts || !address || !holderBalance) return;
     writeContract({
@@ -418,17 +407,11 @@ export default function PoolDetailPage() {
                   <div className="text-right">
                     <p className="text-[11px] text-gray-400 uppercase tracking-wider mb-1">Escrowed LP</p>
                     <p className="text-sm font-semibold text-gray-900 tabular-nums">
-                      {parseFloat(pool.escrow.totalLocked).toFixed(2)}
-                      <span className="text-xs text-gray-400 font-normal ml-1">{issuedTokenLabel}</span>
+                      {parseFloat(pool.escrow.totalLiquidity).toFixed(2)}
+                      <span className="text-xs text-gray-400 font-normal ml-1">LP</span>
                     </p>
-                    {escrowEthAmount > 0 && (
-                      <p className="text-sm font-semibold text-gray-900 tabular-nums">
-                        {escrowEthAmount.toFixed(4)}
-                        <span className="text-xs text-gray-400 font-normal ml-1">ETH</span>
-                      </p>
-                    )}
                     <p className="text-xs text-emerald-600 font-medium">
-                      {total(pool.escrow)}% vested
+                      {vestingPct(pool.escrow)}% removed
                     </p>
                   </div>
                 )}
@@ -486,9 +469,6 @@ export default function PoolDetailPage() {
             <div className="mb-6">
               <EscrowStatus
                 escrow={pool.escrow}
-                tokenLabel={issuedTokenLabel}
-                tokenSymbol={issuedTokenLabel}
-                ethAmount={escrowEthAmount}
                 vestingEndTime={vestingEndTime ? Number(vestingEndTime) : undefined}
               />
             </div>
@@ -568,9 +548,9 @@ export default function PoolDetailPage() {
   );
 }
 
-// Helper to compute vesting % from escrow data
-function total(escrow: { totalLocked: string; released: string }): string {
-  const t = parseFloat(escrow.totalLocked);
-  const r = parseFloat(escrow.released);
+// Helper to compute LP removal % from escrow data
+function vestingPct(escrow: { totalLiquidity: string; removedLiquidity: string }): string {
+  const t = parseFloat(escrow.totalLiquidity);
+  const r = parseFloat(escrow.removedLiquidity);
   return t > 0 ? ((r / t) * 100).toFixed(1) : "0";
 }

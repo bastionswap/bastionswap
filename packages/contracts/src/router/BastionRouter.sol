@@ -14,7 +14,8 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 
 /// @title BastionRouter
 /// @notice Minimal router for Uniswap V4 pools with BastionHook.
-///         Handles swaps and full pool creation (initialize + LP + hook registration) in a single tx.
+///         Handles swaps, full pool creation (initialize + LP + hook registration),
+///         and LP removal with user identification in hookData.
 contract BastionRouter is IUnlockCallback {
     using CurrencyLibrary for Currency;
     using TransientStateLibrary for IPoolManager;
@@ -23,13 +24,14 @@ contract BastionRouter is IUnlockCallback {
 
     uint8 private constant ACTION_SWAP = 0;
     uint8 private constant ACTION_CREATE_POOL = 1;
+    uint8 private constant ACTION_REMOVE_LP = 2;
 
     struct CreatePoolParams {
         PoolKey key;
         uint160 sqrtPriceX96;
         uint256 amount0Max;  // max currency0 for LP
         uint256 amount1Max;  // max currency1 for LP
-        bytes hookData;      // abi.encode(issuer, token, escrowAmt, vesting, commitment, triggerConfig)
+        bytes hookData;      // abi.encode(issuer, token, vesting, commitment, triggerConfig)
     }
 
     error Expired();
@@ -49,6 +51,14 @@ contract BastionRouter is IUnlockCallback {
     /// @param params Pool creation parameters including key, price, amounts, and hookData.
     function createPool(CreatePoolParams calldata params) external payable {
         poolManager.unlock(abi.encode(ACTION_CREATE_POOL, msg.sender, params));
+        _refundETH();
+    }
+
+    /// @notice Remove liquidity from a pool. Encodes msg.sender in hookData for issuer identification.
+    /// @param key Pool key
+    /// @param liquidityToRemove Amount of liquidity to remove
+    function removeLiquidity(PoolKey calldata key, uint128 liquidityToRemove) external {
+        poolManager.unlock(abi.encode(ACTION_REMOVE_LP, msg.sender, key, liquidityToRemove));
         _refundETH();
     }
 
@@ -129,6 +139,8 @@ contract BastionRouter is IUnlockCallback {
             return _handleSwap(data);
         } else if (action == ACTION_CREATE_POOL) {
             return _handleCreatePool(data);
+        } else if (action == ACTION_REMOVE_LP) {
+            return _handleRemoveLP(data);
         }
 
         revert("Unknown action");
@@ -188,6 +200,36 @@ contract BastionRouter is IUnlockCallback {
         // 5. Settle token deltas
         _settle(params.key.currency0, sender, delta.amount0());
         _settle(params.key.currency1, sender, delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleRemoveLP(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, uint128 liquidityToRemove) =
+            abi.decode(data, (uint8, address, PoolKey, uint128));
+
+        // Compute full-range ticks (same as createPool)
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+
+        // hookData identifies the actual user to the hook
+        bytes memory hookData = abi.encode(sender);
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: -int256(uint256(liquidityToRemove)),
+                salt: 0
+            }),
+            hookData
+        );
+
+        // Settle deltas back to sender
+        _settle(key.currency0, sender, delta.amount0());
+        _settle(key.currency1, sender, delta.amount1());
 
         return abi.encode(delta);
     }

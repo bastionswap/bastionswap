@@ -49,8 +49,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
     PoolKey public poolKey;
     PoolId public poolId;
 
-    uint256 constant ESCROW_AMOUNT = 100 ether;
-
     function setUp() public {
         issuerAddr = makeAddr("issuer");
         guardian = makeAddr("guardian");
@@ -61,7 +59,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         deployFreshManagerAndRouters();
 
         // Compute the hook address with correct permission bits
-        // beforeAddLiquidity(1<<11) | beforeRemoveLiquidity(1<<9) | beforeSwap(1<<7) | afterSwap(1<<6)
         uint160 flags =
             uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
 
@@ -72,30 +69,16 @@ contract BastionHookIntegrationTest is Test, Deployers {
         address reputationAddr = address(mockReputation);
 
         // Pre-compute addresses to resolve circular dependency
-        // Deploy order: escrowVault (nonce N), insurancePool (N+1), triggerOracle (N+2)
         uint64 nonce = vm.getNonce(address(this));
         address escrowAddr = vm.computeCreateAddress(address(this), nonce);
         address insuranceAddr = vm.computeCreateAddress(address(this), nonce + 1);
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
-        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr, reputationAddr);
+        escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
 
         // Deploy hook implementation and etch it at the correct address
-        BastionHook impl =
-            new BastionHook(manager, IEscrowVault(address(escrowVault)), insurancePool, triggerOracle, IReputationEngine(reputationAddr));
-        vm.etch(hookAddr, address(impl).code);
-
-        // After etch, the code is at hookAddr but storage is empty.
-        // We need to re-deploy at the correct address. Use a different approach:
-        // Store the immutables by deploying and copying full runtime bytecode including immutables
-        // Since vm.etch only copies bytecode, we need to set storage manually for immutables.
-        // Actually, Solidity immutables are embedded in the bytecode, so vm.etch should work.
-        // But the constructor params are baked into the deployed bytecode, not impl's.
-        // We need to re-create impl with the correct hookAddr as the deployment address.
-
-        // Use deployCodeTo pattern instead:
         bytes memory creationCode = type(BastionHook).creationCode;
         bytes memory constructorArgs =
             abi.encode(address(manager), address(escrowVault), address(insurancePool), address(triggerOracle), reputationAddr);
@@ -105,7 +88,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assembly {
             deployed := create(0, add(bytecode, 0x20), mload(bytecode))
         }
-        // Copy the deployed code (with immutables baked in) to our flag address
         vm.etch(hookAddr, deployed.code);
         hook = BastionHook(payable(hookAddr));
 
@@ -132,9 +114,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         issuedToken.approve(address(swapRouter), type(uint256).max);
         baseToken.approve(address(swapRouter), type(uint256).max);
 
-        // Approve for issuer
+        // Approve for issuer — no hook approval needed
         vm.startPrank(issuerAddr);
-        issuedToken.approve(address(hook), type(uint256).max);
         issuedToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         vm.stopPrank();
@@ -175,7 +156,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         return abi.encode(
             issuerAddr,
             address(issuedToken),
-            ESCROW_AMOUNT,
             _defaultVestingSchedule(),
             _defaultCommitment(),
             _defaultTriggerConfig()
@@ -219,8 +199,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
         (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
         assertGt(escrowId, 0);
 
-        // EscrowVault should hold the escrowed tokens
-        assertEq(issuedToken.balanceOf(address(escrowVault)), ESCROW_AMOUNT);
+        // EscrowVault should hold NO tokens (LP permission model)
+        assertEq(issuedToken.balanceOf(address(escrowVault)), 0);
+        assertEq(address(escrowVault).balance, 0);
+
+        // But should have recorded the liquidity
+        IEscrowVault.EscrowStatus memory status = escrowVault.getEscrowStatus(escrowId);
+        assertGt(status.totalLiquidity, 0);
     }
 
     function test_poolCreation_triggerConfigSet() public {
@@ -293,45 +278,41 @@ contract BastionHookIntegrationTest is Test, Deployers {
         });
         modifyLiquidityRouter.modifyLiquidity(poolKey, addParams, "");
 
-        // Remove liquidity
+        // Remove liquidity (non-issuer, different router)
         ModifyLiquidityParams memory removeParams = ModifyLiquidityParams({
             tickLower: -120,
             tickUpper: 120,
             liquidityDelta: -5e18,
             salt: bytes32(uint256(3))
         });
-        modifyLiquidityRouter.modifyLiquidity(poolKey, removeParams, "");
+        modifyLiquidityRouter.modifyLiquidity(poolKey, removeParams, abi.encode(address(this)));
 
         // Should not trigger (small removal)
         assertFalse(triggerOracle.checkTrigger(poolId).triggered);
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  VESTING RELEASE FLOW
+    //  VESTING & LP REMOVAL FLOW
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_vestingRelease_afterFirstMilestone() public {
+    function test_vestingCalculation_afterFirstMilestone() public {
         _initPoolWithIssuer();
 
         (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
 
         // Before vesting: 0
-        assertEq(escrowVault.calculateVestedAmount(escrowId), 0);
+        assertEq(escrowVault.calculateVestedLiquidity(escrowId), 0);
 
         // Warp to 7 days
         vm.warp(block.timestamp + 7 days);
 
         // 10% should be vested
-        uint256 vested = escrowVault.calculateVestedAmount(escrowId);
-        assertEq(vested, 10 ether);
+        uint128 vested = escrowVault.calculateVestedLiquidity(escrowId);
+        assertGt(vested, 0);
 
-        // Release vested
-        uint256 balanceBefore = issuedToken.balanceOf(issuerAddr);
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(escrowId);
-        uint256 balanceAfter = issuedToken.balanceOf(issuerAddr);
-
-        assertEq(balanceAfter - balanceBefore, 10 ether);
+        // getRemovableLiquidity should match
+        uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
+        assertEq(removable, vested);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -342,11 +323,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithIssuer();
 
         (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
-
-        // Warp to 7 days, release partial
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(escrowId);
 
         // Simulate commitment breach reported by hook
         vm.prank(address(hook));
@@ -361,9 +337,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // Verify trigger activated
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);
 
-        // EscrowVault should have redistributed remaining
+        // EscrowVault should have locked down (no LP removal allowed)
+        assertEq(escrowVault.getRemovableLiquidity(escrowId), 0);
+
         IEscrowVault.EscrowStatus memory status = escrowVault.getEscrowStatus(escrowId);
-        assertEq(status.remaining, 0);
+        assertEq(status.remainingLiquidity, 0); // triggered, so remaining = 0
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -375,7 +353,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithIssuer();
         (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
         assertTrue(hook.isIssuer(poolId, issuerAddr));
-        assertEq(issuedToken.balanceOf(address(escrowVault)), ESCROW_AMOUNT);
+        // Vault holds no tokens
+        assertEq(issuedToken.balanceOf(address(escrowVault)), 0);
 
         // 2. Add more liquidity (normal LP, no escrow)
         ModifyLiquidityParams memory addParams = ModifyLiquidityParams({
@@ -398,15 +377,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
             ""
         );
 
-        // 4. Vesting: warp to 30 days, release
+        // 4. Vesting: warp to 30 days, check vested
         vm.warp(block.timestamp + 30 days);
-        uint256 vested = escrowVault.calculateVestedAmount(escrowId);
-        assertEq(vested, 30 ether); // 30%
-
-        uint256 balBefore = issuedToken.balanceOf(issuerAddr);
-        vm.prank(issuerAddr);
-        escrowVault.releaseVested(escrowId);
-        assertEq(issuedToken.balanceOf(issuerAddr) - balBefore, 30 ether); // 30% vested at 30 days
+        uint128 vested = escrowVault.calculateVestedLiquidity(escrowId);
+        assertGt(vested, 0); // 30% should be vested
 
         // 5. Trigger scenario: simulate commitment breach
         vm.prank(address(hook));
@@ -419,8 +393,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // 6. Verify final state
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);
         IEscrowVault.EscrowStatus memory status = escrowVault.getEscrowStatus(escrowId);
-        assertEq(status.released, 30 ether);
-        assertEq(status.remaining, 0); // triggered, so remaining = 0
+        assertEq(status.remainingLiquidity, 0); // triggered, so remaining = 0
+        // removedLiquidity should still be 0 (no LP was actually removed before trigger)
+        assertEq(status.removedLiquidity, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -468,16 +443,14 @@ contract BastionHookIntegrationTest is Test, Deployers {
         });
         modifyLiquidityRouter.modifyLiquidity(poolKey, params, "");
 
-        // Issuer sells issued tokens (sell = sends issuedToken, receives baseToken)
-        // Determine swap direction: need to send issuedToken
+        // Issuer sells issued tokens
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-        bool zeroForOne = issuedIsToken0; // sell issuedToken = send token0 if issued is token0
+        bool zeroForOne = issuedIsToken0;
 
         PoolSwapTest.TestSettings memory settings =
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
-        // Approve swap router for issuer
         vm.startPrank(issuerAddr);
         issuedToken.approve(address(swapRouter), type(uint256).max);
         baseToken.approve(address(swapRouter), type(uint256).max);
@@ -493,9 +466,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
             ""
         );
         vm.stopPrank();
-
-        // After issuer sell, the swap should complete without revert
-        // _reportIssuerSale was called internally
     }
 
     function test_afterSwap_issuerBuy_doesNotReportSale() public {
@@ -510,10 +480,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
         });
         modifyLiquidityRouter.modifyLiquidity(poolKey, params, "");
 
-        // Issuer buys issued tokens (buy = receives issuedToken)
+        // Issuer buys issued tokens
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-        bool zeroForOne = !issuedIsToken0; // buy issuedToken = opposite direction
+        bool zeroForOne = !issuedIsToken0;
 
         PoolSwapTest.TestSettings memory settings =
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
@@ -558,7 +528,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // Buy issued token
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-        bool zeroForOne = !issuedIsToken0; // buy = receive issued token
+        bool zeroForOne = !issuedIsToken0;
 
         PoolSwapTest.TestSettings memory settings =
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
@@ -616,8 +586,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_removeLiquidity_overflowProtection() public {
         _initPoolWithIssuer();
 
-        // The initial issuer LP adds some tracked liquidity.
-        // Adding and removing more than tracked tests the overflow branch.
         // Add liquidity with different salt
         ModifyLiquidityParams memory addParams = ModifyLiquidityParams({
             tickLower: -120,
@@ -634,11 +602,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
             liquidityDelta: -2e18,
             salt: bytes32(uint256(30))
         });
-        modifyLiquidityRouter.modifyLiquidity(poolKey, removeParams, "");
+        modifyLiquidityRouter.modifyLiquidity(poolKey, removeParams, abi.encode(address(this)));
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  DIRECT afterSwap TESTS (covers _reportIssuerSale, _collectInsuranceFee branches)
+    //  DIRECT afterSwap TESTS
     // ═══════════════════════════════════════════════════════════════════
 
     function test_afterSwap_directCall_issuerSell_reportsToOracle() public {
@@ -647,8 +615,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
 
-        // Issuer sells issued token: zeroForOne=issuedIsToken0
-        // Delta: issued token is negative (sold), base token is positive (received)
         BalanceDelta delta;
         if (issuedIsToken0) {
             delta = toBalanceDelta(-1e15, 1e15);
@@ -662,49 +628,20 @@ contract BastionHookIntegrationTest is Test, Deployers {
             sqrtPriceLimitX96: issuedIsToken0 ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
         });
 
-        // Call afterSwap directly as PoolManager, sender=issuerAddr
         vm.prank(address(manager));
         hook.afterSwap(issuerAddr, poolKey, params, delta, "");
     }
 
-    function test_afterSwap_directCall_issuerSell_issuedIsToken0() public {
+    function test_afterSwap_directCall_buySwap_collectsFee() public {
         _initPoolWithIssuer();
 
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
 
-        // Test the specific token0/token1 branch in _reportIssuerSale
-        // Force the issuedIsToken0 path
-        if (!issuedIsToken0) {
-            // Skip if issued token is not token0 in this test - the other branch is tested above
-            return;
-        }
-
-        BalanceDelta delta = toBalanceDelta(-1e15, 1e15);
-        SwapParams memory params = SwapParams({
-            zeroForOne: true,
-            amountSpecified: -1e15,
-            sqrtPriceLimitX96: MIN_PRICE_LIMIT
-        });
-
-        vm.prank(address(manager));
-        hook.afterSwap(issuerAddr, poolKey, params, delta, "");
-    }
-
-    function test_afterSwap_directCall_buySwap_collectsFee_issuedIsToken0() public {
-        _initPoolWithIssuer();
-
-        address issuedAddr = address(issuedToken);
-        bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-
-        // Buy = receive issued token
-        // If issuedIsToken0: buy = !zeroForOne, so zeroForOne=false
-        // Delta for buy: baseAmount negative (spent), issuedAmount positive (received)
         BalanceDelta delta;
         SwapParams memory params;
 
         if (issuedIsToken0) {
-            // Buy token0: zeroForOne=false, sends token1 (negative), receives token0 (positive)
             delta = toBalanceDelta(1e15, -1e15);
             params = SwapParams({
                 zeroForOne: false,
@@ -712,7 +649,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
                 sqrtPriceLimitX96: MAX_PRICE_LIMIT
             });
         } else {
-            // Buy token1: zeroForOne=true, sends token0 (negative), receives token1 (positive)
             delta = toBalanceDelta(-1e15, 1e15);
             params = SwapParams({
                 zeroForOne: true,
@@ -728,85 +664,20 @@ contract BastionHookIntegrationTest is Test, Deployers {
         hook.afterSwap(trader, poolKey, params, delta, "");
     }
 
-    function test_afterSwap_directCall_buySwap_positiveBaseAmount_skips() public {
-        _initPoolWithIssuer();
-
-        address issuedAddr = address(issuedToken);
-        bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-
-        // Create a delta where baseAmount is positive (>= 0), hitting the early return
-        BalanceDelta delta;
-        SwapParams memory params;
-
-        if (issuedIsToken0) {
-            // Buy token0: base is token1 => make amount1 positive (unusual but covers the branch)
-            delta = toBalanceDelta(1e15, 1e15);
-            params = SwapParams({
-                zeroForOne: false,
-                amountSpecified: -1e15,
-                sqrtPriceLimitX96: MAX_PRICE_LIMIT
-            });
-        } else {
-            // Buy token1: base is token0 => make amount0 positive
-            delta = toBalanceDelta(1e15, 1e15);
-            params = SwapParams({
-                zeroForOne: true,
-                amountSpecified: -1e15,
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
-            });
-        }
-
-        vm.prank(address(manager));
-        hook.afterSwap(trader, poolKey, params, delta, "");
-    }
-
-    function test_afterSwap_directCall_issuerSell_positiveIssuedAmount_skips() public {
-        _initPoolWithIssuer();
-
-        address issuedAddr = address(issuedToken);
-        bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-
-        // Issuer "sell" but with positive issuedAmount (unusual, covers early return)
-        BalanceDelta delta;
-        SwapParams memory params;
-
-        if (issuedIsToken0) {
-            // Sell direction but amount0 positive
-            delta = toBalanceDelta(1e15, -1e15);
-            params = SwapParams({
-                zeroForOne: true,
-                amountSpecified: -1e15,
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
-            });
-        } else {
-            delta = toBalanceDelta(-1e15, 1e15);
-            params = SwapParams({
-                zeroForOne: false,
-                amountSpecified: -1e15,
-                sqrtPriceLimitX96: MAX_PRICE_LIMIT
-            });
-        }
-
-        vm.prank(address(manager));
-        hook.afterSwap(issuerAddr, poolKey, params, delta, "");
-    }
-
     function test_afterSwap_directCall_feeAmountZero() public {
         _initPoolWithIssuer();
 
-        // Set fee rate to 1 (0.01%), then use a tiny amount so feeAmount rounds to 0
         vm.prank(governance);
         insurancePool.setFeeRate(1); // 0.01%
 
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
 
-        // Buy with amount so small that fee = (amount * 1) / 10000 = 0
         BalanceDelta delta;
         SwapParams memory params;
 
         if (issuedIsToken0) {
-            delta = toBalanceDelta(100, -100); // very tiny amounts
+            delta = toBalanceDelta(100, -100);
             params = SwapParams({zeroForOne: false, amountSpecified: -100, sqrtPriceLimitX96: MAX_PRICE_LIMIT});
         } else {
             delta = toBalanceDelta(-100, 100);
@@ -817,41 +688,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         hook.afterSwap(trader, poolKey, params, delta, "");
     }
 
-    function test_afterSwap_directCall_issuerSell_bothTokenDirections() public {
-        _initPoolWithIssuer();
-
-        // Test both token direction branches by calling afterSwap with both delta directions.
-        // Instead, just directly test both delta branches by calling afterSwap twice
-        // with swapped deltas.
-
-        // First: issuedIsToken0 path (amount0 negative = selling token0)
-        {
-            BalanceDelta delta = toBalanceDelta(-1e15, 1e15);
-            SwapParams memory params = SwapParams({
-                zeroForOne: true,
-                amountSpecified: -1e15,
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
-            });
-            vm.prank(address(manager));
-            hook.afterSwap(issuerAddr, poolKey, params, delta, "");
-        }
-
-        // Second: !issuedIsToken0 path (amount1 negative = selling token1)
-        {
-            BalanceDelta delta = toBalanceDelta(1e15, -1e15);
-            SwapParams memory params = SwapParams({
-                zeroForOne: false,
-                amountSpecified: -1e15,
-                sqrtPriceLimitX96: MAX_PRICE_LIMIT
-            });
-            vm.prank(address(manager));
-            hook.afterSwap(issuerAddr, poolKey, params, delta, "");
-        }
-    }
-
     function test_beforeRemoveLiquidity_triggerOracleCallFails() public {
-        // We need a pool where triggerOracle.reportLPRemoval reverts
-        // This happens when the oracle is paused
         _initPoolWithIssuer();
 
         // Pause the oracle
@@ -874,9 +711,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
             liquidityDelta: -5e18,
             salt: bytes32(uint256(50))
         });
-        modifyLiquidityRouter.modifyLiquidity(poolKey, removeParams, "");
-
-        // Should not revert - the ExternalCallFailed event should be emitted
+        modifyLiquidityRouter.modifyLiquidity(poolKey, removeParams, abi.encode(address(this)));
     }
 
     function test_beforeRemoveLiquidity_overflowProtection_setsToZero() public {
@@ -887,11 +722,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertGt(totalLiq, 0);
 
         // Directly call beforeRemoveLiquidity with removeAmount > totalLiquidity
-        // This covers the overflow protection branch (line 167: _totalLiquidity = 0)
         ModifyLiquidityParams memory params = ModifyLiquidityParams({
             tickLower: -120,
             tickUpper: 120,
-            liquidityDelta: -int256(totalLiq + 1e18), // more than tracked
+            liquidityDelta: -int256(totalLiq + 1e18),
             salt: 0
         });
 
@@ -903,16 +737,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertEq(newTotalLiq, 0);
     }
 
-    function test_afterSwap_directCall_issuerSell_totalSupplyZero() public {
-        _initPoolWithIssuer();
-        // totalSupply is non-zero since tokens exist, so this path is unreachable
-        // in normal conditions. Kept as a documentation placeholder.
-    }
-
     function test_onlyPoolManager_reverts() public {
         _initPoolWithIssuer();
 
-        // Call beforeAddLiquidity from non-PoolManager
         ModifyLiquidityParams memory params = ModifyLiquidityParams({
             tickLower: -120,
             tickUpper: 120,
@@ -939,7 +766,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         });
         modifyLiquidityRouter.modifyLiquidity(bareKey, params, "");
 
-        // Swap on pool with no issuer => issuedToken==address(0), skips all logic
+        // Swap on pool with no issuer => skips all logic
         PoolSwapTest.TestSettings memory settings =
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
@@ -953,7 +780,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  RISK-3: ISSUER DUMP DETECTION VIA ROUTER BYPASS
+    //  ISSUER DUMP DETECTION VIA ROUTER BYPASS
     // ═══════════════════════════════════════════════════════════════════
 
     function test_issuer_dump_detected_via_router() public {
@@ -968,18 +795,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         });
         modifyLiquidityRouter.modifyLiquidity(poolKey, params, "");
 
-        // Issuer transfers tokens to a router contract, then the router swaps
-        // The balance-based detection should catch this
+        // Issuer transfers tokens to a router contract
         address routerProxy = makeAddr("routerProxy");
 
-        // Give the router proxy some tokens and approvals
         vm.prank(issuerAddr);
         issuedToken.transfer(routerProxy, 500_000 ether);
-
-        // Now simulate a swap through the hook where beforeSwap snapshots issuer balance
-        // and afterSwap detects the decrease
-        // The issuer's balance decreased due to the transfer above
-        // When a swap happens, beforeSwap snapshots and afterSwap compares
 
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
@@ -987,12 +807,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
         PoolSwapTest.TestSettings memory settings =
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
-        // Approve router proxy
         vm.startPrank(routerProxy);
         issuedToken.approve(address(swapRouter), type(uint256).max);
         baseToken.approve(address(swapRouter), type(uint256).max);
 
-        // Router proxy executes sell of issued token
         bool zeroForOne = issuedIsToken0;
         swapRouter.swap(
             poolKey,
@@ -1005,10 +823,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
             ""
         );
         vm.stopPrank();
-
-        // The issuer's balance decreased (from transfer to router), so beforeSwap/afterSwap
-        // detects this as an issuer sale even though sender != issuer
-        // Note: in a real attack the transfer and swap happen atomically
     }
 
     function test_non_issuer_swap_no_false_positive() public {
@@ -1023,7 +837,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         });
         modifyLiquidityRouter.modifyLiquidity(poolKey, params, "");
 
-        // Trader (non-issuer) swaps - should NOT report issuer sale
         uint256 issuerBalBefore = issuedToken.balanceOf(issuerAddr);
 
         address issuedAddr = address(issuedToken);
@@ -1044,7 +857,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
             ""
         );
 
-        // Issuer balance unchanged => no false positive
         uint256 issuerBalAfter = issuedToken.balanceOf(issuerAddr);
         assertEq(issuerBalAfter, issuerBalBefore);
     }

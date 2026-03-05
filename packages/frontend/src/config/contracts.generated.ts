@@ -5,7 +5,7 @@
 export const LOCAL_CONTRACTS = {
   31337: {
     PoolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
-    BastionHook: "0x0b208040382f66f9b2fa78f38437c1ee328acac0",
+    BastionHook: "0x6d62545c9d05171dcd866e5d93f73384cf1e8ac0",
     EscrowVault: "0x0852e1e05335b6a759ff01d5a9cfddf7e4ab7e6c",
     InsurancePool: "0xcbc3b03cec91562ecb108de3a3a1f6b9f99dd62e",
     TriggerOracle: "0x63e1abb3403e598b439b4f7053c03139af7ecebf",
@@ -16,10 +16,10 @@ export const LOCAL_CONTRACTS = {
 } as const;
 
 export const LOCAL_POOL = {
-  id: "0xc539b13fbb3ed3c61133c65b721722c6658d5c790f33c58e6501283234b4fd1b",
+  id: "0x83a43dd55d9a3e3d231997f12ac4ff279cc0e1662d8f409be7ce93073284378c",
   token0: "0x0000000000000000000000000000000000000000",
   token1: "0x7f380e0f5c12490a9427bf49beec5f4910696be2",
-  hook: "0x0b208040382f66f9b2fa78f38437c1ee328acac0",
+  hook: "0x6d62545c9d05171dcd866e5d93f73384cf1e8ac0",
   isBastion: true,
   issuedToken: "0x7f380e0f5c12490a9427bf49beec5f4910696be2",
   issuer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",

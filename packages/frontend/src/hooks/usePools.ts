@@ -35,9 +35,9 @@ const BASTION_POOLS_QUERY = gql`
       }
       escrow {
         id
-        totalLocked
-        released
-        remaining
+        totalLiquidity
+        removedLiquidity
+        remainingLiquidity
         isTriggered
       }
       insurancePool {
@@ -69,9 +69,9 @@ const ALL_POOLS_QUERY = gql`
       }
       escrow {
         id
-        totalLocked
-        released
-        remaining
+        totalLiquidity
+        removedLiquidity
+        remainingLiquidity
         isTriggered
       }
       insurancePool {
@@ -106,9 +106,9 @@ const POOL_DETAIL_QUERY = gql`
       }
       escrow {
         id
-        totalLocked
-        released
-        remaining
+        totalLiquidity
+        removedLiquidity
+        remainingLiquidity
         isTriggered
         createdAt
         commitment {
@@ -172,9 +172,9 @@ export interface SubgraphPool {
   } | null;
   escrow: {
     id: string;
-    totalLocked: string;
-    released: string;
-    remaining: string;
+    totalLiquidity: string;
+    removedLiquidity: string;
+    remainingLiquidity: string;
     isTriggered: boolean;
     createdAt?: string;
     commitment?: {
@@ -379,7 +379,7 @@ function useLocalPoolOnChain() {
     : { reserve0: null, reserve1: null };
 
   const escrowStatus = data2?.[0]?.status === "success"
-    ? (data2[0].result as { totalLocked: bigint; released: bigint; remaining: bigint; nextUnlockTime: bigint })
+    ? (data2[0].result as { totalLiquidity: bigint; removedLiquidity: bigint; remainingLiquidity: bigint; nextUnlockTime: bigint })
     : null;
 
   const repScore = data2?.[1]?.status === "success" ? Number(data2[1].result) : 0;
@@ -433,9 +433,9 @@ function useLocalPoolOnChain() {
           escrow: escrowStatus
             ? {
                 id: escrowId!.toString(),
-                totalLocked: formatUnits(escrowStatus.totalLocked, 18),
-                released: formatUnits(escrowStatus.released, 18),
-                remaining: formatUnits(escrowStatus.remaining, 18),
+                totalLiquidity: formatUnits(escrowStatus.totalLiquidity, 18),
+                removedLiquidity: formatUnits(escrowStatus.removedLiquidity, 18),
+                remainingLiquidity: formatUnits(escrowStatus.remainingLiquidity, 18),
                 isTriggered: false,
                 createdAt: escrowCreatedAt > 0 ? escrowCreatedAt.toString() : undefined,
                 commitment: escrowCommitment
@@ -477,7 +477,7 @@ export function useBastionPools() {
   const chainId = useChainId();
   const local = useLocalPoolOnChain();
   return useQuery({
-    queryKey: ["bastionPools", chainId, local.pool?.escrow?.totalLocked],
+    queryKey: ["bastionPools", chainId, local.pool?.escrow?.totalLiquidity],
     queryFn: () =>
       chainId === 31337
         ? Promise.resolve({ pools: local.pool ? [local.pool] : [] })
@@ -490,7 +490,7 @@ export function useAllPools() {
   const chainId = useChainId();
   const local = useLocalPoolOnChain();
   return useQuery({
-    queryKey: ["allPools", chainId, local.pool?.escrow?.totalLocked],
+    queryKey: ["allPools", chainId, local.pool?.escrow?.totalLiquidity],
     queryFn: () =>
       chainId === 31337
         ? Promise.resolve({ pools: local.pool ? [local.pool] : [] })
@@ -503,7 +503,7 @@ export function usePool(id: string) {
   const chainId = useChainId();
   const local = useLocalPoolOnChain();
   return useQuery({
-    queryKey: ["pool", id, chainId, local.pool?.escrow?.totalLocked],
+    queryKey: ["pool", id, chainId, local.pool?.escrow?.totalLiquidity],
     queryFn: () =>
       chainId === 31337
         ? Promise.resolve({ pool: id === LOCAL_POOL.id ? local.pool : null })

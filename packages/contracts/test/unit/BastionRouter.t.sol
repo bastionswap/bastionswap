@@ -50,8 +50,6 @@ contract BastionRouterTest is Test, Deployers {
     PoolId public poolId;
     bool public issuedIsToken0;
 
-    uint256 constant ESCROW_AMOUNT = 100 ether;
-
     function setUp() public {
         issuerAddr = makeAddr("issuer");
         trader = makeAddr("trader");
@@ -79,7 +77,7 @@ contract BastionRouterTest is Test, Deployers {
         address insuranceAddr = vm.computeCreateAddress(address(this), nonce + 1);
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
-        escrowVault = new EscrowVault(hookAddr, triggerAddr, insuranceAddr, reputationAddr);
+        escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
 
@@ -107,9 +105,8 @@ contract BastionRouterTest is Test, Deployers {
         issuedToken.mint(trader, 1_000_000 ether);
         baseToken.mint(trader, 1_000_000 ether);
 
-        // Approve LP router (issuer)
+        // Approve LP router (issuer) — no hook approval needed
         vm.startPrank(issuerAddr);
-        issuedToken.approve(address(hook), type(uint256).max);
         issuedToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         vm.stopPrank();
@@ -239,9 +236,6 @@ contract BastionRouterTest is Test, Deployers {
     }
 
     function test_ETHRefund_ExcessReturned() public {
-        // This test verifies the refund mechanism for native ETH pools.
-        // Since our test pool uses ERC20/ERC20 (not ETH), we verify the
-        // refund path directly by sending ETH and checking it's returned.
         vm.deal(trader, 10 ether);
 
         uint256 balBefore = trader.balance;
@@ -287,7 +281,7 @@ contract BastionRouterTest is Test, Deployers {
         });
 
         return abi.encode(
-            issuerAddr, address(issuedToken), ESCROW_AMOUNT, schedule, commitment, triggerConfig
+            issuerAddr, address(issuedToken), schedule, commitment, triggerConfig
         );
     }
 }

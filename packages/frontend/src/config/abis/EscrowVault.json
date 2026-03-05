@@ -13,11 +13,6 @@
         "internalType": "address"
       },
       {
-        "name": "insurancePool",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "reputationEngine",
         "type": "address",
         "internalType": "address"
@@ -28,19 +23,6 @@
   {
     "type": "function",
     "name": "BASTION_HOOK",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "INSURANCE_POOL",
     "inputs": [],
     "outputs": [
       {
@@ -92,7 +74,7 @@
   },
   {
     "type": "function",
-    "name": "calculateVestedAmount",
+    "name": "calculateVestedLiquidity",
     "inputs": [
       {
         "name": "escrowId",
@@ -103,8 +85,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
+        "type": "uint128",
+        "internalType": "uint128"
       }
     ],
     "stateMutability": "view"
@@ -124,14 +106,9 @@
         "internalType": "address"
       },
       {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "liquidity",
+        "type": "uint128",
+        "internalType": "uint128"
       },
       {
         "name": "vestingSchedule",
@@ -240,19 +217,19 @@
         "internalType": "struct IEscrowVault.EscrowStatus",
         "components": [
           {
-            "name": "totalLocked",
-            "type": "uint256",
-            "internalType": "uint256"
+            "name": "totalLiquidity",
+            "type": "uint128",
+            "internalType": "uint128"
           },
           {
-            "name": "released",
-            "type": "uint256",
-            "internalType": "uint256"
+            "name": "removedLiquidity",
+            "type": "uint128",
+            "internalType": "uint128"
           },
           {
-            "name": "remaining",
-            "type": "uint256",
-            "internalType": "uint256"
+            "name": "remainingLiquidity",
+            "type": "uint128",
+            "internalType": "uint128"
           },
           {
             "name": "nextUnlockTime",
@@ -260,6 +237,25 @@
             "internalType": "uint40"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getRemovableLiquidity",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint128",
+        "internalType": "uint128"
       }
     ],
     "stateMutability": "view"
@@ -392,21 +388,20 @@
   },
   {
     "type": "function",
-    "name": "releaseVested",
+    "name": "recordLPRemoval",
     "inputs": [
       {
         "name": "escrowId",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ],
-    "outputs": [
+      },
       {
-        "name": "releasedAmount",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "liquidityRemoved",
+        "type": "uint128",
+        "internalType": "uint128"
       }
     ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -446,7 +441,7 @@
   },
   {
     "type": "function",
-    "name": "triggerRedistribution",
+    "name": "triggerLockdown",
     "inputs": [
       {
         "name": "escrowId",
@@ -459,13 +454,7 @@
         "internalType": "uint8"
       }
     ],
-    "outputs": [
-      {
-        "name": "redistributedAmount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -527,10 +516,10 @@
         "internalType": "address"
       },
       {
-        "name": "amount",
-        "type": "uint256",
+        "name": "liquidity",
+        "type": "uint128",
         "indexed": false,
-        "internalType": "uint256"
+        "internalType": "uint128"
       }
     ],
     "anonymous": false
@@ -556,7 +545,26 @@
   },
   {
     "type": "event",
-    "name": "Redistributed",
+    "name": "LPRemovalRecorded",
+    "inputs": [
+      {
+        "name": "escrowId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "liquidityRemoved",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Lockdown",
     "inputs": [
       {
         "name": "escrowId",
@@ -569,31 +577,6 @@
         "type": "uint8",
         "indexed": true,
         "internalType": "uint8"
-      },
-      {
-        "name": "redistributedAmount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "VestedReleased",
-    "inputs": [
-      {
-        "name": "escrowId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "releasedAmount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false

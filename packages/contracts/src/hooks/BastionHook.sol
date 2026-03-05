@@ -16,7 +16,6 @@ import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
 import {InsurancePool} from "../core/InsurancePool.sol";
 import {ITriggerOracle} from "../interfaces/ITriggerOracle.sol";
-import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 import {TriggerOracle} from "../core/TriggerOracle.sol";
@@ -26,7 +25,6 @@ import {TriggerOracle} from "../core/TriggerOracle.sol";
 ///         Intercepts pool lifecycle events to enforce escrow locking,
 ///         insurance fee collection, and rug-pull protection.
 contract BastionHook is BaseTestHooks {
-    using SafeTransferLib for ERC20;
     using PoolIdLibrary for PoolKey;
 
     // ─── Immutables ───────────────────────────────────────────────────
@@ -51,6 +49,9 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => token address that is the "issued" token (non-base asset)
     mapping(PoolId => address) internal _issuedTokens;
 
+    /// @dev poolId => router address that created the issuer's LP position
+    mapping(PoolId => address) internal _issuerLPOwner;
+
     /// @dev Cached insurance fee rate (basis points) to avoid cross-contract call
     uint16 internal _cachedFeeRate;
 
@@ -58,6 +59,8 @@ contract BastionHook is BaseTestHooks {
 
     error OnlyPoolManager();
     error InvalidHookData();
+    error ExceedsVestedAmount(uint128 requested, uint128 removable);
+    error MustIdentifyUser();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -118,11 +121,11 @@ contract BastionHook is BaseTestHooks {
     // ═══════════════════════════════════════════════════════════════════
 
     /// @notice Called before liquidity is added. First LP provider becomes the issuer
-    ///         and their funds are routed to EscrowVault.
+    ///         and their LP is registered in EscrowVault.
     /// @dev hookData encoding for issuer's first LP:
-    ///      abi.encode(issuer, token, amount, vestingSchedule, commitment, triggerConfig)
+    ///      abi.encode(issuer, token, vestingSchedule, commitment, triggerConfig)
     function beforeAddLiquidity(
-        address,
+        address sender,
         PoolKey calldata key,
         ModifyLiquidityParams calldata params,
         bytes calldata hookData
@@ -131,7 +134,7 @@ contract BastionHook is BaseTestHooks {
 
         // If no issuer registered yet, this is the first LP → register as issuer
         if (_issuers[poolId] == address(0) && hookData.length > 0) {
-            _registerIssuerAndCreateEscrow(poolId, key, hookData);
+            _registerIssuerAndCreateEscrow(poolId, key, sender, uint128(uint256(int256(params.liquidityDelta))), hookData);
         }
 
         // Track total liquidity
@@ -150,12 +153,12 @@ contract BastionHook is BaseTestHooks {
         return IHooks.beforeAddLiquidity.selector;
     }
 
-    /// @notice Called before liquidity is removed. Reports LP removal to TriggerOracle.
+    /// @notice Called before liquidity is removed. Enforces vesting for issuer's LP.
     function beforeRemoveLiquidity(
-        address,
+        address sender,
         PoolKey calldata key,
         ModifyLiquidityParams calldata params,
-        bytes calldata
+        bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4) {
         PoolId poolId = key.toId();
         uint256 removeAmount = params.liquidityDelta < 0
@@ -163,6 +166,28 @@ contract BastionHook is BaseTestHooks {
             : 0;
 
         if (removeAmount > 0) {
+            address issuer = _issuers[poolId];
+
+            // Enforce vesting if this pool has an escrow
+            if (issuer != address(0) && sender == _issuerLPOwner[poolId]) {
+                // This removal is from the issuer's LP position (same router that created it)
+                if (hookData.length == 0) revert MustIdentifyUser();
+
+                address user = abi.decode(hookData, (address));
+                if (user == issuer) {
+                    // Issuer is removing LP — enforce vesting
+                    uint256 escrowId = _escrowIds[poolId];
+                    uint128 liquidityToRemove = uint128(removeAmount);
+                    uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
+                    if (liquidityToRemove > removable) {
+                        revert ExceedsVestedAmount(liquidityToRemove, removable);
+                    }
+                    escrowVault.recordLPRemoval(escrowId, liquidityToRemove);
+                }
+                // else: non-issuer using same router → allow
+            }
+            // else: different router or no escrow → allow
+
             uint256 totalLP = _totalLiquidity[poolId];
 
             // Update tracked liquidity before external call (CEI pattern)
@@ -173,7 +198,7 @@ contract BastionHook is BaseTestHooks {
             }
 
             // Report LP removal to TriggerOracle (for all LPs, but especially issuers)
-            if (_issuers[poolId] != address(0) && totalLP > 0) {
+            if (issuer != address(0) && totalLP > 0) {
                 try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
                     emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
                 }
@@ -210,7 +235,6 @@ contract BastionHook is BaseTestHooks {
 
     /// @notice Called after a swap. Deposits insurance fee on buys and
     ///         reports issuer sales to TriggerOracle.
-    ///         Reads issuedToken, issuer, and preSwapBalance from transient storage (set in beforeSwap).
     function afterSwap(
         address,
         PoolKey calldata key,
@@ -219,7 +243,6 @@ contract BastionHook is BaseTestHooks {
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, int128) {
         PoolId poolId = key.toId();
-        // Read from transient storage (set by beforeSwap in same tx)
         address issuedToken = address(uint160(_tload(_issuedTokenSlot(poolId))));
 
         if (issuedToken != address(0)) {
@@ -287,37 +310,35 @@ contract BastionHook is BaseTestHooks {
     function _registerIssuerAndCreateEscrow(
         PoolId poolId,
         PoolKey calldata,
+        address sender,
+        uint128 liquidity,
         bytes calldata hookData
     ) internal {
-        // Decode hookData — issuer address is explicitly provided
+        // Decode hookData — no escrow amount, liquidity comes from params
         (
             address issuer,
             address token,
-            uint256 amount,
             IEscrowVault.VestingStep[] memory vestingSchedule,
             IEscrowVault.IssuerCommitment memory commitment,
             ITriggerOracle.TriggerConfig memory triggerConfig
         ) = abi.decode(
             hookData,
-            (address, address, uint256, IEscrowVault.VestingStep[], IEscrowVault.IssuerCommitment, ITriggerOracle.TriggerConfig)
+            (address, address, IEscrowVault.VestingStep[], IEscrowVault.IssuerCommitment, ITriggerOracle.TriggerConfig)
         );
 
         // Register issuer
         _issuers[poolId] = issuer;
         _issuedTokens[poolId] = token;
+        _issuerLPOwner[poolId] = sender; // Store the router that created issuer's LP
 
         // Initialize cached fee rate on first pool creation
         if (_cachedFeeRate == 0) {
             _cachedFeeRate = insurancePool.feeRate();
         }
 
-        // Pull tokens from issuer (who must have approved this hook) and approve to EscrowVault
-        ERC20(token).safeTransferFrom(issuer, address(this), amount);
-        ERC20(token).safeApprove(address(escrowVault), amount);
-
-        // Create escrow
+        // Create escrow — no token transfers, just record liquidity
         uint256 escrowId = escrowVault.createEscrow(
-            poolId, issuer, token, amount, vestingSchedule, commitment
+            poolId, issuer, liquidity, vestingSchedule, commitment
         );
         _escrowIds[poolId] = escrowId;
 
@@ -329,7 +350,7 @@ contract BastionHook is BaseTestHooks {
         try reputationEngine.recordEvent(
             issuer,
             IReputationEngine.EventType.POOL_CREATED,
-            abi.encode(token, amount, commitment, escrowId)
+            abi.encode(token, uint256(liquidity), commitment, escrowId)
         ) {} catch {
             emit ExternalCallFailed("ReputationEngine.recordEvent", poolId);
         }
@@ -339,16 +360,12 @@ contract BastionHook is BaseTestHooks {
     }
 
     /// @dev Determine if a swap is a "buy" of the issued token.
-    ///      Buy = the swapper receives the issued token.
     function _isBuySwap(
         PoolKey calldata key,
         SwapParams calldata params,
         address issuedToken
     ) internal pure returns (bool) {
         bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
-        // zeroForOne = selling token0 for token1
-        // If issued token is token0: buy = !zeroForOne (swapper gets token0)
-        // If issued token is token1: buy = zeroForOne (swapper gets token1)
         return issuedIsToken0 ? !params.zeroForOne : params.zeroForOne;
     }
 
@@ -363,28 +380,20 @@ contract BastionHook is BaseTestHooks {
         uint256 cachedFee = _cachedFeeRate;
         if (cachedFee == 0) return;
 
-        // Get the amount of base asset spent (the non-issued token)
-        // In a buy: swapper sends base asset, receives issued token
         bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
         int128 baseAmount;
         if (issuedIsToken0) {
-            // base asset is token1, swapper sends token1 (negative delta = owes)
             baseAmount = delta.amount1();
         } else {
-            // base asset is token0, swapper sends token0 (negative delta = owes)
             baseAmount = delta.amount0();
         }
 
-        // baseAmount is negative (swapper owes), so negate
         if (baseAmount >= 0) return;
         uint256 absBaseAmount = uint256(uint128(int128(-baseAmount)));
 
         uint256 feeAmount = (absBaseAmount * cachedFee) / 10_000;
         if (feeAmount == 0) return;
 
-        // The fee is deposited as ETH to InsurancePool
-        // In a real deployment, the hook would take from the pool's balance.
-        // For now, we emit the event and try to forward ETH if available.
         if (address(this).balance >= feeAmount) {
             insurancePool.depositFee{value: feeAmount}(poolId);
             emit InsuranceFeeDeposited(poolId, feeAmount);

@@ -4,10 +4,10 @@ pragma solidity =0.8.26;
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 /// @title IEscrowVault
-/// @notice Manages time-locked and condition-based vesting of token issuer LP funds.
-///         Issuer liquidity is automatically escrowed upon pool creation and released
-///         according to a predefined vesting schedule. If an on-chain trigger event occurs,
-///         remaining escrowed funds are redistributed pro-rata to token holders.
+/// @notice LP removal permission manager. Records how much liquidity the issuer added
+///         and controls how much they can remove based on the vesting schedule.
+///         No tokens or ETH are held by the vault. BastionHook's beforeRemoveLiquidity
+///         is the enforcement point.
 interface IEscrowVault {
     // ─── Structs ──────────────────────────────────────────────────────
 
@@ -23,21 +23,21 @@ interface IEscrowVault {
 
     /// @notice Defines a single step in a vesting schedule.
     /// @param timeOffset Seconds after escrow creation when this tranche unlocks
-    /// @param basisPoints Cumulative percentage (basis points, max 10_000) of total escrowed amount released
+    /// @param basisPoints Cumulative percentage (basis points, max 10_000) of total escrowed liquidity released
     struct VestingStep {
         uint40 timeOffset;
         uint16 basisPoints;
     }
 
     /// @notice Full status snapshot of an escrow position.
-    /// @param totalLocked Original amount deposited into escrow
-    /// @param released Cumulative amount already released to the issuer
-    /// @param remaining Amount still locked in escrow
+    /// @param totalLiquidity Original liquidity amount locked
+    /// @param removedLiquidity Cumulative liquidity already removed by the issuer
+    /// @param remainingLiquidity Liquidity still locked
     /// @param nextUnlockTime Timestamp of the next vesting tranche unlock (0 if fully vested)
     struct EscrowStatus {
-        uint256 totalLocked;
-        uint256 released;
-        uint256 remaining;
+        uint128 totalLiquidity;
+        uint128 removedLiquidity;
+        uint128 remainingLiquidity;
         uint40 nextUnlockTime;
     }
 
@@ -47,19 +47,18 @@ interface IEscrowVault {
     /// @param escrowId Unique identifier for the escrow
     /// @param poolId Uniswap V4 pool identifier
     /// @param issuer Address of the token issuer
-    /// @param amount Total amount locked
-    event EscrowCreated(uint256 indexed escrowId, PoolId indexed poolId, address indexed issuer, uint256 amount);
+    /// @param liquidity Total liquidity locked
+    event EscrowCreated(uint256 indexed escrowId, PoolId indexed poolId, address indexed issuer, uint128 liquidity);
 
-    /// @notice Emitted when vested funds are released to the issuer.
+    /// @notice Emitted when LP removal is recorded for the issuer.
     /// @param escrowId Escrow identifier
-    /// @param releasedAmount Amount released in this transaction
-    event VestedReleased(uint256 indexed escrowId, uint256 releasedAmount);
+    /// @param liquidityRemoved Amount of liquidity removed in this transaction
+    event LPRemovalRecorded(uint256 indexed escrowId, uint128 liquidityRemoved);
 
-    /// @notice Emitted when escrowed funds are redistributed due to a trigger event.
+    /// @notice Emitted when escrow is locked down due to a trigger event.
     /// @param escrowId Escrow identifier
-    /// @param triggerType Type of trigger that caused the redistribution
-    /// @param redistributedAmount Total amount redistributed to holders
-    event Redistributed(uint256 indexed escrowId, uint8 indexed triggerType, uint256 redistributedAmount);
+    /// @param triggerType Type of trigger that caused the lockdown
+    event Lockdown(uint256 indexed escrowId, uint8 indexed triggerType);
 
     /// @notice Emitted when an issuer updates their commitment to stricter values.
     /// @param escrowId Escrow identifier
@@ -68,42 +67,42 @@ interface IEscrowVault {
 
     // ─── Functions ────────────────────────────────────────────────────
 
-    /// @notice Creates a new escrow position for an issuer's LP funds.
+    /// @notice Creates a new escrow position recording the issuer's LP liquidity.
     /// @param poolId Uniswap V4 pool identifier
     /// @param issuer Address of the token issuer whose LP is being escrowed
-    /// @param token Address of the ERC20 token to escrow
-    /// @param amount Total amount of tokens to lock
+    /// @param liquidity Total liquidity amount to lock
     /// @param vestingSchedule Ordered array of vesting steps defining the release schedule
     /// @param commitment Issuer's up-front commitment parameters
     /// @return escrowId Unique identifier for the newly created escrow
     function createEscrow(
         PoolId poolId,
         address issuer,
-        address token,
-        uint256 amount,
+        uint128 liquidity,
         VestingStep[] calldata vestingSchedule,
         IssuerCommitment calldata commitment
     ) external returns (uint256 escrowId);
 
-    /// @notice Releases all currently vested funds to the issuer.
-    /// @dev Reverts if no funds are available for release.
+    /// @notice Records an LP removal by the issuer. Called by BastionHook.
+    /// @dev Enforces daily withdraw limits and updates removedLiquidity.
     /// @param escrowId Identifier of the escrow position
-    /// @return releasedAmount Amount of funds released in this call
-    function releaseVested(uint256 escrowId) external returns (uint256 releasedAmount);
+    /// @param liquidityRemoved Amount of liquidity being removed
+    function recordLPRemoval(uint256 escrowId, uint128 liquidityRemoved) external;
 
-    /// @notice Redistributes remaining escrowed funds to token holders after a trigger event.
+    /// @notice Returns the amount of liquidity the issuer can currently remove.
+    /// @param escrowId Identifier of the escrow position
+    /// @return removable Amount of liquidity removable right now
+    function getRemovableLiquidity(uint256 escrowId) external view returns (uint128 removable);
+
+    /// @notice Locks down the escrow due to a trigger event. No LP removal allowed after this.
     /// @dev Can only be called by the TriggerOracle.
     /// @param escrowId Identifier of the escrow position
     /// @param triggerType The type of trigger event that occurred
-    /// @return redistributedAmount Total amount redistributed
-    function triggerRedistribution(uint256 escrowId, uint8 triggerType)
-        external
-        returns (uint256 redistributedAmount);
+    function triggerLockdown(uint256 escrowId, uint8 triggerType) external;
 
-    /// @notice Calculates the total amount vested so far for an escrow.
+    /// @notice Calculates the total liquidity vested so far for an escrow.
     /// @param escrowId Identifier of the escrow position
-    /// @return vestedAmount Cumulative amount vested (before subtracting released)
-    function calculateVestedAmount(uint256 escrowId) external view returns (uint256 vestedAmount);
+    /// @return vestedLiquidity Cumulative liquidity vested (before subtracting removed)
+    function calculateVestedLiquidity(uint256 escrowId) external view returns (uint128 vestedLiquidity);
 
     /// @notice Updates the issuer's commitment to stricter values only.
     /// @param escrowId Identifier of the escrow position
@@ -112,12 +111,12 @@ interface IEscrowVault {
 
     /// @notice Returns the current status of an escrow position.
     /// @param escrowId Identifier of the escrow position
-    /// @return status Full status snapshot including locked, released, remaining amounts and next unlock
+    /// @return status Full status snapshot including liquidity amounts and next unlock
     function getEscrowStatus(uint256 escrowId) external view returns (EscrowStatus memory status);
 
-    /// @notice Checks whether an escrow position is fully vested (all funds released).
+    /// @notice Checks whether an escrow position is fully vested (all liquidity removed).
     /// @param poolId Uniswap V4 pool identifier
-    /// @return True if the escrow's releasedAmount equals its totalAmount
+    /// @return True if the escrow's removedLiquidity equals its totalLiquidity
     function isFullyVested(PoolId poolId) external view returns (bool);
 
     /// @notice Returns the timestamp when the last vesting tranche unlocks.
@@ -148,9 +147,6 @@ interface IEscrowVault {
     function getEscrowInfo(uint256 escrowId) external view returns (uint40 createdAt, IssuerCommitment memory commitment);
 
     /// @notice Returns a proportional strictness score (0..200) for reputation scoring.
-    /// @dev Measures how much stricter the custom schedule is compared to default.
-    ///      At each default milestone, computes (defaultBps - customBps)/defaultBps.
-    ///      Also includes duration bonus for schedules longer than 90 days.
     /// @param escrowId Identifier of the escrow position
     /// @return score 0 = default or looser, up to 200 = maximum strictness
     function getVestingStrictnessScore(uint256 escrowId) external view returns (uint256 score);

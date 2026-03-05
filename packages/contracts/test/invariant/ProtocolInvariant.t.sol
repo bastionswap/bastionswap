@@ -28,7 +28,6 @@ contract MockERC20Token is ERC20 {
 contract ProtocolHandler is Test {
     EscrowVault public vault;
     InsurancePool public pool;
-    MockERC20Token public token;
 
     address public hook;
     address public oracle;
@@ -37,7 +36,7 @@ contract ProtocolHandler is Test {
 
     // Fixed escrow parameters
     uint256 public constant NUM_POOLS = 5;
-    uint256 public constant ESCROW_AMOUNT = 100 ether;
+    uint128 public constant ESCROW_LIQUIDITY = 100e18;
 
     // Escrow state tracking
     uint256[] public escrowIds;
@@ -45,17 +44,16 @@ contract ProtocolHandler is Test {
     address[] public issuers;
 
     // Ghost variables for invariant verification
-    uint256 public ghost_totalLocked;
-    uint256 public ghost_totalReleased;
-    uint256 public ghost_totalRedistributed;
+    uint128 public ghost_totalLocked;
+    uint128 public ghost_totalRemoved;
     uint256 public ghost_totalFeeDeposited;
     uint256 public ghost_totalClaimed;
     mapping(uint256 => bool) public ghost_escrowTriggered;
-    mapping(uint256 => uint256) public ghost_escrowReleased;
+    mapping(uint256 => uint128) public ghost_escrowRemoved;
     mapping(bytes32 => bool) public ghost_poolTriggered;
     mapping(bytes32 => uint256) public ghost_poolTriggerCount;
-    uint256 public ghost_releaseAfterTriggerAttempts;
-    bool public ghost_releaseAfterTriggerSucceeded;
+    uint256 public ghost_removalAfterTriggerAttempts;
+    bool public ghost_removalAfterTriggerSucceeded;
 
     // Claim tracking
     mapping(bytes32 => uint256) public ghost_poolTotalClaimed;
@@ -64,7 +62,6 @@ contract ProtocolHandler is Test {
     constructor(
         EscrowVault _vault,
         InsurancePool _pool,
-        MockERC20Token _token,
         address _hook,
         address _oracle,
         address _insuranceAddr,
@@ -72,7 +69,6 @@ contract ProtocolHandler is Test {
     ) {
         vault = _vault;
         pool = _pool;
-        token = _token;
         hook = _hook;
         oracle = _oracle;
         insuranceAddr = _insuranceAddr;
@@ -86,10 +82,6 @@ contract ProtocolHandler is Test {
             poolIds.push(poolId);
             issuers.push(issuer);
 
-            token.mint(hook, ESCROW_AMOUNT);
-            vm.prank(hook);
-            token.approve(address(vault), type(uint256).max);
-
             IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
             schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 2000});
             schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 5000});
@@ -102,10 +94,10 @@ contract ProtocolHandler is Test {
             });
 
             vm.prank(hook);
-            uint256 escrowId = vault.createEscrow(poolId, issuer, address(token), ESCROW_AMOUNT, schedule, commitment);
+            uint256 escrowId = vault.createEscrow(poolId, issuer, ESCROW_LIQUIDITY, schedule, commitment);
             escrowIds.push(escrowId);
 
-            ghost_totalLocked += ESCROW_AMOUNT;
+            ghost_totalLocked += ESCROW_LIQUIDITY;
         }
 
         // Fund insurance pool for each pool
@@ -124,35 +116,37 @@ contract ProtocolHandler is Test {
         vm.warp(block.timestamp + secs);
     }
 
-    function releaseVested(uint256 poolIndex) external {
+    function recordLPRemoval(uint256 poolIndex, uint128 amount) external {
         poolIndex = bound(poolIndex, 0, NUM_POOLS - 1);
         uint256 escrowId = escrowIds[poolIndex];
-        address issuer = issuers[poolIndex];
 
         if (ghost_escrowTriggered[escrowId]) {
-            ghost_releaseAfterTriggerAttempts++;
+            ghost_removalAfterTriggerAttempts++;
         }
 
-        vm.prank(issuer);
-        try vault.releaseVested(escrowId) returns (uint256 amt) {
-            ghost_totalReleased += amt;
-            ghost_escrowReleased[escrowId] += amt;
+        uint128 removable = vault.getRemovableLiquidity(escrowId);
+        amount = uint128(bound(amount, 0, removable));
+        if (amount == 0) return;
+
+        vm.prank(hook);
+        try vault.recordLPRemoval(escrowId, amount) {
+            ghost_totalRemoved += amount;
+            ghost_escrowRemoved[escrowId] += amount;
 
             if (ghost_escrowTriggered[escrowId]) {
-                ghost_releaseAfterTriggerSucceeded = true;
+                ghost_removalAfterTriggerSucceeded = true;
             }
         } catch {}
     }
 
-    function triggerRedistribution(uint256 poolIndex) external {
+    function triggerLockdown(uint256 poolIndex) external {
         poolIndex = bound(poolIndex, 0, NUM_POOLS - 1);
         uint256 escrowId = escrowIds[poolIndex];
         bytes32 poolKey = PoolId.unwrap(poolIds[poolIndex]);
 
         vm.prank(oracle);
-        try vault.triggerRedistribution(escrowId, 1) returns (uint256 redistributed) {
+        try vault.triggerLockdown(escrowId, 1) {
             ghost_escrowTriggered[escrowId] = true;
-            ghost_totalRedistributed += redistributed;
             ghost_poolTriggerCount[poolKey]++;
         } catch {}
     }
@@ -217,7 +211,6 @@ contract ProtocolHandler is Test {
 contract ProtocolInvariantTest is Test {
     EscrowVault public vault;
     InsurancePool public pool;
-    MockERC20Token public token;
     ProtocolHandler public handler;
 
     address public hook;
@@ -230,27 +223,26 @@ contract ProtocolInvariantTest is Test {
         oracle = makeAddr("oracle");
         governance = makeAddr("governance");
 
-        token = new MockERC20Token();
-        vault = new EscrowVault(hook, oracle, address(0), address(new MockRepEngine()));
+        vault = new EscrowVault(hook, oracle, address(new MockRepEngine()));
 
         // InsurancePool: hook deposits fees, oracle triggers payouts
         pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
         insuranceAddr = address(pool);
 
-        handler = new ProtocolHandler(vault, pool, token, hook, oracle, insuranceAddr, governance);
+        handler = new ProtocolHandler(vault, pool, hook, oracle, insuranceAddr, governance);
 
         targetContract(address(handler));
     }
 
-    // ─── Invariant 1: totalLocked >= releasedAmount for every escrow ──
+    // ─── Invariant 1: totalLiquidity >= removedLiquidity for every escrow ──
 
-    function invariant_escrowLockedGeReleased() public view {
+    function invariant_escrowLiquidityGeRemoved() public view {
         for (uint256 i; i < handler.NUM_POOLS(); ++i) {
             uint256 escrowId = handler.escrowIds(i);
             if (handler.ghost_escrowTriggered(escrowId)) continue;
 
             IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
-            assert(status.totalLocked >= status.released);
+            assert(status.totalLiquidity >= status.removedLiquidity);
         }
     }
 
@@ -260,16 +252,14 @@ contract ProtocolInvariantTest is Test {
         for (uint256 i; i < handler.NUM_POOLS(); ++i) {
             PoolId poolId = handler.poolIds(i);
             IInsurancePool.PoolStatus memory status = pool.getPoolStatus(poolId);
-            // balance is uint256 so always >= 0, but verify it's not underflowed
-            // by checking address(pool).balance >= sum of all pool balances
             assert(status.balance <= address(pool).balance);
         }
     }
 
-    // ─── Invariant 3: No release after trigger ────────────────────────
+    // ─── Invariant 3: No removal after trigger ────────────────────────
 
-    function invariant_noReleaseAfterTrigger() public view {
-        assert(!handler.ghost_releaseAfterTriggerSucceeded());
+    function invariant_noRemovalAfterTrigger() public view {
+        assert(!handler.ghost_removalAfterTriggerSucceeded());
     }
 
     // ─── Invariant 4: Max 1 trigger per pool (escrow side) ───────────
@@ -281,14 +271,10 @@ contract ProtocolInvariantTest is Test {
         }
     }
 
-    // ─── Invariant 5: Token balance conservation (EscrowVault) ───────
+    // ─── Invariant 5: Vault holds no assets ───────────────────────────
 
-    function invariant_escrowTokenConservation() public view {
-        uint256 vaultBalance = token.balanceOf(address(vault));
-        uint256 expectedInVault = handler.ghost_totalLocked()
-            - handler.ghost_totalReleased()
-            - handler.ghost_totalRedistributed();
-        assertEq(vaultBalance, expectedInVault);
+    function invariant_vaultHoldsNoAssets() public view {
+        assertEq(address(vault).balance, 0);
     }
 
     // ─── Invariant 6: ETH conservation (InsurancePool) ───────────────
@@ -312,15 +298,15 @@ contract ProtocolInvariantTest is Test {
         }
     }
 
-    // ─── Invariant 8: Released amount matches ghost tracking ─────────
+    // ─── Invariant 8: Removed amount matches ghost tracking ─────────
 
-    function invariant_releasedMatchesGhost() public view {
+    function invariant_removedMatchesGhost() public view {
         for (uint256 i; i < handler.NUM_POOLS(); ++i) {
             uint256 escrowId = handler.escrowIds(i);
             if (handler.ghost_escrowTriggered(escrowId)) continue;
 
             IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
-            assertEq(status.released, handler.ghost_escrowReleased(escrowId));
+            assertEq(status.removedLiquidity, handler.ghost_escrowRemoved(escrowId));
         }
     }
 }
@@ -332,53 +318,38 @@ contract ProtocolInvariantTest is Test {
 contract EconomicHandler is Test {
     EscrowVault public vault;
     InsurancePool public pool;
-    MockERC20Token public token;
 
     address public hook;
     address public oracle;
-    address public insuranceAddr;
 
     uint256 public escrowId;
     PoolId public poolId;
     address public issuer;
-    uint256 public escrowAmount;
+    uint128 public escrowLiquidity;
 
-    // Ghost: track what issuer actually received
-    uint256 public ghost_issuerReceived;
-    // Ghost: track what went to insurance (redistributed from escrow)
-    uint256 public ghost_insuranceFromEscrow;
+    // Ghost: track total LP removed by issuer
+    uint128 public ghost_totalRemoved;
     // Ghost: track fee deposits to insurance
     uint256 public ghost_insuranceFees;
-    // Ghost: total holder losses (approximated as redistributed amount)
-    uint256 public ghost_holderLossCovered;
 
     bool public ghost_triggered;
 
     constructor(
         EscrowVault _vault,
         InsurancePool _pool,
-        MockERC20Token _token,
         address _hook,
         address _oracle,
-        address _insuranceAddr,
-        uint256 _amount
+        uint128 _liquidity
     ) {
         vault = _vault;
         pool = _pool;
-        token = _token;
         hook = _hook;
         oracle = _oracle;
-        insuranceAddr = _insuranceAddr;
-        escrowAmount = _amount;
+        escrowLiquidity = _liquidity;
 
         issuer = makeAddr("econ_issuer");
         poolId = PoolId.wrap(bytes32(uint256(0xECECEC)));
         escrowId = uint256(keccak256(abi.encode(poolId, issuer)));
-
-        // Create escrow
-        token.mint(hook, _amount);
-        vm.prank(hook);
-        token.approve(address(vault), type(uint256).max);
 
         IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
         schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 2000});
@@ -392,7 +363,7 @@ contract EconomicHandler is Test {
         });
 
         vm.prank(hook);
-        vault.createEscrow(poolId, issuer, address(token), _amount, schedule, commitment);
+        vault.createEscrow(poolId, issuer, _liquidity, schedule, commitment);
 
         // Fund insurance pool
         vm.deal(hook, 5 ether);
@@ -406,21 +377,25 @@ contract EconomicHandler is Test {
         vm.warp(block.timestamp + secs);
     }
 
-    function releaseVested() external {
+    function recordLPRemoval(uint128 amount) external {
         if (ghost_triggered) return;
-        vm.prank(issuer);
-        try vault.releaseVested(escrowId) returns (uint256 amt) {
-            ghost_issuerReceived += amt;
+
+        uint128 removable = vault.getRemovableLiquidity(escrowId);
+        amount = uint128(bound(amount, 0, removable));
+        if (amount == 0) return;
+
+        vm.prank(hook);
+        try vault.recordLPRemoval(escrowId, amount) {
+            ghost_totalRemoved += amount;
         } catch {}
     }
 
-    function triggerAndRedistribute() external {
+    function triggerLockdown() external {
         if (ghost_triggered) return;
 
         vm.prank(oracle);
-        try vault.triggerRedistribution(escrowId, 1) returns (uint256 redistributed) {
+        try vault.triggerLockdown(escrowId, 1) {
             ghost_triggered = true;
-            ghost_insuranceFromEscrow = redistributed;
         } catch {}
     }
 
@@ -436,64 +411,57 @@ contract EconomicHandler is Test {
 contract EconomicInvariantTest is Test {
     EscrowVault public vault;
     InsurancePool public pool;
-    MockERC20Token public token;
     EconomicHandler public handler;
 
     address public hook;
     address public oracle;
     address public governance;
-    uint256 constant AMOUNT = 200 ether;
+    uint128 constant LIQUIDITY = 200e18;
 
     function setUp() public {
         hook = makeAddr("hook");
         oracle = makeAddr("oracle");
         governance = makeAddr("governance");
 
-        token = new MockERC20Token();
-        vault = new EscrowVault(hook, oracle, address(0), address(new MockRepEngine()));
+        vault = new EscrowVault(hook, oracle, address(new MockRepEngine()));
         pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
 
-        handler = new EconomicHandler(vault, pool, token, hook, oracle, address(pool), AMOUNT);
+        handler = new EconomicHandler(vault, pool, hook, oracle, LIQUIDITY);
 
         targetContract(address(handler));
     }
 
-    /// @dev Issuer can never extract more than the escrow amount
-    function invariant_issuerCantExceedEscrowAmount() public view {
-        assert(handler.ghost_issuerReceived() <= AMOUNT);
+    /// @dev Issuer can never remove more LP than the total liquidity
+    function invariant_issuerCantExceedLiquidity() public view {
+        assert(handler.ghost_totalRemoved() <= LIQUIDITY);
     }
 
-    /// @dev If trigger fires with remaining funds, issuer gets less than full amount (scam cost > 0)
-    function invariant_triggerReducesIssuerGains() public view {
+    /// @dev If trigger fires, issuer can't remove any more LP
+    function invariant_triggerBlocksRemoval() public view {
         if (!handler.ghost_triggered()) return;
-        // If escrow had remaining funds at trigger time, issuer got less than total
-        uint256 redistributed = handler.ghost_insuranceFromEscrow();
-        if (redistributed > 0) {
-            assert(handler.ghost_issuerReceived() < AMOUNT);
+        uint128 removable = vault.getRemovableLiquidity(handler.escrowId());
+        assertEq(removable, 0);
+    }
+
+    /// @dev removed + remaining = total liquidity (conservation)
+    ///      After lockdown, remainingLiquidity is reported as 0 (locked), so the
+    ///      invariant becomes: removedLiquidity <= totalLiquidity.
+    function invariant_liquidityConservation() public view {
+        IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(handler.escrowId());
+        if (handler.ghost_triggered()) {
+            // After lockdown: remaining is 0, removed <= total
+            assertEq(status.remainingLiquidity, 0);
+            assertLe(status.removedLiquidity, status.totalLiquidity);
+        } else {
+            // Normal: removed + remaining = total
+            assertEq(uint256(status.removedLiquidity) + uint256(status.remainingLiquidity), uint256(status.totalLiquidity));
         }
-        // Either way, issuer never gets more than the total
-        assert(handler.ghost_issuerReceived() <= AMOUNT);
-    }
-
-    /// @dev After trigger, redistributed + issued = total locked
-    function invariant_triggerConservesFunds() public view {
-        if (!handler.ghost_triggered()) return;
-        uint256 sum = handler.ghost_issuerReceived() + handler.ghost_insuranceFromEscrow();
-        assertEq(sum, AMOUNT);
     }
 
     /// @dev Insurance pool ETH balance tracks deposits minus claims
     function invariant_insurancePoolSolvency() public view {
         uint256 poolBalance = address(pool).balance;
         assert(poolBalance >= handler.ghost_insuranceFees());
-    }
-
-    /// @dev Coverage ratio: insurance redistributed is always from remaining escrow
-    function invariant_coverageFromRemaining() public view {
-        if (!handler.ghost_triggered()) return;
-        // Redistributed amount = totalLocked - released (which is what's left in escrow)
-        uint256 expectedRedistributed = AMOUNT - handler.ghost_issuerReceived();
-        assertEq(handler.ghost_insuranceFromEscrow(), expectedRedistributed);
     }
 }
 
@@ -508,7 +476,6 @@ contract CrossContractFuzzTest is Test {
 
     address public hook;
     address public oracle;
-    address public insurancePool_;
     address public governance;
 
     function setUp() public {
@@ -517,26 +484,21 @@ contract CrossContractFuzzTest is Test {
         governance = makeAddr("governance");
 
         token = new MockERC20Token();
-        vault = new EscrowVault(hook, oracle, address(0), address(new MockRepEngine()));
+        vault = new EscrowVault(hook, oracle, address(new MockRepEngine()));
         pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
-        insurancePool_ = address(pool);
     }
 
     function _createEscrowWithParams(
-        uint256 amount,
+        uint128 liquidity,
         uint40 lockDuration,
         uint16 dailyLimit
     ) internal returns (uint256 escrowId, PoolId poolId, address issuer) {
-        amount = bound(amount, 1 ether, type(uint128).max);
+        liquidity = uint128(bound(liquidity, 1e18, type(uint128).max / 2));
         lockDuration = uint40(bound(lockDuration, 0, 90 days));
         dailyLimit = uint16(bound(dailyLimit, 0, 10000));
 
         issuer = makeAddr("fuzz_issuer");
-        poolId = PoolId.wrap(bytes32(uint256(keccak256(abi.encode(amount, lockDuration, dailyLimit)))));
-
-        token.mint(hook, amount);
-        vm.prank(hook);
-        token.approve(address(vault), type(uint256).max);
+        poolId = PoolId.wrap(bytes32(uint256(keccak256(abi.encode(liquidity, lockDuration, dailyLimit)))));
 
         IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
         schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 2000});
@@ -550,67 +512,73 @@ contract CrossContractFuzzTest is Test {
         });
 
         vm.prank(hook);
-        escrowId = vault.createEscrow(poolId, issuer, address(token), amount, schedule, commitment);
+        escrowId = vault.createEscrow(poolId, issuer, liquidity, schedule, commitment);
     }
 
-    /// @dev Full flow: create escrow → warp → release → verify invariants
-    function testFuzz_fullFlowReleaseInvariants(
-        uint256 amount,
+    /// @dev Full flow: create escrow → warp → record removal → verify invariants
+    function testFuzz_fullFlowRemovalInvariants(
+        uint128 liquidity,
         uint40 lockDuration,
         uint16 dailyLimit,
         uint256 warpTime
     ) public {
-        (uint256 escrowId, , address issuer) = _createEscrowWithParams(amount, lockDuration, dailyLimit);
-        amount = bound(amount, 1 ether, type(uint128).max);
+        // Force dailyLimit to 0 so that removing all removable liquidity at once never hits DailyLimitExceeded
+        dailyLimit = 0;
+        (uint256 escrowId, , ) = _createEscrowWithParams(liquidity, lockDuration, dailyLimit);
+        liquidity = uint128(bound(liquidity, 1e18, type(uint128).max / 2));
         warpTime = bound(warpTime, 0, 365 days);
 
         vm.warp(block.timestamp + warpTime);
 
-        uint256 vestedBefore = vault.calculateVestedAmount(escrowId);
+        uint128 removable = vault.getRemovableLiquidity(escrowId);
 
-        vm.prank(issuer);
-        try vault.releaseVested(escrowId) returns (uint256 released) {
-            // released <= vested
-            assertLe(released, vestedBefore);
+        if (removable > 0) {
+            vm.prank(hook);
+            vault.recordLPRemoval(escrowId, removable);
 
             IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
-            // totalLocked >= released
-            assertGe(status.totalLocked, status.released);
-            // remaining = totalLocked - released
-            assertEq(status.remaining, status.totalLocked - status.released);
-        } catch {}
+            // totalLiquidity >= removedLiquidity
+            assertGe(status.totalLiquidity, status.removedLiquidity);
+            // remaining = totalLiquidity - removedLiquidity
+            assertEq(status.remainingLiquidity, status.totalLiquidity - status.removedLiquidity);
+        }
     }
 
-    /// @dev Full flow: create escrow → partial release → trigger → verify conservation
-    function testFuzz_fullFlowTriggerConservation(
-        uint256 amount,
+    /// @dev Full flow: create escrow → partial removal → trigger → verify lockdown
+    function testFuzz_fullFlowTriggerLockdown(
+        uint128 liquidity,
         uint40 lockDuration,
         uint256 warpBeforeTrigger
     ) public {
-        (uint256 escrowId, , address issuer) = _createEscrowWithParams(amount, lockDuration, 0);
-        amount = bound(amount, 1 ether, type(uint128).max);
+        (uint256 escrowId, , ) = _createEscrowWithParams(liquidity, lockDuration, 0);
+        liquidity = uint128(bound(liquidity, 1e18, type(uint128).max / 2));
         warpBeforeTrigger = bound(warpBeforeTrigger, 0, 365 days);
 
         vm.warp(block.timestamp + warpBeforeTrigger);
 
-        // Try partial release
-        uint256 issuerBalBefore = token.balanceOf(issuer);
-        vm.prank(issuer);
-        try vault.releaseVested(escrowId) {} catch {}
-        uint256 released = token.balanceOf(issuer) - issuerBalBefore;
+        // Try partial removal
+        uint128 removable = vault.getRemovableLiquidity(escrowId);
+        uint128 removed;
+        if (removable > 0) {
+            vm.prank(hook);
+            vault.recordLPRemoval(escrowId, removable);
+            removed = removable;
+        }
 
-        // Trigger
-        uint256 insuranceBefore = token.balanceOf(address(0));
+        // Trigger lockdown
         vm.prank(oracle);
-        uint256 redistributed = vault.triggerRedistribution(escrowId, 1);
+        vault.triggerLockdown(escrowId, 1);
 
-        // Conservation: released + redistributed = original amount
-        assertEq(released + redistributed, amount);
+        // Verify removal returns 0 after trigger
+        uint128 removableAfter = vault.getRemovableLiquidity(escrowId);
+        assertEq(removableAfter, 0);
 
-        // Verify release reverts after trigger
-        vm.prank(issuer);
-        vm.expectRevert(EscrowVault.EscrowTriggered.selector);
-        vault.releaseVested(escrowId);
+        // After lockdown, getEscrowStatus reports remainingLiquidity = 0 (locked down).
+        // The actual conservation is: removedLiquidity <= totalLiquidity
+        IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(escrowId);
+        assertEq(status.remainingLiquidity, 0, "remaining should be 0 after lockdown");
+        assertEq(status.removedLiquidity, removed, "removed should match what was removed before lockdown");
+        assertLe(status.removedLiquidity, status.totalLiquidity, "removed must not exceed total");
     }
 
     /// @dev Insurance pool: deposit → trigger → claim → verify pro-rata
