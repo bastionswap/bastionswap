@@ -78,10 +78,22 @@ export function SwapCard() {
     isSuccess: isFaucetSuccess,
   } = useFaucet(faucetAddr, address);
 
-  // Refetch allowance after approval succeeds
+  // After approval succeeds: refetch allowance, then auto-execute swap
   useEffect(() => {
-    if (isApproveSuccess) refetchAllowance();
-  }, [isApproveSuccess, refetchAllowance]);
+    if (!isApproveSuccess) return;
+    refetchAllowance();
+    // Auto-trigger swap after approval confirms
+    if (poolKey && parsedAmountIn > 0n) {
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+      swap({
+        ...poolKey,
+        amountIn: parsedAmountIn,
+        minAmountOut,
+        deadline,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isApproveSuccess]);
 
   // Reset states when token selection changes
   useEffect(() => {
@@ -129,7 +141,7 @@ export function SwapCard() {
   }, [amountIn]);
 
   const insufficientBalance = tokenInBalance !== undefined && parsedAmountIn > 0n && parsedAmountIn > tokenInBalance;
-  const needsApproval = !tokenInIsNative && allowance !== undefined && parsedAmountIn > 0n && allowance < parsedAmountIn;
+  const needsApproval = !tokenInIsNative && allowance !== undefined && parsedAmountIn > 0n && allowance < parsedAmountIn && !isApproveSuccess;
 
   const slippageBps = Math.floor(parseFloat(slippage || "1") * 100);
   // Account for pool fee (0.3% = 30 bps) + insurance fee before applying slippage
@@ -397,16 +409,18 @@ export function SwapCard() {
               {isApproving || isApproveConfirming ? (
                 <>
                   <LoadingSpinner size="sm" />
-                  {isApproving ? "Confirm approval..." : "Approving..."}
+                  {isApproving ? "Approve in wallet..." : "Approving..."}
                 </>
               ) : (
-                `Approve ${tokenIn.symbol}`
+                `Approve & Swap`
               )}
             </button>
-          ) : isWriting || isConfirming ? (
+          ) : isApproveSuccess || isWriting || isConfirming ? (
             <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2">
               <LoadingSpinner size="sm" />
-              {isWriting ? "Confirm in wallet..." : "Swapping..."}
+              {isApproveSuccess && !isWriting && !isConfirming
+                ? "Approved! Sending swap..."
+                : isWriting ? "Confirm swap in wallet..." : "Swapping..."}
             </button>
           ) : (
             <button
