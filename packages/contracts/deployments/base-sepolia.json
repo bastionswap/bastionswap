@@ -18,7 +18,7 @@
   },
   "subgraph": {
     "name": "bastionswap-base-sepolia",
-    "url": "https://api.studio.thegraph.com/query/<STUDIO_ID>/bastionswap-base-sepolia/version/latest"
+    "url": "https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest"
   },
   "verification": {
     "allContractsVerified": true,
