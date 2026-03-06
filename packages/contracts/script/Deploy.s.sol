@@ -98,8 +98,9 @@ contract Deploy is Script {
         console2.log("InsurancePool:   ", a.insurance);
         console2.log("TriggerOracle:   ", a.trigger);
         console2.log("ReputationEngine:", a.reputation);
+        console2.log("BastionRouter:   ", address(router));
 
-        _writeDeploymentJson(a);
+        _writeDeploymentJson(a, address(router));
     }
 
     // ─── Internal Helpers ───────────────────────────────────────────────
@@ -152,7 +153,7 @@ contract Deploy is Script {
         guardian = vm.envOr("GUARDIAN", deployer);
     }
 
-    function _writeDeploymentJson(Addresses memory a) internal {
+    function _writeDeploymentJson(Addresses memory a, address router) internal {
         string memory obj = "deployment";
         vm.serializeUint(obj, "chainId", block.chainid);
         vm.serializeAddress(obj, "bastionDeployer", a.factory);
@@ -160,7 +161,8 @@ contract Deploy is Script {
         vm.serializeAddress(obj, "escrowVault", a.escrow);
         vm.serializeAddress(obj, "insurancePool", a.insurance);
         vm.serializeAddress(obj, "triggerOracle", a.trigger);
-        string memory json = vm.serializeAddress(obj, "reputationEngine", a.reputation);
+        vm.serializeAddress(obj, "reputationEngine", a.reputation);
+        string memory json = vm.serializeAddress(obj, "bastionRouter", router);
 
         string memory dir = "deployments/";
         vm.createDir(dir, true);

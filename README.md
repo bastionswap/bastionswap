@@ -19,15 +19,16 @@ When a token issuer creates a liquidity pool, their LP tokens are automatically 
 
 ## Contract Addresses (Base Sepolia)
 
-All contracts are deployed on Base Sepolia (v2 — treasury withdrawal support).
+All contracts are deployed on Base Sepolia (v3 — multi-hop swap support).
 
 | Contract | Address |
 |----------|---------|
-| BastionHook | [`0xC85852313B9BE98Be4EA17E212caeb6BB56e4Ac0`](https://sepolia.basescan.org/address/0xC85852313B9BE98Be4EA17E212caeb6BB56e4Ac0) |
-| EscrowVault | [`0xADdb75264a16a9d5727c5743859a39B4d57CD669`](https://sepolia.basescan.org/address/0xADdb75264a16a9d5727c5743859a39B4d57CD669) |
-| InsurancePool | [`0x86b43706D57f948f704836a13Eb989833EE44611`](https://sepolia.basescan.org/address/0x86b43706D57f948f704836a13Eb989833EE44611) |
-| TriggerOracle | [`0x221D8a269626C0C43970874571eab5a45a434683`](https://sepolia.basescan.org/address/0x221D8a269626C0C43970874571eab5a45a434683) |
-| ReputationEngine | [`0x3a3160A9257FDaBbbD1CfEA6f31763B064D24A7f`](https://sepolia.basescan.org/address/0x3a3160A9257FDaBbbD1CfEA6f31763B064D24A7f) |
+| BastionHook | [`0xfeD3C0F50312cB437F999a03D98576115bA90Ac0`](https://sepolia.basescan.org/address/0xfeD3C0F50312cB437F999a03D98576115bA90Ac0) |
+| BastionRouter | [`0x7D0789EE508A15FB2bE29CfaC81f51C51b733447`](https://sepolia.basescan.org/address/0x7D0789EE508A15FB2bE29CfaC81f51C51b733447) |
+| EscrowVault | [`0x83D2A0be3C7f5728a560B76BBB29b0a2fDb97241`](https://sepolia.basescan.org/address/0x83D2A0be3C7f5728a560B76BBB29b0a2fDb97241) |
+| InsurancePool | [`0x37ce342D5366999D2C526908e88772C61a45bC4a`](https://sepolia.basescan.org/address/0x37ce342D5366999D2C526908e88772C61a45bC4a) |
+| TriggerOracle | [`0x624d89EddE24BE86a971bDaf8268561d40D0c730`](https://sepolia.basescan.org/address/0x624d89EddE24BE86a971bDaf8268561d40D0c730) |
+| ReputationEngine | [`0xeB8529cD6bE727355C07cc0685140ADE49198A43`](https://sepolia.basescan.org/address/0xeB8529cD6bE727355C07cc0685140ADE49198A43) |
 
 **External Dependencies:**
 
