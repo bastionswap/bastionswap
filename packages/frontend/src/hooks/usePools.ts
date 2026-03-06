@@ -536,36 +536,38 @@ function useLocalPoolsOnChain() {
 export function useBastionPools() {
   const chainId = useChainId();
   const local = useLocalPoolsOnChain();
-  const useLocal = local.pools.length > 0 || local.isLoading;
+  const isLocal = chainId === 31337;
   return useQuery({
     queryKey: ["bastionPools", chainId, local.pools.length, local.pools.map(p => p.escrow?.totalLiquidity).join()],
     queryFn: () =>
-      local.pools.length > 0
+      isLocal && local.pools.length > 0
         ? Promise.resolve({ pools: local.pools })
         : graphClient.request<{ pools: SubgraphPool[] }>(BASTION_POOLS_QUERY),
     select: (data) => data.pools,
-    enabled: !local.isLoading,
+    enabled: isLocal ? !local.isLoading : true,
   });
 }
 
 export function useAllPools() {
   const chainId = useChainId();
   const local = useLocalPoolsOnChain();
+  const isLocal = chainId === 31337;
   return useQuery({
     queryKey: ["allPools", chainId, local.pools.length, local.pools.map(p => p.escrow?.totalLiquidity).join()],
     queryFn: () =>
-      local.pools.length > 0
+      isLocal && local.pools.length > 0
         ? Promise.resolve({ pools: local.pools })
         : graphClient.request<{ pools: SubgraphPool[] }>(ALL_POOLS_QUERY),
     select: (data) => data.pools,
-    enabled: !local.isLoading,
+    enabled: isLocal ? !local.isLoading : true,
   });
 }
 
 export function usePool(id: string) {
   const chainId = useChainId();
   const local = useLocalPoolsOnChain();
-  const localPool = local.pools.find(p => p.id.toLowerCase() === id.toLowerCase()) ?? null;
+  const isLocal = chainId === 31337;
+  const localPool = isLocal ? (local.pools.find(p => p.id.toLowerCase() === id.toLowerCase()) ?? null) : null;
   return useQuery({
     queryKey: ["pool", id, chainId, localPool?.escrow?.totalLiquidity],
     queryFn: () =>
@@ -573,7 +575,7 @@ export function usePool(id: string) {
         ? Promise.resolve({ pool: localPool })
         : graphClient.request<{ pool: SubgraphPool | null }>(POOL_DETAIL_QUERY, { id }),
     select: (data) => data.pool,
-    enabled: !!id,
+    enabled: !!id && (isLocal ? !local.isLoading : true),
   });
 }
 
@@ -595,15 +597,16 @@ const POOL_BY_TOKEN_QUERY = gql`
 export function usePoolByToken(tokenAddress: string | undefined) {
   const chainId = useChainId();
   const local = useLocalPoolsOnChain();
+  const isLocal = chainId === 31337;
   const token = tokenAddress?.toLowerCase();
 
   return useQuery({
     queryKey: ["poolByToken", token, chainId, local.pools.length],
     queryFn: () => {
-      const match = local.pools.find(
-        (p) => p.issuedToken?.toLowerCase() === token
-      );
-      if (match || local.pools.length > 0) {
+      if (isLocal) {
+        const match = local.pools.find(
+          (p) => p.issuedToken?.toLowerCase() === token
+        );
         return Promise.resolve({
           pools: match ? [{ id: match.id }] : [],
         });
@@ -613,7 +616,7 @@ export function usePoolByToken(tokenAddress: string | undefined) {
       });
     },
     select: (data) => data.pools[0]?.id ?? null,
-    enabled: !!token,
+    enabled: !!token && (isLocal ? !local.isLoading : true),
   });
 }
 
@@ -640,15 +643,16 @@ export function usePoolReserves(
 ) {
   const chainId = useChainId();
   const local = useLocalPoolsOnChain();
+  const isLocal = chainId === 31337;
   const [token0, token1] =
     tokenA && tokenB && tokenA.toLowerCase() < tokenB.toLowerCase()
       ? [tokenA.toLowerCase(), tokenB.toLowerCase()]
       : [tokenB?.toLowerCase(), tokenA?.toLowerCase()];
 
   return useQuery({
-    queryKey: ["poolReserves", token0, token1, chainId, local.pools.length, local.pools.map(p => `${p.reserve0}:${p.reserve1}`).join()],
+    queryKey: ["poolReserves", token0, token1, chainId, isLocal ? local.pools.length : 0, isLocal ? local.pools.map(p => `${p.reserve0}:${p.reserve1}`).join() : ""],
     queryFn: () => {
-      if (local.pools.length > 0) {
+      if (isLocal && local.pools.length > 0) {
         const match = local.pools.find(
           (p) =>
             p.token0.toLowerCase() === token0 &&
@@ -666,7 +670,7 @@ export function usePoolReserves(
       );
     },
     select: (data) => data.pools[0] ?? null,
-    enabled: !!token0 && !!token1,
+    enabled: !!token0 && !!token1 && (isLocal ? !local.isLoading : true),
     staleTime: 15_000,
   });
 }
