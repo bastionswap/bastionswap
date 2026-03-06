@@ -64,8 +64,12 @@ export function SwapCard() {
   );
 
   // Token balances
-  const { balance: tokenInBalance } = useTokenBalance(
+  const { balance: tokenInBalance, refetch: refetchTokenIn } = useTokenBalance(
     tokenIn?.address as `0x${string}` | undefined,
+    address
+  );
+  const { balance: tokenOutBalance, refetch: refetchTokenOut } = useTokenBalance(
+    tokenOut?.address as `0x${string}` | undefined,
     address
   );
 
@@ -84,6 +88,14 @@ export function SwapCard() {
   useEffect(() => {
     if (isApproveSuccess) refetchAllowance();
   }, [isApproveSuccess, refetchAllowance]);
+
+  // Refetch balances after swap succeeds
+  useEffect(() => {
+    if (isSuccess) {
+      refetchTokenIn();
+      refetchTokenOut();
+    }
+  }, [isSuccess, refetchTokenIn, refetchTokenOut]);
 
   // Reset states when token selection changes
   useEffect(() => {

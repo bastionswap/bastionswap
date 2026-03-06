@@ -92,12 +92,12 @@ export function useTokenBalance(
 ) {
   const isNative = token === "0x0000000000000000000000000000000000000000";
 
-  const { data: ethBalance } = useBalance({
+  const { data: ethBalance, refetch: refetchEth } = useBalance({
     address: account,
     query: { enabled: !!account && isNative },
   });
 
-  const { data: erc20Balance, refetch } = useReadContract({
+  const { data: erc20Balance, refetch: refetchErc20 } = useReadContract({
     address: token,
     abi: ERC20_ABI,
     functionName: "balanceOf",
@@ -107,7 +107,7 @@ export function useTokenBalance(
 
   return {
     balance: isNative ? ethBalance?.value : (erc20Balance as bigint | undefined),
-    refetch,
+    refetch: isNative ? refetchEth : refetchErc20,
   };
 }
 
