@@ -21,7 +21,7 @@ import {
   FAUCETS,
 } from "@/hooks/useSwap";
 import { useSwapRoute } from "@/hooks/useSwapRoute";
-import { usePoolReserves } from "@/hooks/usePools";
+import { usePoolReserves, useAllPools } from "@/hooks/usePools";
 import { getContracts } from "@/config/contracts";
 import { explorerUrl } from "@/lib/formatters";
 
@@ -45,6 +45,9 @@ export function SwapCard() {
   const [showTokenSelect, setShowTokenSelect] = useState<"in" | "out" | null>(null);
   const [showSlippage, setShowSlippage] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+
+  // All pools (for multi-hop price impact)
+  const { data: pools } = useAllPools();
 
   // Route finding
   const route = useSwapRoute(
@@ -178,7 +181,7 @@ export function SwapCard() {
   const quotedOut = isMultiHop ? multiHopQuotedOut : directQuotedOut;
   const isQuoteLoading = isMultiHop ? isMultiHopQuoteLoading : isDirectQuoteLoading;
 
-  // Pool reserves for spot price calculation
+  // Pool reserves for spot price calculation (direct route)
   const { data: poolReserves } = usePoolReserves(tokenIn?.address, tokenOut?.address);
 
   // Queries must be loaded before allowing swap
@@ -193,27 +196,60 @@ export function SwapCard() {
     ? (quotedOut * BigInt(10000 - slippageBps)) / 10000n
     : 0n;
 
-  // Price impact: compare effective price vs spot price from reserves
+  // Price impact: compare effective price vs composite spot rate
   const priceImpact = useMemo(() => {
-    if (!quotedOut || !poolReserves || parsedAmountIn <= 0n) return 0;
-
-    const r0 = parseFloat(poolReserves.reserve0 || "0");
-    const r1 = parseFloat(poolReserves.reserve1 || "0");
-    if (r0 <= 0 || r1 <= 0) return 0;
-
-    const tokenInAddr = tokenIn?.address.toLowerCase() ?? "";
-    const tokenOutAddr = tokenOut?.address.toLowerCase() ?? "";
-    const token0Addr = tokenInAddr < tokenOutAddr ? tokenInAddr : tokenOutAddr;
-    const isZeroForOne = tokenInAddr === token0Addr;
-
-    const reserveIn = isZeroForOne ? r0 : r1;
-    const reserveOut = isZeroForOne ? r1 : r0;
-    const spotRate = reserveOut / reserveIn;
+    if (!quotedOut || parsedAmountIn <= 0n || !route) return 0;
 
     const effectiveRate = Number(quotedOut) / Number(parsedAmountIn);
-    const impact = (1 - effectiveRate / spotRate) * 100;
+    if (effectiveRate <= 0) return 0;
+
+    if (route.type === "direct") {
+      // Direct: use poolReserves for spot rate
+      if (!poolReserves) return 0;
+      const r0 = parseFloat(poolReserves.reserve0 || "0");
+      const r1 = parseFloat(poolReserves.reserve1 || "0");
+      if (r0 <= 0 || r1 <= 0) return 0;
+
+      const tokenInAddr = tokenIn?.address.toLowerCase() ?? "";
+      const tokenOutAddr = tokenOut?.address.toLowerCase() ?? "";
+      const token0Addr = tokenInAddr < tokenOutAddr ? tokenInAddr : tokenOutAddr;
+      const isZeroForOne = tokenInAddr === token0Addr;
+
+      const reserveIn = isZeroForOne ? r0 : r1;
+      const reserveOut = isZeroForOne ? r1 : r0;
+      const spotRate = reserveOut / reserveIn;
+
+      const impact = (1 - effectiveRate / spotRate) * 100;
+      return Math.max(impact, 0);
+    }
+
+    // Multi-hop: compute composite spot rate from each hop's pool reserves
+    if (!pools || pools.length === 0) return 0;
+
+    let compositeSpotRate = 1;
+    for (const step of route.steps) {
+      const c0 = step.poolKey.currency0.toLowerCase();
+      const c1 = step.poolKey.currency1.toLowerCase();
+
+      // Find the pool matching this step
+      const pool = pools.find(
+        (p) => p.token0.toLowerCase() === c0 && p.token1.toLowerCase() === c1
+      );
+      if (!pool) return 0;
+
+      const r0 = parseFloat(pool.reserve0 || "0");
+      const r1 = parseFloat(pool.reserve1 || "0");
+      if (r0 <= 0 || r1 <= 0) return 0;
+
+      // Spot rate for this hop: output/input
+      const hopSpotRate = step.zeroForOne ? r1 / r0 : r0 / r1;
+      compositeSpotRate *= hopSpotRate;
+    }
+
+    if (compositeSpotRate <= 0) return 0;
+    const impact = (1 - effectiveRate / compositeSpotRate) * 100;
     return Math.max(impact, 0);
-  }, [quotedOut, poolReserves, parsedAmountIn, tokenIn?.address, tokenOut?.address]);
+  }, [quotedOut, poolReserves, parsedAmountIn, tokenIn?.address, tokenOut?.address, route, pools]);
 
   const handleApprove = () => {
     if (!tokenIn || !routerAddr) return;
