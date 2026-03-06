@@ -190,6 +190,7 @@ export function SwapCard() {
       amountIn: parsedAmountIn,
       minAmountOut,
       deadline,
+      value: tokenInIsNative ? parsedAmountIn : 0n,
     });
   };
 
