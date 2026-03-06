@@ -1,10 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
-import { useChainId, useReadContracts } from "wagmi";
-import { formatUnits, keccak256, encodeAbiParameters } from "viem";
+import { useChainId } from "wagmi";
+import { formatUnits, keccak256, encodeAbiParameters, createPublicClient, http, defineChain } from "viem";
 import { gql } from "graphql-request";
 import { graphClient } from "@/config/subgraph";
-import { LOCAL_POOL, LOCAL_CONTRACTS } from "@/config/contracts.generated";
 import { getContracts } from "@/config/contracts";
+
+const anvilChain = defineChain({
+  id: 31337,
+  name: "Anvil",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: ["http://127.0.0.1:8545"] } },
+  contracts: {
+    multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" },
+  },
+});
 import {
   BastionHookABI,
   EscrowVaultABI,
@@ -256,158 +265,224 @@ function computeReservesFromState(
   };
 }
 
-// ─── Local on-chain pool data hook ──────────────────────────────────
+// ─── Event ABIs for pool discovery ──────────────────────────────────
 
-function useLocalPoolOnChain() {
+const IssuerRegisteredEvent = {
+  type: "event" as const,
+  name: "IssuerRegistered" as const,
+  inputs: [
+    { name: "poolId", type: "bytes32" as const, indexed: true, internalType: "PoolId" as const },
+    { name: "issuer", type: "address" as const, indexed: true, internalType: "address" as const },
+    { name: "issuedToken", type: "address" as const, indexed: false, internalType: "address" as const },
+  ],
+} as const;
+
+const InitializeEvent = {
+  type: "event" as const,
+  name: "Initialize" as const,
+  inputs: [
+    { name: "id", type: "bytes32" as const, indexed: true, internalType: "PoolId" as const },
+    { name: "currency0", type: "address" as const, indexed: true, internalType: "Currency" as const },
+    { name: "currency1", type: "address" as const, indexed: true, internalType: "Currency" as const },
+    { name: "fee", type: "uint24" as const, indexed: false, internalType: "uint24" as const },
+    { name: "tickSpacing", type: "int24" as const, indexed: false, internalType: "int24" as const },
+    { name: "hooks", type: "address" as const, indexed: false, internalType: "address" as const },
+    { name: "sqrtPriceX96", type: "uint160" as const, indexed: false, internalType: "uint160" as const },
+    { name: "tick", type: "int24" as const, indexed: false, internalType: "int24" as const },
+  ],
+} as const;
+
+// ─── Local on-chain multi-pool discovery hook ──────────────────────────────────
+
+// Dedicated public client for the local Anvil fork — independent of the
+// wallet's connected chain so discovery works even when the wallet is on
+// Base Sepolia or another network.
+const anvilClient = createPublicClient({
+  chain: anvilChain,
+  transport: http("http://127.0.0.1:8545"),
+});
+
+function useLocalPoolsOnChain() {
   const contracts = getContracts(31337);
-  const poolId = LOCAL_POOL.id as `0x${string}`;
-  const poolSlots = computePoolSlots(poolId);
 
-  const { data, isLoading } = useReadContracts({
-    contracts: contracts
-      ? [
-          // 0: BastionHook.getPoolInfo(poolId)
-          {
-            address: contracts.BastionHook as `0x${string}`,
-            abi: BastionHookABI,
-            functionName: "getPoolInfo",
-            args: [poolId],
-          },
-          // 1: InsurancePool.getPoolStatus(poolId)
-          {
-            address: contracts.InsurancePool as `0x${string}`,
-            abi: InsurancePoolABI,
-            functionName: "getPoolStatus",
-            args: [poolId],
-          },
-          // 2: InsurancePool.feeRate()
-          {
-            address: contracts.InsurancePool as `0x${string}`,
-            abi: InsurancePoolABI,
-            functionName: "feeRate",
-          },
-          // 3: PoolManager.extsload(slot0) — sqrtPriceX96
-          {
-            address: contracts.PoolManager as `0x${string}`,
-            abi: PoolManagerABI,
-            functionName: "extsload",
-            args: [poolSlots.slot0],
-          },
-          // 4: PoolManager.extsload(liquidity slot)
-          {
-            address: contracts.PoolManager as `0x${string}`,
-            abi: PoolManagerABI,
-            functionName: "extsload",
-            args: [poolSlots.liquidity],
-          },
-        ]
-      : undefined,
-    query: { enabled: !!contracts },
-  });
+  const { data: pools, isLoading } = useQuery({
+    queryKey: ["localPoolsDiscovery"],
+    queryFn: async (): Promise<SubgraphPool[]> => {
+      if (!contracts) return [];
 
-  // Extract escrowId from getPoolInfo result, then read escrow + reputation
-  const poolInfo = data?.[0]?.status === "success" ? (data[0].result as [string, bigint, string, bigint]) : null;
-  const escrowId = poolInfo?.[1];
-  const issuerAddr = poolInfo?.[0];
+      const hookAddr = contracts.BastionHook as `0x${string}`;
+      const pmAddr = contracts.PoolManager as `0x${string}`;
 
-  const { data: data2 } = useReadContracts({
-    contracts:
-      contracts && escrowId !== undefined && issuerAddr
-        ? [
-            // 0: EscrowVault.getEscrowStatus(escrowId)
-            {
-              address: contracts.EscrowVault as `0x${string}`,
-              abi: EscrowVaultABI,
-              functionName: "getEscrowStatus",
-              args: [escrowId],
-            },
-            // 1: ReputationEngine.getScore(issuer)
-            {
-              address: contracts.ReputationEngine as `0x${string}`,
-              abi: ReputationEngineABI,
-              functionName: "getScore",
-              args: [issuerAddr],
-            },
-            // 2: ReputationEngine.encodeScoreData(issuer)
-            {
-              address: contracts.ReputationEngine as `0x${string}`,
-              abi: ReputationEngineABI,
-              functionName: "encodeScoreData",
-              args: [issuerAddr],
-            },
-            // 3: EscrowVault.getEscrowInfo(escrowId)
-            {
-              address: contracts.EscrowVault as `0x${string}`,
-              abi: EscrowVaultABI,
-              functionName: "getEscrowInfo",
-              args: [escrowId],
-            },
-          ]
-        : undefined,
-    query: { enabled: !!contracts && escrowId !== undefined && !!issuerAddr },
-  });
+      // Determine the fork block so we only scan local (post-fork) blocks.
+      // Querying pre-fork blocks proxies to the upstream RPC which hangs.
+      let fromBlock = 0n;
+      try {
+        const nodeInfo = await anvilClient.request({ method: "anvil_nodeInfo" as any }) as any;
+        const forkBlock = nodeInfo?.forkConfig?.forkBlockNumber;
+        if (forkBlock != null) fromBlock = BigInt(forkBlock);
+      } catch {
+        // Not an Anvil fork — fall back to recent blocks
+        const currentBlock = await anvilClient.getBlockNumber();
+        fromBlock = currentBlock > 500n ? currentBlock - 500n : 0n;
+      }
 
-  const insuranceStatus = data?.[1]?.status === "success"
-    ? (data[1].result as { balance: bigint; isTriggered: boolean; triggerTimestamp: number; totalEligibleSupply: bigint })
-    : null;
+      // 1. Discover pools from on-chain events
+      const [issuerLogs, initLogs] = await Promise.all([
+        anvilClient.getLogs({
+          address: hookAddr,
+          event: IssuerRegisteredEvent,
+          fromBlock,
+          toBlock: "latest",
+        }),
+        anvilClient.getLogs({
+          address: pmAddr,
+          event: InitializeEvent,
+          fromBlock,
+          toBlock: "latest",
+        }),
+      ]);
 
-  const feeRate = data?.[2]?.status === "success" ? Number(data[2].result) : 100;
+      // Build map of Initialize events filtered by hook address
+      const initMap = new Map<string, { currency0: string; currency1: string }>();
+      for (const log of initLogs) {
+        if (log.args.hooks?.toLowerCase() === hookAddr.toLowerCase()) {
+          initMap.set(log.args.id!.toLowerCase(), {
+            currency0: log.args.currency0!,
+            currency1: log.args.currency1!,
+          });
+        }
+      }
 
-  // Decode sqrtPriceX96 from slot0 (lower 160 bits) and liquidity
-  const slot0Raw = data?.[3]?.status === "success" ? (data[3].result as `0x${string}`) : null;
-  const liqRaw = data?.[4]?.status === "success" ? (data[4].result as `0x${string}`) : null;
+      if (issuerLogs.length === 0) return [];
 
-  const sqrtPriceX96 = slot0Raw ? BigInt(slot0Raw) & ((1n << 160n) - 1n) : 0n;
-  const liquidity = liqRaw ? BigInt(liqRaw) : 0n;
-  const reserves = sqrtPriceX96 > 0n && liquidity > 0n
-    ? computeReservesFromState(sqrtPriceX96, liquidity)
-    : { reserve0: null, reserve1: null };
+      // Build pool entries with token addresses
+      const poolEntries = issuerLogs.map((log) => {
+        const poolId = log.args.poolId! as `0x${string}`;
+        const init = initMap.get(poolId.toLowerCase());
+        return {
+          poolId,
+          issuer: log.args.issuer!,
+          issuedToken: log.args.issuedToken!,
+          token0: init?.currency0 ?? "0x0000000000000000000000000000000000000000",
+          token1: init?.currency1 ?? log.args.issuedToken!,
+        };
+      });
 
-  const escrowStatus = data2?.[0]?.status === "success"
-    ? (data2[0].result as { totalLiquidity: bigint; removedLiquidity: bigint; remainingLiquidity: bigint; nextUnlockTime: bigint })
-    : null;
+      // 2. Batch read on-chain state for all pools (batch 1: pool info, insurance, reserves)
+      const batch1Calls = poolEntries.flatMap((p) => {
+        const slots = computePoolSlots(p.poolId);
+        return [
+          { address: hookAddr, abi: BastionHookABI, functionName: "getPoolInfo" as const, args: [p.poolId] },
+          { address: contracts.InsurancePool as `0x${string}`, abi: InsurancePoolABI, functionName: "getPoolStatus" as const, args: [p.poolId] },
+          { address: contracts.InsurancePool as `0x${string}`, abi: InsurancePoolABI, functionName: "feeRate" as const },
+          { address: pmAddr, abi: PoolManagerABI, functionName: "extsload" as const, args: [slots.slot0] },
+          { address: pmAddr, abi: PoolManagerABI, functionName: "extsload" as const, args: [slots.liquidity] },
+        ];
+      });
 
-  const repScore = data2?.[1]?.status === "success" ? Number(data2[1].result) : 0;
+      const batch1Results = await anvilClient.multicall({
+        contracts: batch1Calls as any,
+        allowFailure: true,
+      });
 
-  // Decode score data for profile stats
-  const scoreData = data2?.[2]?.status === "success" ? (data2[2].result as `0x${string}`) : null;
-  let poolsCreated = 0, escrowsCompleted = 0, triggerCount = 0, uniqueTokens = 0;
-  if (scoreData && scoreData.length >= 66) {
-    // encodeScoreData returns abi.encode(score, poolsCreated, escrowsCompleted, triggerCount, uniqueTokens)
-    try {
-      // Manual decode: each uint256 is 32 bytes. Skip first 32 bytes (score), then read uint16s packed as uint256
-      const hex = scoreData.slice(2); // remove 0x
-      poolsCreated = parseInt(hex.slice(64, 128), 16) || 0;
-      escrowsCompleted = parseInt(hex.slice(128, 192), 16) || 0;
-      triggerCount = parseInt(hex.slice(192, 256), 16) || 0;
-      uniqueTokens = parseInt(hex.slice(256, 320), 16) || 0;
-    } catch { /* ignore */ }
-  }
+      // Parse batch1 and prepare batch2 calls (escrow + reputation)
+      const batch2Calls: any[] = [];
+      const poolInfos: Array<{ issuer: string; escrowId: bigint; issuedToken: string; totalLiquidity: bigint } | null> = [];
 
-  // Parse escrow info (createdAt, lockDuration, vestingDuration, commitment)
-  const escrowInfo = data2?.[3]?.status === "success"
-    ? (data2[3].result as [bigint, bigint, bigint, { dailyWithdrawLimit: number; maxSellPercent: number }])
-    : null;
-  const escrowCreatedAt = escrowInfo ? Number(escrowInfo[0]) : 0;
-  const escrowLockDuration = escrowInfo ? Number(escrowInfo[1]) : 0;
-  const escrowVestingDuration = escrowInfo ? Number(escrowInfo[2]) : 0;
-  const escrowCommitment = escrowInfo ? escrowInfo[3] : null;
+      for (let i = 0; i < poolEntries.length; i++) {
+        const base = i * 5;
+        const poolInfoResult = batch1Results[base];
+        if (poolInfoResult.status === "success") {
+          const [issuer, escrowId, issuedToken, totalLiquidity] = poolInfoResult.result as [string, bigint, string, bigint];
+          poolInfos.push({ issuer, escrowId, issuedToken, totalLiquidity });
+          batch2Calls.push(
+            { address: contracts.EscrowVault as `0x${string}`, abi: EscrowVaultABI, functionName: "getEscrowStatus", args: [escrowId] },
+            { address: contracts.ReputationEngine as `0x${string}`, abi: ReputationEngineABI, functionName: "getScore", args: [issuer] },
+            { address: contracts.ReputationEngine as `0x${string}`, abi: ReputationEngineABI, functionName: "encodeScoreData", args: [issuer] },
+            { address: contracts.EscrowVault as `0x${string}`, abi: EscrowVaultABI, functionName: "getEscrowInfo", args: [escrowId] },
+          );
+        } else {
+          poolInfos.push(null);
+        }
+      }
 
-  const pool: SubgraphPool | null =
-    isLoading || !contracts
-      ? null
-      : {
-          id: LOCAL_POOL.id,
-          token0: LOCAL_POOL.token0,
-          token1: LOCAL_POOL.token1,
-          hook: LOCAL_POOL.hook,
+      const batch2Results = batch2Calls.length > 0
+        ? await anvilClient.multicall({ contracts: batch2Calls, allowFailure: true })
+        : [];
+
+      // 3. Assemble SubgraphPool objects
+      const results: SubgraphPool[] = [];
+      let batch2Idx = 0;
+
+      for (let i = 0; i < poolEntries.length; i++) {
+        const entry = poolEntries[i];
+        const base = i * 5;
+        const info = poolInfos[i];
+
+        // Parse reserves from slot0 and liquidity
+        const slot0Raw = batch1Results[base + 3]?.status === "success" ? (batch1Results[base + 3].result as `0x${string}`) : null;
+        const liqRaw = batch1Results[base + 4]?.status === "success" ? (batch1Results[base + 4].result as `0x${string}`) : null;
+        const sqrtPriceX96 = slot0Raw ? BigInt(slot0Raw) & ((1n << 160n) - 1n) : 0n;
+        const liquidity = liqRaw ? BigInt(liqRaw) : 0n;
+        const reserves = sqrtPriceX96 > 0n && liquidity > 0n
+          ? computeReservesFromState(sqrtPriceX96, liquidity)
+          : { reserve0: null, reserve1: null };
+
+        // Insurance
+        const insuranceStatus = batch1Results[base + 1]?.status === "success"
+          ? (batch1Results[base + 1].result as { balance: bigint; isTriggered: boolean; triggerTimestamp: number; totalEligibleSupply: bigint })
+          : null;
+        const feeRate = batch1Results[base + 2]?.status === "success" ? Number(batch1Results[base + 2].result) : 100;
+
+        // Escrow + reputation (from batch2)
+        type EscrowStatus = { totalLiquidity: bigint; removedLiquidity: bigint; remainingLiquidity: bigint; nextUnlockTime: bigint };
+        let escrowStatus: EscrowStatus | null = null;
+        let repScore = 0;
+        let poolsCreated = 0, escrowsCompleted = 0, triggerCount = 0;
+        let escrowCreatedAt = 0, escrowLockDuration = 0, escrowVestingDuration = 0;
+        let escrowCommitment: { dailyWithdrawLimit: number; maxSellPercent: number } | null = null;
+
+        if (info) {
+          escrowStatus = batch2Results[batch2Idx]?.status === "success"
+            ? (batch2Results[batch2Idx].result as EscrowStatus)
+            : null;
+          repScore = batch2Results[batch2Idx + 1]?.status === "success" ? Number(batch2Results[batch2Idx + 1].result) : 0;
+
+          const scoreData = batch2Results[batch2Idx + 2]?.status === "success" ? (batch2Results[batch2Idx + 2].result as `0x${string}`) : null;
+          if (scoreData && scoreData.length >= 66) {
+            try {
+              const hex = scoreData.slice(2);
+              poolsCreated = parseInt(hex.slice(64, 128), 16) || 0;
+              escrowsCompleted = parseInt(hex.slice(128, 192), 16) || 0;
+              triggerCount = parseInt(hex.slice(192, 256), 16) || 0;
+            } catch { /* ignore */ }
+          }
+
+          const escrowInfo = batch2Results[batch2Idx + 3]?.status === "success"
+            ? (batch2Results[batch2Idx + 3].result as [bigint, bigint, bigint, { dailyWithdrawLimit: number; maxSellPercent: number }])
+            : null;
+          if (escrowInfo) {
+            escrowCreatedAt = Number(escrowInfo[0]);
+            escrowLockDuration = Number(escrowInfo[1]);
+            escrowVestingDuration = Number(escrowInfo[2]);
+            escrowCommitment = escrowInfo[3];
+          }
+
+          batch2Idx += 4;
+        }
+
+        results.push({
+          id: entry.poolId,
+          token0: entry.token0,
+          token1: entry.token1,
+          hook: contracts.BastionHook,
           isBastion: true,
-          issuedToken: LOCAL_POOL.issuedToken,
+          issuedToken: entry.issuedToken,
           reserve0: reserves.reserve0,
           reserve1: reserves.reserve1,
-          issuer: issuerAddr
+          issuer: info
             ? {
-                id: issuerAddr,
+                id: info.issuer,
                 reputationScore: repScore.toString(),
                 totalEscrowsCreated: poolsCreated,
                 totalEscrowsCompleted: escrowsCompleted,
@@ -416,7 +491,7 @@ function useLocalPoolOnChain() {
             : null,
           escrow: escrowStatus
             ? {
-                id: escrowId!.toString(),
+                id: info!.escrowId.toString(),
                 totalLiquidity: formatUnits(escrowStatus.totalLiquidity, 18),
                 removedLiquidity: formatUnits(escrowStatus.removedLiquidity, 18),
                 remainingLiquidity: formatUnits(escrowStatus.remainingLiquidity, 18),
@@ -434,7 +509,7 @@ function useLocalPoolOnChain() {
             : null,
           insurancePool: insuranceStatus
             ? {
-                id: LOCAL_POOL.id,
+                id: entry.poolId,
                 balance: formatUnits(insuranceStatus.balance, 18),
                 feeRate: feeRate,
                 isTriggered: insuranceStatus.isTriggered,
@@ -446,45 +521,56 @@ function useLocalPoolOnChain() {
             : null,
           createdAt: Math.floor(Date.now() / 1000).toString(),
           createdTx: "0x",
-        };
+        });
+      }
 
-  return { pool, isLoading };
+      return results;
+    },
+    enabled: !!contracts,
+    refetchInterval: 10_000,
+  });
+
+  return { pools: pools ?? [], isLoading };
 }
 
 export function useBastionPools() {
   const chainId = useChainId();
-  const local = useLocalPoolOnChain();
+  const local = useLocalPoolsOnChain();
+  const useLocal = local.pools.length > 0 || local.isLoading;
   return useQuery({
-    queryKey: ["bastionPools", chainId, local.pool?.escrow?.totalLiquidity],
+    queryKey: ["bastionPools", chainId, local.pools.length, local.pools.map(p => p.escrow?.totalLiquidity).join()],
     queryFn: () =>
-      chainId === 31337
-        ? Promise.resolve({ pools: local.pool ? [local.pool] : [] })
+      local.pools.length > 0
+        ? Promise.resolve({ pools: local.pools })
         : graphClient.request<{ pools: SubgraphPool[] }>(BASTION_POOLS_QUERY),
     select: (data) => data.pools,
+    enabled: !local.isLoading,
   });
 }
 
 export function useAllPools() {
   const chainId = useChainId();
-  const local = useLocalPoolOnChain();
+  const local = useLocalPoolsOnChain();
   return useQuery({
-    queryKey: ["allPools", chainId, local.pool?.escrow?.totalLiquidity],
+    queryKey: ["allPools", chainId, local.pools.length, local.pools.map(p => p.escrow?.totalLiquidity).join()],
     queryFn: () =>
-      chainId === 31337
-        ? Promise.resolve({ pools: local.pool ? [local.pool] : [] })
+      local.pools.length > 0
+        ? Promise.resolve({ pools: local.pools })
         : graphClient.request<{ pools: SubgraphPool[] }>(ALL_POOLS_QUERY),
     select: (data) => data.pools,
+    enabled: !local.isLoading,
   });
 }
 
 export function usePool(id: string) {
   const chainId = useChainId();
-  const local = useLocalPoolOnChain();
+  const local = useLocalPoolsOnChain();
+  const localPool = local.pools.find(p => p.id.toLowerCase() === id.toLowerCase()) ?? null;
   return useQuery({
-    queryKey: ["pool", id, chainId, local.pool?.escrow?.totalLiquidity],
+    queryKey: ["pool", id, chainId, localPool?.escrow?.totalLiquidity],
     queryFn: () =>
-      chainId === 31337
-        ? Promise.resolve({ pool: id === LOCAL_POOL.id ? local.pool : null })
+      localPool
+        ? Promise.resolve({ pool: localPool })
         : graphClient.request<{ pool: SubgraphPool | null }>(POOL_DETAIL_QUERY, { id }),
     select: (data) => data.pool,
     enabled: !!id,
@@ -508,21 +594,24 @@ const POOL_BY_TOKEN_QUERY = gql`
  */
 export function usePoolByToken(tokenAddress: string | undefined) {
   const chainId = useChainId();
+  const local = useLocalPoolsOnChain();
   const token = tokenAddress?.toLowerCase();
 
   return useQuery({
-    queryKey: ["poolByToken", token, chainId],
-    queryFn: () =>
-      chainId === 31337
-        ? Promise.resolve({
-            pools:
-              token === LOCAL_POOL.token1.toLowerCase()
-                ? [{ id: LOCAL_POOL.id }]
-                : [],
-          })
-        : graphClient.request<{ pools: { id: string }[] }>(POOL_BY_TOKEN_QUERY, {
-            token,
-          }),
+    queryKey: ["poolByToken", token, chainId, local.pools.length],
+    queryFn: () => {
+      const match = local.pools.find(
+        (p) => p.issuedToken?.toLowerCase() === token
+      );
+      if (match || local.pools.length > 0) {
+        return Promise.resolve({
+          pools: match ? [{ id: match.id }] : [],
+        });
+      }
+      return graphClient.request<{ pools: { id: string }[] }>(POOL_BY_TOKEN_QUERY, {
+        token,
+      });
+    },
     select: (data) => data.pools[0]?.id ?? null,
     enabled: !!token,
   });
@@ -550,28 +639,32 @@ export function usePoolReserves(
   tokenB: string | undefined
 ) {
   const chainId = useChainId();
-  const local = useLocalPoolOnChain();
+  const local = useLocalPoolsOnChain();
   const [token0, token1] =
     tokenA && tokenB && tokenA.toLowerCase() < tokenB.toLowerCase()
       ? [tokenA.toLowerCase(), tokenB.toLowerCase()]
       : [tokenB?.toLowerCase(), tokenA?.toLowerCase()];
 
   return useQuery({
-    queryKey: ["poolReserves", token0, token1, chainId, local.pool?.reserve0, local.pool?.reserve1],
-    queryFn: () =>
-      chainId === 31337
-        ? Promise.resolve({
-            pools:
-              token0 === LOCAL_POOL.token0.toLowerCase() &&
-              token1 === LOCAL_POOL.token1.toLowerCase() &&
-              local.pool
-                ? [{ id: LOCAL_POOL.id, reserve0: local.pool.reserve0, reserve1: local.pool.reserve1 }]
-                : [],
-          })
-        : graphClient.request<{ pools: { id: string; reserve0: string | null; reserve1: string | null }[] }>(
-            POOL_BY_TOKENS_QUERY,
-            { token0, token1 }
-          ),
+    queryKey: ["poolReserves", token0, token1, chainId, local.pools.length, local.pools.map(p => `${p.reserve0}:${p.reserve1}`).join()],
+    queryFn: () => {
+      if (local.pools.length > 0) {
+        const match = local.pools.find(
+          (p) =>
+            p.token0.toLowerCase() === token0 &&
+            p.token1.toLowerCase() === token1
+        );
+        return Promise.resolve({
+          pools: match
+            ? [{ id: match.id, reserve0: match.reserve0, reserve1: match.reserve1 }]
+            : [],
+        });
+      }
+      return graphClient.request<{ pools: { id: string; reserve0: string | null; reserve1: string | null }[] }>(
+        POOL_BY_TOKENS_QUERY,
+        { token0, token1 }
+      );
+    },
     select: (data) => data.pools[0] ?? null,
     enabled: !!token0 && !!token1,
     staleTime: 15_000,
