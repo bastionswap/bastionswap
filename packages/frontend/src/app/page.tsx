@@ -97,7 +97,7 @@ export default function HomePage() {
 
   const statItems = [
     { label: "Bastion Pools", value: stats?.totalBastionPools ?? "—" },
-    { label: "Escrow Locked", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—", unit: "tokens" },
+    { label: "Escrow Locked", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—", unit: "LP" },
     { label: "Insurance Available", value: stats ? `${parseFloat(stats.totalInsuranceBalance).toFixed(2)}` : "—", unit: "ETH" },
     { label: "Compensation Paid", value: stats ? `${parseFloat(stats.totalCompensationPaid).toFixed(2)}` : "—", unit: "ETH" },
   ];
