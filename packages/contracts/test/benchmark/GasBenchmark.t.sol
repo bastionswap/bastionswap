@@ -119,19 +119,14 @@ contract GasBenchmarkTest is Test, Deployers {
         vm.stopPrank();
     }
 
-    function _defaultVestingSchedule() internal pure returns (IEscrowVault.VestingStep[] memory) {
-        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
-        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
-        return schedule;
-    }
-
     function _encodeIssuerHookData() internal view returns (bytes memory) {
+        uint40 lockDuration = 7 days;
+        uint40 vestingDuration = 83 days;
+
         return abi.encode(
             issuerAddr, address(issuedToken),
-            _defaultVestingSchedule(),
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, lockDuration: 0, maxSellPercent: 200}),
+            lockDuration, vestingDuration,
+            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200}),
             ITriggerOracle.TriggerConfig({
                 lpRemovalThreshold: 5000, dumpThresholdPercent: 3000,
                 dumpWindowSeconds: 86400, taxDeviationThreshold: 500,

@@ -35,6 +35,19 @@
   },
   {
     "type": "function",
+    "name": "MIN_LOCK_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_VESTING_DURATION",
     "inputs": [],
     "outputs": [
@@ -129,21 +142,14 @@
         "internalType": "uint128"
       },
       {
-        "name": "vestingSchedule",
-        "type": "tuple[]",
-        "internalType": "struct IEscrowVault.VestingStep[]",
-        "components": [
-          {
-            "name": "timeOffset",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "basisPoints",
-            "type": "uint16",
-            "internalType": "uint16"
-          }
-        ]
+        "name": "lockDuration",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "vestingDuration",
+        "type": "uint40",
+        "internalType": "uint40"
       },
       {
         "name": "commitment",
@@ -154,11 +160,6 @@
             "name": "dailyWithdrawLimit",
             "type": "uint16",
             "internalType": "uint16"
-          },
-          {
-            "name": "lockDuration",
-            "type": "uint40",
-            "internalType": "uint40"
           },
           {
             "name": "maxSellPercent",
@@ -194,6 +195,16 @@
         "internalType": "uint40"
       },
       {
+        "name": "lockDuration",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "vestingDuration",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
         "name": "commitment",
         "type": "tuple",
         "internalType": "struct IEscrowVault.IssuerCommitment",
@@ -202,11 +213,6 @@
             "name": "dailyWithdrawLimit",
             "type": "uint16",
             "internalType": "uint16"
-          },
-          {
-            "name": "lockDuration",
-            "type": "uint40",
-            "internalType": "uint40"
           },
           {
             "name": "maxSellPercent",
@@ -312,37 +318,6 @@
         "name": "endTime",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getVestingSchedule",
-    "inputs": [
-      {
-        "name": "escrowId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "tuple[]",
-        "internalType": "struct IEscrowVault.VestingStep[]",
-        "components": [
-          {
-            "name": "timeOffset",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "basisPoints",
-            "type": "uint16",
-            "internalType": "uint16"
-          }
-        ]
       }
     ],
     "stateMutability": "view"
@@ -461,11 +436,6 @@
             "internalType": "uint16"
           },
           {
-            "name": "lockDuration",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
             "name": "maxSellPercent",
             "type": "uint16",
             "internalType": "uint16"
@@ -516,11 +486,6 @@
             "internalType": "uint16"
           },
           {
-            "name": "lockDuration",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
             "name": "maxSellPercent",
             "type": "uint16",
             "internalType": "uint16"
@@ -557,6 +522,18 @@
         "type": "uint128",
         "indexed": false,
         "internalType": "uint128"
+      },
+      {
+        "name": "lockDuration",
+        "type": "uint40",
+        "indexed": false,
+        "internalType": "uint40"
+      },
+      {
+        "name": "vestingDuration",
+        "type": "uint40",
+        "indexed": false,
+        "internalType": "uint40"
       }
     ],
     "anonymous": false
@@ -680,11 +657,6 @@
   },
   {
     "type": "error",
-    "name": "EmptySchedule",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "EscrowAlreadyExists",
     "inputs": []
   },
@@ -696,6 +668,11 @@
   {
     "type": "error",
     "name": "EscrowTriggered",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "LockDurationTooShort",
     "inputs": []
   },
   {
@@ -725,32 +702,7 @@
   },
   {
     "type": "error",
-    "name": "ScheduleBpsExceedsMax",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ScheduleBpsNotIncreasing",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ScheduleFinalBpsNot10000",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ScheduleTimesNotIncreasing",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ScheduleTooLong",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "VestingBelowMinDuration",
+    "name": "VestingDurationTooShort",
     "inputs": []
   },
   {

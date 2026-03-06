@@ -27,10 +27,10 @@ export interface CreatePoolInput {
   ethAmount: string;       // in ETH (e.g. "1.5")
   tokenAmount: string;     // in token units (e.g. "1000000")
   // LP position is automatically locked via EscrowVault (no token escrow needed)
-  vestingSchedule: { timeOffset: number; basisPoints: number }[];
+  lockDuration: number;    // in seconds (min 7 days)
+  vestingDuration: number; // in seconds (min 7 days)
   commitment: {
     dailyWithdrawLimit: number;
-    lockDuration: number;
     maxSellPercent: number;
   };
   triggerConfig: {
@@ -119,24 +119,23 @@ export function useCreateBastionPool() {
       const tokenWei = parseEther(input.tokenAmount);
       const sqrtPriceX96 = computeSqrtPriceX96(ethWei, tokenWei);
 
-      // hookData: no escrow amount — EscrowVault records liquidity from LP params
+      // hookData: issuer, issuedToken, lockDuration, vestingDuration, commitment, triggerConfig
       const hookData = encodeAbiParameters(
         parseAbiParameters([
           "address",
           "address",
-          "(uint40,uint16)[]",
-          "(uint16,uint40,uint16)",
+          "uint40",
+          "uint40",
+          "(uint16,uint16)",
           "(uint16,uint16,uint40,uint16,uint40,uint16)",
         ]),
         [
           address,
           input.tokenAddress,
-          input.vestingSchedule.map((s) =>
-            [s.timeOffset, s.basisPoints] as const
-          ),
+          input.lockDuration,
+          input.vestingDuration,
           [
             input.commitment.dailyWithdrawLimit,
-            input.commitment.lockDuration,
             input.commitment.maxSellPercent,
           ] as const,
           [

@@ -11,7 +11,7 @@ import {
   type CreatePoolStep,
 } from "@/hooks/useCreatePool";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { formatBps, formatDuration } from "@/lib/formatters";
+import { formatBps } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
 import { VestingChart } from "@/components/ui/VestingChart";
 import { usePoolByToken } from "@/hooks/usePools";
@@ -21,70 +21,33 @@ type Step = 1 | 2 | 3 | 4;
 
 const DEFAULT_COMMITMENT = {
   dailyWithdrawLimit: 500, // 5% in bps
-  lockDuration: 7776000, // 90 days in seconds
   maxSellPercent: 300, // 3% in bps
 };
 
-// Vesting schedule types and presets
+// Lock + Linear Vesting presets
 type VestingMode = "standard" | "quick" | "extended" | "custom";
 
-interface Milestone {
-  days: number;
-  bps: number;
+interface VestingPreset {
+  lockDays: number;
+  vestingDays: number;
 }
 
-const VESTING_PRESETS: Record<Exclude<VestingMode, "custom">, Milestone[]> = {
-  standard: [
-    { days: 7, bps: 1000 },
-    { days: 30, bps: 3000 },
-    { days: 90, bps: 10000 },
-  ],
-  quick: [
-    { days: 7, bps: 3000 },
-    { days: 30, bps: 10000 },
-  ],
-  extended: [
-    { days: 14, bps: 500 },
-    { days: 60, bps: 2000 },
-    { days: 180, bps: 10000 },
-  ],
+const VESTING_PRESETS: Record<Exclude<VestingMode, "custom">, VestingPreset> = {
+  quick: { lockDays: 7, vestingDays: 23 },       // 30 days total
+  standard: { lockDays: 7, vestingDays: 83 },     // 90 days total
+  extended: { lockDays: 30, vestingDays: 150 },    // 180 days total
 };
 
-// Default milestones for strictness comparison
-const DEFAULT_MILESTONES = [
-  { time: 7, bps: 1000 },
-  { time: 30, bps: 3000 },
-  { time: 90, bps: 10000 },
-];
+const DEFAULT_TOTAL_DAYS = 90;
 
 function computeStrictnessLevel(
-  milestones: Milestone[]
+  lockDays: number,
+  vestingDays: number
 ): "stricter" | "default" | "looser" | "invalid" {
-  if (milestones.length === 0) return "invalid";
-  const last = milestones[milestones.length - 1];
-  if (last.days < 7) return "invalid";
-  if (last.bps !== 10000) return "invalid";
-
-  if (last.days < 90) return "looser";
-
-  const getBpsAtTime = (time: number): number => {
-    let bps = 0;
-    for (const m of milestones) {
-      if (m.days <= time) bps = m.bps;
-      else break;
-    }
-    return bps;
-  };
-
-  let allSame = true;
-
-  for (const def of DEFAULT_MILESTONES) {
-    const customBps = getBpsAtTime(def.time);
-    if (customBps > def.bps) return "looser";
-    if (customBps < def.bps) allSame = false;
-  }
-
-  if (allSame && last.days === 90) return "default";
+  if (lockDays < 7 || vestingDays < 7) return "invalid";
+  const totalDays = lockDays + vestingDays;
+  if (totalDays < DEFAULT_TOTAL_DAYS) return "looser";
+  if (totalDays === DEFAULT_TOTAL_DAYS) return "default";
   return "stricter";
 }
 
@@ -122,9 +85,6 @@ function formatCompact(n: number): string {
   return n.toFixed(4);
 }
 
-function formatLPPct(bps: number): string {
-  return `${(bps / 100).toFixed(0)}% of LP`;
-}
 
 export default function CreatePoolPage() {
   const { isConnected, address } = useAccount();
@@ -134,26 +94,16 @@ export default function CreatePoolPage() {
   const [tokenAmount, setTokenAmount] = useState("");
   const [commitment, setCommitment] = useState(DEFAULT_COMMITMENT);
   const [vestingMode, setVestingMode] = useState<VestingMode>("standard");
-  const [customMilestones, setCustomMilestones] = useState<Milestone[]>([
-    { days: 7, bps: 1000 },
-    { days: 30, bps: 3000 },
-    { days: 90, bps: 10000 },
-  ]);
+  const [lockDays, setLockDays] = useState(7);
+  const [vestingDays, setVestingDays] = useState(83);
 
-  const activeMilestones = vestingMode === "custom" ? customMilestones : VESTING_PRESETS[vestingMode];
+  const activeLockDays = vestingMode === "custom" ? lockDays : VESTING_PRESETS[vestingMode].lockDays;
+  const activeVestingDays = vestingMode === "custom" ? vestingDays : VESTING_PRESETS[vestingMode].vestingDays;
+  const totalDays = activeLockDays + activeVestingDays;
 
-  const strictness = useMemo(() => computeStrictnessLevel(activeMilestones), [activeMilestones]);
+  const strictness = useMemo(() => computeStrictnessLevel(activeLockDays, activeVestingDays), [activeLockDays, activeVestingDays]);
 
-  const isVestingValid = useMemo(() => {
-    if (activeMilestones.length === 0) return false;
-    const last = activeMilestones[activeMilestones.length - 1];
-    if (last.days < 7 || last.bps !== 10000) return false;
-    for (let i = 1; i < activeMilestones.length; i++) {
-      if (activeMilestones[i].days <= activeMilestones[i - 1].days) return false;
-      if (activeMilestones[i].bps <= activeMilestones[i - 1].bps) return false;
-    }
-    return true;
-  }, [activeMilestones]);
+  const isVestingValid = activeLockDays >= 7 && activeVestingDays >= 7;
 
   const {
     step: poolStep,
@@ -181,13 +131,10 @@ export default function CreatePoolPage() {
       tokenAddress: tokenAddr,
       ethAmount,
       tokenAmount,
-      vestingSchedule: activeMilestones.map((m) => ({
-        timeOffset: m.days * 86400,
-        basisPoints: m.bps,
-      })),
+      lockDuration: activeLockDays * 86400,
+      vestingDuration: activeVestingDays * 86400,
       commitment: {
         dailyWithdrawLimit: commitment.dailyWithdrawLimit,
-        lockDuration: commitment.lockDuration,
         maxSellPercent: commitment.maxSellPercent,
       },
       triggerConfig: DEFAULT_TRIGGER_CONFIG,
@@ -195,9 +142,9 @@ export default function CreatePoolPage() {
   };
 
   const trustLevel =
-    commitment.lockDuration >= 7776000 && commitment.maxSellPercent <= 300
+    totalDays >= 90 && commitment.maxSellPercent <= 300
       ? "High"
-      : commitment.lockDuration >= 2592000
+      : totalDays >= 30
         ? "Medium"
         : "Low";
   const trustColor =
@@ -372,20 +319,20 @@ export default function CreatePoolPage() {
               <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">LP Vesting Schedule</p>
                 <div className="space-y-2.5">
-                  {activeMilestones.map((m, i) => (
-                    <div key={i} className="flex items-center gap-3">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <div className="h-2 w-2 rounded-full bg-bastion-500 shrink-0" />
-                        <span className="text-sm text-gray-600">Day {m.days}</span>
-                      </div>
-                      <span className="text-sm font-medium text-gray-900 tabular-nums">
-                        {m.bps / 100}%
-                      </span>
-                      <span className="text-sm text-gray-500 tabular-nums text-right">
-                        ({formatLPPct(m.bps)})
-                      </span>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+                      <span className="text-sm text-gray-600">Day 0–{activeLockDays}</span>
                     </div>
-                  ))}
+                    <span className="text-sm font-medium text-gray-900">Locked (0%)</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="h-2 w-2 rounded-full bg-bastion-500 shrink-0" />
+                      <span className="text-sm text-gray-600">Day {activeLockDays}–{totalDays}</span>
+                    </div>
+                    <span className="text-sm font-medium text-gray-900">Linear vesting (0%→100%)</span>
+                  </div>
                 </div>
                 <p className="text-xs text-gray-400 mt-3 flex items-center gap-1">
                   <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -449,8 +396,8 @@ export default function CreatePoolPage() {
             {/* Preset Buttons */}
             <div className="grid grid-cols-4 gap-2 mb-5">
               {([
-                { mode: "standard" as const, label: "Standard", desc: "90 days" },
                 { mode: "quick" as const, label: "Quick", desc: "30 days" },
+                { mode: "standard" as const, label: "Standard", desc: "90 days" },
                 { mode: "extended" as const, label: "Extended", desc: "180 days" },
                 { mode: "custom" as const, label: "Custom", desc: "Your rules" },
               ]).map(({ mode, label, desc }) => (
@@ -459,7 +406,8 @@ export default function CreatePoolPage() {
                   onClick={() => {
                     setVestingMode(mode);
                     if (mode !== "custom") {
-                      setCustomMilestones(VESTING_PRESETS[mode]);
+                      setLockDays(VESTING_PRESETS[mode].lockDays);
+                      setVestingDays(VESTING_PRESETS[mode].vestingDays);
                     }
                   }}
                   className={`rounded-xl border px-3 py-2.5 text-center transition-all ${
@@ -474,107 +422,73 @@ export default function CreatePoolPage() {
               ))}
             </div>
 
-            {/* Custom Milestone Editor */}
+            {/* Custom Lock/Vesting Duration Editor */}
             {vestingMode === "custom" && (
-              <div className="space-y-3 mb-4">
-                <div className="flex items-center gap-2 text-[11px] text-gray-400 uppercase tracking-wider font-medium px-1">
-                  <span className="flex-1">Day</span>
-                  <span className="flex-1">Percentage</span>
-                  <span className="w-8" />
-                </div>
-                {customMilestones.map((m, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <input
-                        type="number"
-                        min={1}
-                        value={m.days}
-                        onChange={(e) => {
-                          const newMs = [...customMilestones];
-                          newMs[i] = { ...newMs[i], days: parseInt(e.target.value) || 0 };
-                          setCustomMilestones(newMs);
-                        }}
-                        className="input-base text-sm tabular-nums"
-                        placeholder="Days"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <div className="relative">
-                        <input
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={m.bps / 100}
-                          onChange={(e) => {
-                            const newMs = [...customMilestones];
-                            const pct = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                            newMs[i] = { ...newMs[i], bps: pct * 100 };
-                            setCustomMilestones(newMs);
-                          }}
-                          className="input-base text-sm tabular-nums pr-8"
-                          placeholder="%"
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        if (customMilestones.length > 1) {
-                          setCustomMilestones(customMilestones.filter((_, j) => j !== i));
-                        }
-                      }}
-                      disabled={customMilestones.length <= 1}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-30"
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+              <div className="space-y-5 mb-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-3">
+                    <span className="text-gray-600 font-medium">Lock Period</span>
+                    <span className="text-gray-900 font-semibold tabular-nums">{lockDays} days</span>
                   </div>
-                ))}
-                {customMilestones.length < 10 && (
-                  <button
-                    onClick={() => {
-                      const lastDay = customMilestones.length > 0 ? customMilestones[customMilestones.length - 1].days : 0;
-                      const lastBps = customMilestones.length > 0 ? customMilestones[customMilestones.length - 1].bps : 0;
-                      setCustomMilestones([
-                        ...customMilestones,
-                        { days: lastDay + 30, bps: Math.min(10000, lastBps + 2000) },
-                      ]);
-                    }}
-                    className="w-full rounded-xl border border-dashed border-gray-300 py-2.5 text-sm text-gray-500 hover:border-bastion-400 hover:text-bastion-600 transition-colors"
-                  >
-                    + Add Milestone
-                  </button>
-                )}
+                  <input
+                    type="range"
+                    min={7}
+                    max={90}
+                    step={1}
+                    value={lockDays}
+                    onChange={(e) => setLockDays(parseInt(e.target.value))}
+                    className="w-full accent-bastion-600"
+                  />
+                  <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                    <span>7 days (min)</span>
+                    <span>90 days</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-3">
+                    <span className="text-gray-600 font-medium">Vesting Period</span>
+                    <span className="text-gray-900 font-semibold tabular-nums">{vestingDays} days</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={7}
+                    max={365}
+                    step={1}
+                    value={vestingDays}
+                    onChange={(e) => setVestingDays(parseInt(e.target.value))}
+                    className="w-full accent-bastion-600"
+                  />
+                  <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                    <span>7 days (min)</span>
+                    <span>365 days</span>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 text-center">
+                  Total: <span className="font-semibold">{totalDays} days</span>
+                </div>
               </div>
             )}
 
             {/* Vesting Chart */}
             <div className="rounded-xl bg-gray-50 p-4 mb-4">
               <VestingChart
-                milestones={activeMilestones}
-                lockDays={Math.round(commitment.lockDuration / 86400)}
-                defaultMilestones={vestingMode !== "standard" ? VESTING_PRESETS.standard : undefined}
-                defaultLockDays={Math.round(DEFAULT_COMMITMENT.lockDuration / 86400)}
+                lockDays={activeLockDays}
+                vestingDays={activeVestingDays}
+                defaultLockDays={vestingMode !== "standard" ? VESTING_PRESETS.standard.lockDays : undefined}
+                defaultVestingDays={vestingMode !== "standard" ? VESTING_PRESETS.standard.vestingDays : undefined}
                 label={vestingMode === "custom" ? "Custom" : vestingMode.charAt(0).toUpperCase() + vestingMode.slice(1)}
                 height={160}
               />
-              {/* Milestone list below chart */}
+              {/* Summary below chart */}
               <div className="mt-3 pt-3 border-t border-gray-200 space-y-1.5">
-                {activeMilestones.map((m, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">Day {m.days}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="font-medium text-gray-900 tabular-nums">{m.bps / 100}% unlocked</span>
-                      {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
-                        <span className="text-gray-400 tabular-nums text-xs">
-                          ({formatLPPct(m.bps)})
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Lock period</span>
+                  <span className="font-medium text-gray-900 tabular-nums">Day 0–{activeLockDays} (0% removable)</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Linear vesting</span>
+                  <span className="font-medium text-gray-900 tabular-nums">Day {activeLockDays}–{totalDays} (0%→100%)</span>
+                </div>
               </div>
             </div>
 
@@ -676,30 +590,6 @@ export default function CreatePoolPage() {
               </div>
               <div>
                 <div className="flex justify-between text-sm mb-3">
-                  <span className="text-gray-600 font-medium">Lock Duration</span>
-                  <span className="text-gray-900 font-semibold tabular-nums">{formatDuration(commitment.lockDuration)}</span>
-                </div>
-                <input
-                  type="range"
-                  min={604800}
-                  max={31536000}
-                  step={604800}
-                  value={commitment.lockDuration}
-                  onChange={(e) =>
-                    setCommitment({
-                      ...commitment,
-                      lockDuration: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full accent-bastion-600"
-                />
-                <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                  <span>1 week</span>
-                  <span>1 year</span>
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-3">
                   <span className="text-gray-600 font-medium">Max Sell per 24h</span>
                   <span className="text-gray-900 font-semibold tabular-nums">{formatBps(commitment.maxSellPercent)}</span>
                 </div>
@@ -797,7 +687,7 @@ export default function CreatePoolPage() {
             <div className="flex justify-between">
               <span className="text-gray-500">Vesting</span>
               <span className="text-gray-900 font-medium capitalize">
-                {vestingMode} ({activeMilestones[activeMilestones.length - 1]?.days ?? 0}d)
+                {vestingMode} ({totalDays}d total)
               </span>
             </div>
             <div className="flex justify-between">
@@ -808,7 +698,6 @@ export default function CreatePoolPage() {
               <span className="text-gray-500">Commitments</span>
               <span className="text-gray-900 font-medium">
                 {commitment.dailyWithdrawLimit === DEFAULT_COMMITMENT.dailyWithdrawLimit &&
-                 commitment.lockDuration === DEFAULT_COMMITMENT.lockDuration &&
                  commitment.maxSellPercent === DEFAULT_COMMITMENT.maxSellPercent
                   ? "Default"
                   : "Custom"}
@@ -824,22 +713,33 @@ export default function CreatePoolPage() {
           <div className="mt-4 rounded-xl bg-bastion-50 border border-bastion-200 p-4">
             <p className="text-sm text-bastion-800">
               By creating this pool, your LP position will be locked in escrow.
-              You can remove LP according to the vesting schedule:
+              LP unlocks linearly after the lock period:
             </p>
             <div className="mt-3 space-y-1.5">
-              {activeMilestones.map((m, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm">
-                  <svg className="h-4 w-4 text-bastion-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span className="text-bastion-700">
-                    Day {m.days}: up to {m.bps / 100}% LP
-                    {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
-                      <span className="text-bastion-500"> ({formatLPPct(m.bps)})</span>
-                    )}
-                  </span>
-                </div>
-              ))}
+              <div className="flex items-center gap-2 text-sm">
+                <svg className="h-4 w-4 text-bastion-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-bastion-700">
+                  Lock period: {activeLockDays} days (no LP removal)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <svg className="h-4 w-4 text-bastion-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-bastion-700">
+                  Vesting: {activeVestingDays} days (linear 0%→100%)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <svg className="h-4 w-4 text-bastion-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-bastion-700">
+                  Full unlock at day {totalDays}
+                </span>
+              </div>
             </div>
             <p className="mt-3 text-xs text-bastion-600/70">
               If a rug pull is detected, the issuer&apos;s LP will be permanently locked down.

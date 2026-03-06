@@ -1,19 +1,14 @@
 "use client";
 
-interface Milestone {
-  days: number;
-  bps: number; // basis points, 10000 = 100%
-}
-
 interface VestingChartProps {
-  /** Current vesting schedule milestones (timeOffset in days, NOT including lockDays) */
-  milestones: Milestone[];
-  /** Optional default schedule to overlay as comparison (dashed line) */
-  defaultMilestones?: Milestone[];
-  /** Lock duration in days (cliff before vesting starts). Milestones shift right by this amount. */
-  lockDays?: number;
-  /** Lock duration for default schedule in days */
+  /** Lock duration in days (0% removable during this period) */
+  lockDays: number;
+  /** Vesting duration in days (linear from 0% to 100% after lock) */
+  vestingDays: number;
+  /** Optional default lock days to overlay as comparison (dashed line) */
   defaultLockDays?: number;
+  /** Optional default vesting days to overlay as comparison (dashed line) */
+  defaultVestingDays?: number;
   /** Chart height in px */
   height?: number;
   /** Label for the current schedule */
@@ -28,14 +23,15 @@ const PAD_RIGHT = 16;
 const PAD_TOP = 16;
 const PAD_BOTTOM = 32;
 
-function buildStepPath(
-  milestones: Milestone[],
+function buildLinearPath(
   lockDays: number,
+  vestingDays: number,
   maxDays: number,
   chartW: number,
   chartH: number,
 ): string {
-  if (milestones.length === 0) return "";
+  const totalDays = lockDays + vestingDays;
+  if (totalDays === 0) return "";
 
   const toX = (d: number) => PAD_LEFT + (d / maxDays) * chartW;
   const toY = (bps: number) => PAD_TOP + chartH - (bps / 10000) * chartH;
@@ -44,37 +40,25 @@ function buildStepPath(
   let path = `M ${toX(0)} ${toY(0)}`;
 
   // Flat at 0% through lock period
-  if (lockDays > 0) {
-    path += ` H ${toX(lockDays)}`;
-  }
+  path += ` L ${toX(lockDays)} ${toY(0)}`;
 
-  for (const m of milestones) {
-    const actualDay = lockDays + m.days;
-    // Horizontal to the milestone day at previous bps level
-    path += ` H ${toX(actualDay)}`;
-    // Vertical jump to new bps level
-    path += ` V ${toY(m.bps)}`;
-  }
+  // Linear ramp from 0% to 100% over vesting period
+  const endDay = Math.min(totalDays, maxDays);
+  path += ` L ${toX(endDay)} ${toY(10000)}`;
 
-  // Extend horizontally to the end if last milestone doesn't reach maxDays
-  const lastM = milestones[milestones.length - 1];
-  if (lockDays + lastM.days < maxDays) {
+  // Extend horizontally if totalDays < maxDays
+  if (totalDays < maxDays) {
     path += ` H ${toX(maxDays)}`;
   }
 
   return path;
 }
 
-/** Get the actual day positions of milestones (lock + timeOffset) */
-function getMilestoneDots(milestones: Milestone[], lockDays: number) {
-  return milestones.map((m) => ({ day: lockDays + m.days, bps: m.bps }));
-}
-
 export function VestingChart({
-  milestones,
-  defaultMilestones,
-  lockDays = 0,
-  defaultLockDays = 0,
+  lockDays,
+  vestingDays,
+  defaultLockDays,
+  defaultVestingDays,
   height = 180,
   label = "Custom",
   defaultLabel = "Default (90d)",
@@ -83,13 +67,11 @@ export function VestingChart({
   const chartW = WIDTH - PAD_LEFT - PAD_RIGHT;
   const chartH = height - PAD_TOP - PAD_BOTTOM;
 
+  const totalDays = lockDays + vestingDays;
+  const defaultTotalDays = (defaultLockDays ?? 0) + (defaultVestingDays ?? 0);
+
   // Determine max days for the x-axis
-  const allDays = [
-    ...milestones.map((m) => lockDays + m.days),
-    ...(defaultMilestones?.map((m) => defaultLockDays + m.days) ?? []),
-  ];
-  const rawMax = Math.max(...allDays, 7);
-  // Round up to a nice number
+  const rawMax = Math.max(totalDays, defaultTotalDays, 7);
   const maxDays = rawMax <= 30 ? 30 : rawMax <= 90 ? 90 : rawMax <= 180 ? 180 : rawMax <= 365 ? 365 : Math.ceil(rawMax / 30) * 30;
 
   const toX = (d: number) => PAD_LEFT + (d / maxDays) * chartW;
@@ -108,7 +90,6 @@ export function VestingChart({
   } else {
     for (let d = 0; d <= maxDays; d += 30) xTicks.push(d);
     if (xTicks[xTicks.length - 1] !== maxDays) xTicks.push(maxDays);
-    // Limit to ~6 ticks
     if (xTicks.length > 7) {
       const step = Math.ceil(maxDays / 5 / 30) * 30;
       xTicks.length = 0;
@@ -117,9 +98,9 @@ export function VestingChart({
     }
   }
 
-  const currentPath = buildStepPath(milestones, lockDays, maxDays, chartW, chartH);
-  const defaultPath = defaultMilestones
-    ? buildStepPath(defaultMilestones, defaultLockDays, maxDays, chartW, chartH)
+  const currentPath = buildLinearPath(lockDays, vestingDays, maxDays, chartW, chartH);
+  const defaultPath = defaultLockDays !== undefined && defaultVestingDays !== undefined
+    ? buildLinearPath(defaultLockDays, defaultVestingDays, maxDays, chartW, chartH)
     : "";
 
   // Fill area under current schedule
@@ -127,10 +108,7 @@ export function VestingChart({
     ? `${currentPath} V ${toY(0)} H ${toX(0)} Z`
     : "";
 
-  const currentDots = getMilestoneDots(milestones, lockDays);
-  const defaultDots = defaultMilestones ? getMilestoneDots(defaultMilestones, defaultLockDays) : [];
-
-  const showLegend = !!defaultMilestones && defaultMilestones.length > 0;
+  const showLegend = !!defaultPath;
   const showLock = lockDays > 0;
 
   return (
@@ -250,31 +228,25 @@ export function VestingChart({
           />
         )}
 
-        {/* Milestone dots on current schedule */}
-        {currentDots.map((m, i) => (
-          <circle
-            key={i}
-            cx={toX(m.day)}
-            cy={toY(m.bps)}
-            r={3.5}
-            fill="white"
-            stroke="#6d28d9"
-            strokeWidth={2}
-          />
-        ))}
-
-        {/* Default milestone dots */}
-        {defaultDots.map((m, i) => (
-          <circle
-            key={`d-${i}`}
-            cx={toX(m.day)}
-            cy={toY(m.bps)}
-            r={2.5}
-            fill="white"
-            stroke="#9ca3af"
-            strokeWidth={1.5}
-          />
-        ))}
+        {/* Key points on current schedule */}
+        {/* Lock end point */}
+        <circle
+          cx={toX(lockDays)}
+          cy={toY(0)}
+          r={3.5}
+          fill="white"
+          stroke="#6d28d9"
+          strokeWidth={2}
+        />
+        {/* Vesting end point (100%) */}
+        <circle
+          cx={toX(totalDays)}
+          cy={toY(10000)}
+          r={3.5}
+          fill="white"
+          stroke="#6d28d9"
+          strokeWidth={2}
+        />
 
         {/* Gradient definition */}
         <defs>

@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { VestingChart } from "@/components/ui/VestingChart";
-import { formatBps } from "@/lib/formatters";
 
 interface EscrowStatusProps {
   escrow: {
@@ -12,64 +11,28 @@ interface EscrowStatusProps {
     remainingLiquidity: string;
     isTriggered: boolean;
     createdAt?: string;
+    lockDuration?: string;
+    vestingDuration?: string;
     commitment?: {
       dailyWithdrawLimit: string;
-      lockDuration: string;
       maxSellPercent: string;
     } | null;
-    vestingSchedule?: {
-      id: string;
-      timestamp: string;
-      basisPoints: number;
-    }[];
   };
   tokenLabel?: string;
   tokenSymbol?: string;
   vestingEndTime?: number;
 }
 
-// Default milestones for strictness comparison
-const DEFAULT_MILESTONES = [
-  { time: 7 * 86400, bps: 1000 },
-  { time: 30 * 86400, bps: 3000 },
-  { time: 90 * 86400, bps: 10000 },
-];
+const DEFAULT_TOTAL_DAYS = 90;
 
 function computeStrictnessLevel(
-  milestones: { timestamp: string; basisPoints: number }[],
-  createdAt: number,
-  lockDuration: number
+  lockDuration: number,
+  vestingDuration: number
 ): "stricter" | "default" | "looser" | null {
-  if (!milestones || milestones.length === 0 || createdAt === 0) return null;
-
-  const sorted = milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
-  const vestingStart = createdAt + lockDuration;
-  const offsets = sorted.map((m) => ({
-    timeOffset: parseInt(m.timestamp) - vestingStart,
-    bps: m.basisPoints,
-  }));
-  const lastOffset = offsets[offsets.length - 1].timeOffset;
-
-  if (lastOffset < 90 * 86400) return "looser";
-
-  const getBpsAtOffset = (offset: number): number => {
-    let bps = 0;
-    for (const o of offsets) {
-      if (o.timeOffset <= offset) bps = o.bps;
-      else break;
-    }
-    return bps;
-  };
-
-  let allSame = true;
-
-  for (const def of DEFAULT_MILESTONES) {
-    const customBps = getBpsAtOffset(def.time);
-    if (customBps > def.bps) return "looser";
-    if (customBps !== def.bps) allSame = false;
-  }
-
-  if (allSame && lastOffset === 90 * 86400) return "default";
+  if (lockDuration === 0 && vestingDuration === 0) return null;
+  const totalDays = Math.round((lockDuration + vestingDuration) / 86400);
+  if (totalDays < DEFAULT_TOTAL_DAYS) return "looser";
+  if (totalDays === DEFAULT_TOTAL_DAYS) return "default";
   return "stricter";
 }
 
@@ -94,17 +57,6 @@ function formatCompact(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   if (n >= 1) return n.toFixed(2);
   return n.toFixed(4);
-}
-
-/** Format LP liquidity amount */
-function formatLP(amount: number): string {
-  return `${formatCompact(amount)} LP`;
-}
-
-/** Format LP at a specific bps proportion */
-function formatLPAtBps(totalLiquidity: number, bps: number): string {
-  const part = (totalLiquidity * bps) / 10000;
-  return `${formatCompact(part)} LP`;
 }
 
 function Countdown({ targetTs, label }: { targetTs: number; label?: string }) {
@@ -154,19 +106,17 @@ function Countdown({ targetTs, label }: { targetTs: number; label?: string }) {
   );
 }
 
-/* ── Full-width Vesting Timeline ── */
+/* ── Full-width Linear Vesting Timeline ── */
 function VestingTimeline({
-  milestones,
   createdAt,
   lockDuration,
+  vestingDuration,
   vestingEndTime,
-  total,
 }: {
-  milestones: { id: string; timestamp: string; basisPoints: number }[];
   createdAt: number;
   lockDuration: number;
+  vestingDuration: number;
   vestingEndTime?: number;
-  total: number;
 }) {
   const [now, setNow] = useState(Math.floor(Date.now() / 1000));
   useEffect(() => {
@@ -174,31 +124,21 @@ function VestingTimeline({
     return () => clearInterval(id);
   }, []);
 
-  const sorted = useMemo(
-    () => milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp)),
-    [milestones]
-  );
-
   const startTs = createdAt;
-  const lastMilestoneTs = sorted.length > 0 ? parseInt(sorted[sorted.length - 1].timestamp) : 0;
-  const endTs = vestingEndTime && vestingEndTime > lastMilestoneTs
+  const lockEndTs = createdAt + lockDuration;
+  const endTs = vestingEndTime && vestingEndTime > 0
     ? vestingEndTime
-    : lastMilestoneTs > 0
-      ? lastMilestoneTs
-      : lockDuration > 0
-        ? createdAt + lockDuration
-        : createdAt + 86400 * 90;
+    : createdAt + lockDuration + vestingDuration;
   const range = endTs - startTs;
   if (range <= 0) return null;
 
   const toPct = (ts: number) => Math.min(Math.max(((ts - startTs) / range) * 100, 0), 100);
   const currentPct = toPct(now);
-  const lockEndTs = lockDuration > 0 ? createdAt + lockDuration : 0;
-  const lockPct = lockEndTs > 0 ? toPct(lockEndTs) : 0;
-  const isLocked = lockEndTs > 0 && now < lockEndTs;
+  const lockPct = toPct(lockEndTs);
+  const isLocked = now < lockEndTs;
 
   const phases: { label: string; color: string; bgColor: string; start: number; end: number; active: boolean }[] = [];
-  if (lockPct > 0) {
+  if (lockDuration > 0) {
     phases.push({
       label: "Lock Period",
       color: isLocked ? "text-amber-700" : "text-gray-400",
@@ -209,7 +149,7 @@ function VestingTimeline({
     });
   }
   phases.push({
-    label: "Vesting",
+    label: "Linear Vesting",
     color: !isLocked && currentPct < 100 ? "text-emerald-700" : "text-gray-400",
     bgColor: !isLocked && currentPct < 100 ? "bg-emerald-400/50" : "bg-emerald-200/30",
     start: lockPct,
@@ -273,37 +213,6 @@ function VestingTimeline({
           </div>
         )}
 
-        {/* Milestone markers */}
-        {sorted.map((m, i) => {
-          const ts = parseInt(m.timestamp);
-          const pct = toPct(ts);
-          const isPast = ts <= now;
-          const cumulativeBps = m.basisPoints;
-
-          return (
-            <div
-              key={m.id}
-              className="absolute top-1/2 z-10 group"
-              style={{ left: `${pct}%`, transform: "translateX(-50%) translateY(-50%)" }}
-            >
-              <div
-                className={`h-4 w-4 rounded-full border-2 border-white shadow-sm transition-all ${
-                  isPast ? "bg-emerald-500" : "bg-white border-gray-300"
-                }`}
-              />
-              {/* Tooltip on hover */}
-              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block z-50">
-                <div className="bg-gray-900 text-white rounded-lg px-3 py-2 text-xs whitespace-nowrap shadow-lg">
-                  <p className="font-medium">{formatBps(cumulativeBps)} LP vested</p>
-                  <p className="text-gray-400">{formatLPAtBps(total, cumulativeBps)}</p>
-                  <p className="text-gray-400">{formatDate(ts)}</p>
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
         {/* Current position indicator */}
         <div
           className="absolute top-1/2 z-30"
@@ -322,7 +231,7 @@ function VestingTimeline({
       {/* Timeline dates */}
       <div className="relative mt-3 flex justify-between text-[11px] text-gray-400">
         <span>{formatShortDate(startTs)}</span>
-        {lockEndTs > 0 && lockPct > 15 && lockPct < 85 && (
+        {lockDuration > 0 && lockPct > 15 && lockPct < 85 && (
           <span className="absolute" style={{ left: `${lockPct}%`, transform: "translateX(-50%)" }}>
             <span className={isLocked ? "text-amber-600 font-medium" : ""}>
               {formatShortDate(lockEndTs)}
@@ -350,72 +259,6 @@ function VestingTimeline({
   );
 }
 
-/* ── Milestone List ── */
-function MilestoneList({
-  milestones,
-  total,
-}: {
-  milestones: { id: string; timestamp: string; basisPoints: number }[];
-  total: number;
-}) {
-  const now = Math.floor(Date.now() / 1000);
-  const sorted = milestones.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
-
-  return (
-    <div className="mt-5">
-      <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">
-        Vesting Schedule
-      </p>
-      <div className="space-y-0">
-        {sorted.map((m, i) => {
-          const ts = parseInt(m.timestamp);
-          const isPast = ts <= now;
-          const isNext = !isPast && (i === 0 || parseInt(sorted[i - 1].timestamp) <= now);
-
-          return (
-            <div key={m.id} className="flex items-start gap-3">
-              {/* Timeline connector */}
-              <div className="flex flex-col items-center">
-                <div
-                  className={`h-3 w-3 rounded-full border-2 shrink-0 mt-1 ${
-                    isPast
-                      ? "bg-emerald-500 border-emerald-500"
-                      : isNext
-                        ? "bg-white border-emerald-500"
-                        : "bg-white border-gray-300"
-                  }`}
-                />
-                {i < sorted.length - 1 && (
-                  <div className={`w-0.5 h-8 ${isPast ? "bg-emerald-300" : "bg-gray-200"}`} />
-                )}
-              </div>
-              {/* Content */}
-              <div className={`flex-1 flex items-center justify-between pb-3 ${
-                isNext ? "bg-emerald-50/50 -mx-2 px-2 rounded-lg" : ""
-              }`}>
-                <div>
-                  <p className={`text-sm font-medium ${isPast ? "text-gray-400" : isNext ? "text-emerald-700" : "text-gray-700"}`}>
-                    {formatBps(m.basisPoints)} LP
-                    {isNext && <span className="text-[10px] ml-1.5 text-emerald-600 font-semibold">NEXT</span>}
-                  </p>
-                  <p className="text-[11px] text-gray-400">
-                    {formatDate(ts)} &middot; {formatLPAtBps(total, m.basisPoints)}
-                  </p>
-                </div>
-                {isPast && (
-                  <svg className="h-4 w-4 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
   const total = parseFloat(escrow.totalLiquidity);
   const removed = parseFloat(escrow.removedLiquidity);
@@ -424,24 +267,22 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
 
   const now = Math.floor(Date.now() / 1000);
   const createdAt = escrow.createdAt ? parseInt(escrow.createdAt) : 0;
-  const lockDuration = escrow.commitment?.lockDuration
-    ? parseInt(escrow.commitment.lockDuration)
-    : 0;
+  const lockDuration = escrow.lockDuration ? parseInt(escrow.lockDuration) : 0;
+  const vestingDuration = escrow.vestingDuration ? parseInt(escrow.vestingDuration) : 0;
+  const totalDuration = lockDuration + vestingDuration;
 
-  const sortedMilestones = escrow.vestingSchedule
-    ?.slice()
-    .sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
-  const nextMilestone = sortedMilestones?.find(
-    (m) => parseInt(m.timestamp) > now
-  );
-  const allVested = sortedMilestones && sortedMilestones.length > 0 && !nextMilestone;
-
-  const nextMilestoneBps = nextMilestone?.basisPoints ?? 0;
+  const lockEndTs = createdAt + lockDuration;
+  const vestEndTs = createdAt + totalDuration;
+  const isLocked = now < lockEndTs;
+  const allVested = now >= vestEndTs && createdAt > 0;
 
   const vestingStrictness = useMemo(
-    () => sortedMilestones ? computeStrictnessLevel(sortedMilestones, createdAt, lockDuration) : null,
-    [sortedMilestones, createdAt, lockDuration]
+    () => computeStrictnessLevel(lockDuration, vestingDuration),
+    [lockDuration, vestingDuration]
   );
+
+  const lockDays = Math.round(lockDuration / 86400);
+  const vestingDays = Math.round(vestingDuration / 86400);
 
   return (
     <div className="glass-card p-0 overflow-hidden">
@@ -457,7 +298,7 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
           </div>
           <div>
             <h3 className="text-base font-semibold text-gray-900">Escrow Vault</h3>
-            <p className="text-xs text-gray-400">LP lock & vesting</p>
+            <p className="text-xs text-gray-400">LP lock & linear vesting</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -467,9 +308,9 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
                 ? "bg-emerald-50 text-emerald-700"
                 : "bg-yellow-50 text-yellow-700"
             }`}>
-              {vestingStrictness === "stricter" ? "Stricter than default" : `${
-                sortedMilestones ? Math.round((parseInt(sortedMilestones[sortedMilestones.length - 1].timestamp) - createdAt) / 86400) : 0
-              }d vesting`}
+              {vestingStrictness === "stricter"
+                ? "Stricter than default"
+                : `${lockDays + vestingDays}d vesting`}
             </span>
           )}
           {escrow.isTriggered ? (
@@ -505,10 +346,16 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
             <p className="text-3xl font-bold text-gray-900 tabular-nums">{progress.toFixed(1)}%</p>
             <p className="text-xs text-gray-400 mt-0.5">vested so far</p>
           </div>
-          {!escrow.isTriggered && nextMilestone && (
+          {!escrow.isTriggered && !allVested && isLocked && (
             <Countdown
-              targetTs={parseInt(nextMilestone.timestamp)}
-              label={`Next unlock: ${formatBps(nextMilestoneBps)} LP`}
+              targetTs={lockEndTs}
+              label="Lock ends in"
+            />
+          )}
+          {!escrow.isTriggered && !allVested && !isLocked && (
+            <Countdown
+              targetTs={vestEndTs}
+              label="Fully vested in"
             />
           )}
           {!escrow.isTriggered && allVested && (
@@ -517,7 +364,7 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
                 <svg className="h-5 w-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span className="text-sm font-semibold text-emerald-600">All milestones reached</span>
+                <span className="text-sm font-semibold text-emerald-600">Fully vested</span>
               </div>
             </div>
           )}
@@ -565,45 +412,62 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
       </div>
 
       {/* Full-width timeline */}
-      {!escrow.isTriggered && sortedMilestones && sortedMilestones.length > 0 && createdAt > 0 && (
+      {!escrow.isTriggered && createdAt > 0 && totalDuration > 0 && (
         <div className="border-t border-subtle bg-gray-50/50 px-6 py-5">
           <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-1">
             Escrow Timeline
           </p>
           <VestingTimeline
-            milestones={sortedMilestones}
             createdAt={createdAt}
             lockDuration={lockDuration}
+            vestingDuration={vestingDuration}
             vestingEndTime={vestingEndTime}
-            total={total}
           />
         </div>
       )}
 
-      {/* Vesting Chart + Milestone list */}
-      {!escrow.isTriggered && sortedMilestones && sortedMilestones.length > 0 && (
+      {/* Vesting Chart */}
+      {!escrow.isTriggered && totalDuration > 0 && (
         <div className="border-t border-subtle px-6 py-4">
           <VestingChart
-            milestones={sortedMilestones.map((m) => ({
-              days: Math.round((parseInt(m.timestamp) - createdAt - lockDuration) / 86400),
-              bps: m.basisPoints,
-            }))}
-            lockDays={Math.round(lockDuration / 86400)}
-            defaultMilestones={[
-              { days: 7, bps: 1000 },
-              { days: 30, bps: 3000 },
-              { days: 90, bps: 10000 },
-            ]}
-            defaultLockDays={90}
+            lockDays={lockDays}
+            vestingDays={vestingDays}
+            defaultLockDays={7}
+            defaultVestingDays={83}
             label="This pool"
             height={160}
           />
-          <MilestoneList milestones={sortedMilestones} total={total} />
+          {/* Vesting summary */}
+          <div className="mt-5">
+            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">
+              Vesting Schedule
+            </p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-2.5 rounded-sm bg-amber-400/60" />
+                  <span className="text-gray-600">Lock period</span>
+                </div>
+                <span className="font-medium text-gray-900 tabular-nums">{lockDays} days</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-2.5 rounded-sm bg-emerald-400/50" />
+                  <span className="text-gray-600">Linear vesting</span>
+                </div>
+                <span className="font-medium text-gray-900 tabular-nums">{vestingDays} days</span>
+              </div>
+              <div className="flex items-center justify-between text-sm pt-1 border-t border-gray-200">
+                <span className="text-gray-600 font-medium">Total duration</span>
+                <span className="font-semibold text-gray-900 tabular-nums">{lockDays + vestingDays} days</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Fallback: vesting end time from chain if no milestones */}
-      {!escrow.isTriggered && (!sortedMilestones || sortedMilestones.length === 0) && vestingEndTime && vestingEndTime > 0 && (
+      {/* Fallback: vesting end time from chain if no durations */}
+      {!escrow.isTriggered && totalDuration === 0 && vestingEndTime && vestingEndTime > 0 && (
         <div className="border-t border-subtle px-6 py-4">
           <div className="flex items-center justify-between">
             <div>

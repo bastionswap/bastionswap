@@ -282,14 +282,11 @@ contract TestE2E is Script {
     }
 
     function _buildHookData(address deployer) internal view returns (bytes memory) {
-        IEscrowVault.VestingStep[] memory vesting = new IEscrowVault.VestingStep[](3);
-        vesting[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        vesting[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        vesting[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
+        uint40 lockDuration = 7 days;
+        uint40 vestingDuration = 83 days;
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 500,
-            lockDuration: 7776000, // 90 days
             maxSellPercent: 300
         });
 
@@ -303,7 +300,7 @@ contract TestE2E is Script {
         });
 
         return abi.encode(
-            deployer, address(issuedToken), vesting, commitment, triggerConfig
+            deployer, address(issuedToken), lockDuration, vestingDuration, commitment, triggerConfig
         );
     }
 }

@@ -9,7 +9,6 @@ import {
 } from "../../generated/EscrowVault/EscrowVault";
 import {
   Escrow,
-  VestingMilestone,
   Commitment,
   Pool,
 } from "../../generated/schema";
@@ -31,6 +30,8 @@ export function handleEscrowVaultCreated(event: EscrowCreated): void {
   escrow.totalLiquidity = toDecimal(event.params.liquidity);
   escrow.removedLiquidity = ZERO_BD;
   escrow.remainingLiquidity = toDecimal(event.params.liquidity);
+  escrow.lockDuration = BigInt.fromI32(event.params.lockDuration);
+  escrow.vestingDuration = BigInt.fromI32(event.params.vestingDuration);
   escrow.isTriggered = false;
   escrow.createdAt = event.block.timestamp;
   escrow.save();
@@ -128,7 +129,6 @@ export function handleCommitmentSet(event: CommitmentSet): void {
   commitment.dailyWithdrawLimit = BigInt.fromI32(
     event.params.newCommitment.dailyWithdrawLimit
   );
-  commitment.lockDuration = event.params.newCommitment.lockDuration;
   commitment.maxSellPercent = BigInt.fromI32(
     event.params.newCommitment.maxSellPercent
   );

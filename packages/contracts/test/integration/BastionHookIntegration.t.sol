@@ -133,16 +133,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
     // ─── Helpers ──────────────────────────────────────────────────────
 
-    function _defaultVestingSchedule() internal pure returns (IEscrowVault.VestingStep[] memory) {
-        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
-        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
-        return schedule;
-    }
+    uint40 constant DEFAULT_LOCK = 7 days;
+    uint40 constant DEFAULT_VESTING = 83 days;
 
     function _defaultCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
-        return IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, lockDuration: 0, maxSellPercent: 200});
+        return IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
     }
 
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
@@ -160,7 +155,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         return abi.encode(
             issuerAddr,
             address(issuedToken),
-            _defaultVestingSchedule(),
+            DEFAULT_LOCK,
+            DEFAULT_VESTING,
             _defaultCommitment(),
             _defaultTriggerConfig()
         );
@@ -299,18 +295,18 @@ contract BastionHookIntegrationTest is Test, Deployers {
     //  VESTING & LP REMOVAL FLOW
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_vestingCalculation_afterFirstMilestone() public {
+    function test_vestingCalculation_duringLockAndVesting() public {
         _initPoolWithIssuer();
 
         (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
 
-        // Before vesting: 0
+        // During lock period: 0
         assertEq(escrowVault.calculateVestedLiquidity(escrowId), 0);
 
-        // Warp to 7 days
-        vm.warp(block.timestamp + 7 days);
+        // Warp past lock (7 days) into vesting
+        vm.warp(block.timestamp + 7 days + 1);
 
-        // 10% should be vested
+        // Should have some vested (linear)
         uint128 vested = escrowVault.calculateVestedLiquidity(escrowId);
         assertGt(vested, 0);
 

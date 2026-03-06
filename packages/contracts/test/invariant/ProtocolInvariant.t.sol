@@ -82,19 +82,13 @@ contract ProtocolHandler is Test {
             poolIds.push(poolId);
             issuers.push(issuer);
 
-            IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
-            schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 2000});
-            schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 5000});
-            schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
-
             IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
                 dailyWithdrawLimit: 0,
-                lockDuration: 0,
                 maxSellPercent: 200
             });
 
             vm.prank(hook);
-            uint256 escrowId = vault.createEscrow(poolId, issuer, ESCROW_LIQUIDITY, schedule, commitment);
+            uint256 escrowId = vault.createEscrow(poolId, issuer, ESCROW_LIQUIDITY, 7 days, 83 days, commitment);
             escrowIds.push(escrowId);
 
             ghost_totalLocked += ESCROW_LIQUIDITY;
@@ -351,19 +345,13 @@ contract EconomicHandler is Test {
         poolId = PoolId.wrap(bytes32(uint256(0xECECEC)));
         escrowId = uint256(keccak256(abi.encode(poolId, issuer)));
 
-        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
-        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 2000});
-        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 5000});
-        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
-
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
-            lockDuration: 0,
             maxSellPercent: 200
         });
 
         vm.prank(hook);
-        vault.createEscrow(poolId, issuer, _liquidity, schedule, commitment);
+        vault.createEscrow(poolId, issuer, _liquidity, 7 days, 83 days, commitment);
 
         // Fund insurance pool
         vm.deal(hook, 5 ether);
@@ -494,25 +482,21 @@ contract CrossContractFuzzTest is Test {
         uint16 dailyLimit
     ) internal returns (uint256 escrowId, PoolId poolId, address issuer) {
         liquidity = uint128(bound(liquidity, 1e18, type(uint128).max / 2));
-        lockDuration = uint40(bound(lockDuration, 0, 90 days));
+        lockDuration = uint40(bound(lockDuration, 7 days, 90 days));
         dailyLimit = uint16(bound(dailyLimit, 0, 10000));
 
         issuer = makeAddr("fuzz_issuer");
         poolId = PoolId.wrap(bytes32(uint256(keccak256(abi.encode(liquidity, lockDuration, dailyLimit)))));
 
-        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
-        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 2000});
-        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 5000});
-        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
-
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: dailyLimit,
-            lockDuration: lockDuration,
             maxSellPercent: 10000
         });
 
+        uint40 vestingDuration = uint40(bound(uint256(lockDuration), 7 days, 180 days));
+
         vm.prank(hook);
-        escrowId = vault.createEscrow(poolId, issuer, liquidity, schedule, commitment);
+        escrowId = vault.createEscrow(poolId, issuer, liquidity, lockDuration, vestingDuration, commitment);
     }
 
     /// @dev Full flow: create escrow → warp → record removal → verify invariants

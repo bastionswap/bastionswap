@@ -155,8 +155,10 @@ contract ReputationEngine is IReputationEngine {
             profile.uniqueTokens++;
         }
 
-        // Add escrow history weighted value (amount * lockDuration / (1 day * 1e18))
-        profile.totalLockedWeighted += (amount * uint256(commitment.lockDuration)) / (1 days * 1e18);
+        // Add escrow history weighted value (amount * totalDuration / (1 day * 1e18))
+        (,uint40 lockDur, uint40 vestDur,) = IEscrowVault(ESCROW_VAULT).getEscrowInfo(escrowId);
+        uint256 totalDuration = uint256(lockDur) + uint256(vestDur);
+        profile.totalLockedWeighted += (amount * totalDuration) / (1 days * 1e18);
 
         // Add commitment strictness score (base from commitment params)
         profile.commitmentScore += _calcSingleCommitmentStrictness(commitment);
@@ -247,19 +249,13 @@ contract ReputationEngine is IReputationEngine {
     }
 
     /// @dev Calculates strictness of a single commitment (0..200 range).
-    ///      Normalizes all three components to BPS scale, sums, then divides once to minimize rounding loss.
+    ///      Normalizes both components to BPS scale, sums, then divides once to minimize rounding loss.
     function _calcSingleCommitmentStrictness(IEscrowVault.IssuerCommitment memory c) internal pure returns (uint256) {
-        // All components normalized to 0..MAX_BPS (10000) scale
+        // Both components normalized to 0..MAX_BPS (10000) scale
         uint256 withdrawBps = MAX_BPS - uint256(c.dailyWithdrawLimit);
-
-        uint256 duration = uint256(c.lockDuration);
-        uint256 maxDuration = 365 days;
-        if (duration > maxDuration) duration = maxDuration;
-        uint256 lockBps = (duration * MAX_BPS) / maxDuration;
-
         uint256 sellBps = MAX_BPS - uint256(c.maxSellPercent);
 
-        // Sum all (0..30000) then scale to 0..200 in one division
-        return ((withdrawBps + lockBps + sellBps) * 200) / (3 * MAX_BPS);
+        // Sum (0..20000) then scale to 0..200 in one division
+        return ((withdrawBps + sellBps) * 200) / (2 * MAX_BPS);
     }
 }

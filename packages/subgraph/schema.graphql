@@ -27,24 +27,17 @@ type Escrow @entity {
   totalLiquidity: BigDecimal!
   removedLiquidity: BigDecimal!
   remainingLiquidity: BigDecimal!
-  vestingSchedule: [VestingMilestone!]! @derivedFrom(field: "escrow")
+  lockDuration: BigInt! # lock duration in seconds
+  vestingDuration: BigInt! # linear vesting duration in seconds
   commitment: Commitment
   isTriggered: Boolean!
   createdAt: BigInt!
-}
-
-type VestingMilestone @entity {
-  id: ID! # escrowId-index
-  escrow: Escrow!
-  timestamp: BigInt! # unlock time (absolute timestamp)
-  basisPoints: Int! # cumulative vesting ratio (10000 = 100%)
 }
 
 type Commitment @entity {
   id: ID! # escrowId
   escrow: Escrow!
   dailyWithdrawLimit: BigInt!
-  lockDuration: BigInt!
   maxSellPercent: BigInt!
 }
 

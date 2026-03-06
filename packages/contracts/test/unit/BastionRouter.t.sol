@@ -311,14 +311,11 @@ contract BastionRouterTest is Test, Deployers {
     // ═══════════════════════════════════════════════════════════════
 
     function _encodeIssuerHookDataForToken(address tokenAddr) internal view returns (bytes memory) {
-        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
-        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
+        uint40 lockDuration = 7 days;
+        uint40 vestingDuration = 83 days;
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
-            lockDuration: 0,
             maxSellPercent: 200
         });
 
@@ -332,19 +329,16 @@ contract BastionRouterTest is Test, Deployers {
         });
 
         return abi.encode(
-            issuerAddr, tokenAddr, schedule, commitment, triggerConfig
+            issuerAddr, tokenAddr, lockDuration, vestingDuration, commitment, triggerConfig
         );
     }
 
     function _encodeIssuerHookData() internal view returns (bytes memory) {
-        IEscrowVault.VestingStep[] memory schedule = new IEscrowVault.VestingStep[](3);
-        schedule[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        schedule[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        schedule[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
+        uint40 lockDuration = 7 days;
+        uint40 vestingDuration = 83 days;
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
-            lockDuration: 0,
             maxSellPercent: 200
         });
 
@@ -358,7 +352,7 @@ contract BastionRouterTest is Test, Deployers {
         });
 
         return abi.encode(
-            issuerAddr, address(issuedToken), schedule, commitment, triggerConfig
+            issuerAddr, address(issuedToken), lockDuration, vestingDuration, commitment, triggerConfig
         );
     }
 }

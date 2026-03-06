@@ -76,7 +76,6 @@ dataSources:
       language: wasm/assemblyscript
       entities:
         - Escrow
-        - VestingMilestone
         - Commitment
         - Issuer
         - ProtocolStats
@@ -84,7 +83,7 @@ dataSources:
         - name: EscrowVault
           file: ../contracts/out/EscrowVault.sol/EscrowVault.json
       eventHandlers:
-        - event: EscrowCreated(indexed uint256,indexed bytes32,indexed address,uint128)
+        - event: EscrowCreated(indexed uint256,indexed bytes32,indexed address,uint128,uint40,uint40)
           handler: handleEscrowVaultCreated
         - event: LiquidityAdded(indexed uint256,uint128,uint128)
           handler: handleLiquidityAdded
@@ -94,7 +93,7 @@ dataSources:
           handler: handleForceRemoval
         - event: ForceRemovalFailed(indexed uint256,bytes)
           handler: handleForceRemovalFailed
-        - event: CommitmentSet(indexed uint256,(uint16,uint40,uint16))
+        - event: CommitmentSet(indexed uint256,(uint16,uint16))
           handler: handleCommitmentSet
       file: ./src/mappings/escrowVault.ts
 

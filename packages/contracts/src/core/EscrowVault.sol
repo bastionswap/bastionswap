@@ -9,22 +9,19 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 /// @title EscrowVault
 /// @notice LP removal permission manager. Records how much liquidity the issuer added
-///         and controls how much they can remove based on the vesting schedule.
+///         and controls how much they can remove based on lock + linear vesting.
 ///         No tokens or ETH are ever held by this contract.
 contract EscrowVault is IEscrowVault, ReentrancyGuard {
     // ─── Constants ────────────────────────────────────────────────────
 
     uint16 internal constant BPS_BASE = 10_000;
-    uint256 internal constant MAX_SCHEDULE_LENGTH = 10;
+    uint256 public constant MIN_LOCK_DURATION = 7 days;
     uint256 public constant MIN_VESTING_DURATION = 7 days;
 
-    // Default vesting schedule milestones for comparison
-    uint40 private constant DEFAULT_STEP1_TIME = 7 days;
-    uint16 private constant DEFAULT_STEP1_BPS  = 1000;
-    uint40 private constant DEFAULT_STEP2_TIME = 30 days;
-    uint16 private constant DEFAULT_STEP2_BPS  = 3000;
-    uint40 private constant DEFAULT_STEP3_TIME = 90 days;
-    uint16 private constant DEFAULT_STEP3_BPS  = 10_000;
+    // Default vesting parameters for comparison
+    uint40 private constant DEFAULT_LOCK_DURATION = 7 days;
+    uint40 private constant DEFAULT_VESTING_DURATION = 83 days;
+    uint40 private constant DEFAULT_TOTAL_DURATION = 90 days; // 7 + 83
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -39,6 +36,8 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         uint128 totalLiquidity;
         uint128 removedLiquidity;
         uint40 createdAt;
+        uint40 lockDuration;
+        uint40 vestingDuration;
         IssuerCommitment commitment;
         bool isTriggered;
         uint8 triggerType;
@@ -46,9 +45,6 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     /// @dev escrowId => Escrow
     mapping(uint256 => Escrow) internal _escrows;
-
-    /// @dev escrowId => VestingStep[]
-    mapping(uint256 => VestingStep[]) internal _vestingSchedules;
 
     /// @dev escrowId => dayNumber => liquidity withdrawn that day
     mapping(uint256 => mapping(uint256 => uint256)) internal _dailyWithdrawn;
@@ -68,16 +64,11 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     error EscrowAlreadyExists();
     error EscrowNotFound();
     error EscrowTriggered();
-    error EmptySchedule();
-    error ScheduleTooLong();
-    error ScheduleTimesNotIncreasing();
-    error ScheduleBpsNotIncreasing();
-    error ScheduleBpsExceedsMax();
-    error ScheduleFinalBpsNot10000();
     error NothingToRelease();
     error DailyLimitExceeded();
     error CommitmentNotStricter();
-    error VestingBelowMinDuration();
+    error LockDurationTooShort();
+    error VestingDurationTooShort();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -91,11 +82,11 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         _;
     }
 
-    // ─── Constructor ──────────────────────────────────────────────────
-
     // ─── Events (contract-level) ─────────────────────────────────────
 
     event ExternalCallFailed(string target, uint256 indexed escrowId);
+
+    // ─── Constructor ──────────────────────────────────────────────────
 
     constructor(address bastionHook, address triggerOracle, address reputationEngine) {
         BASTION_HOOK = bastionHook;
@@ -110,15 +101,16 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         PoolId poolId,
         address issuer,
         uint128 liquidity,
-        VestingStep[] calldata vestingSchedule,
+        uint40 lockDuration,
+        uint40 vestingDuration,
         IssuerCommitment calldata commitment
     ) external onlyHook nonReentrant returns (uint256 escrowId) {
         if (liquidity == 0) revert ZeroAmount();
+        if (lockDuration < MIN_LOCK_DURATION) revert LockDurationTooShort();
+        if (vestingDuration < MIN_VESTING_DURATION) revert VestingDurationTooShort();
 
         escrowId = _computeEscrowId(poolId, issuer);
         if (_escrows[escrowId].createdAt != 0) revert EscrowAlreadyExists();
-
-        _validateSchedule(vestingSchedule);
 
         // Store escrow
         _escrows[escrowId] = Escrow({
@@ -126,6 +118,8 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
             totalLiquidity: liquidity,
             removedLiquidity: 0,
             createdAt: uint40(block.timestamp),
+            lockDuration: lockDuration,
+            vestingDuration: vestingDuration,
             commitment: commitment,
             isTriggered: false,
             triggerType: 0
@@ -135,12 +129,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         _poolEscrowIds[PoolId.unwrap(poolId)] = escrowId;
         _escrowPoolIds[escrowId] = poolId;
 
-        // Copy vesting schedule to storage
-        for (uint256 i; i < vestingSchedule.length; ++i) {
-            _vestingSchedules[escrowId].push(vestingSchedule[i]);
-        }
-
-        emit EscrowCreated(escrowId, poolId, issuer, liquidity);
+        emit EscrowCreated(escrowId, poolId, issuer, liquidity, lockDuration, vestingDuration);
     }
 
     /// @inheritdoc IEscrowVault
@@ -176,7 +165,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         if (escrow.createdAt == 0) revert EscrowNotFound();
         if (escrow.isTriggered) revert EscrowTriggered();
 
-        uint128 vestedLiq = _calculateVestedLiquidity(escrow, _vestingSchedules[escrowId]);
+        uint128 vestedLiq = _calculateVestedLiquidity(escrow);
         uint128 removable = vestedLiq > escrow.removedLiquidity ? vestedLiq - escrow.removedLiquidity : 0;
         if (removable == 0) revert NothingToRelease();
         if (liquidityRemoved > removable) revert NothingToRelease();
@@ -217,7 +206,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         if (escrow.createdAt == 0) return 0;
         if (escrow.isTriggered) return 0;
 
-        uint128 vestedLiq = _calculateVestedLiquidity(escrow, _vestingSchedules[escrowId]);
+        uint128 vestedLiq = _calculateVestedLiquidity(escrow);
         return vestedLiq > escrow.removedLiquidity ? vestedLiq - escrow.removedLiquidity : 0;
     }
 
@@ -261,7 +250,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     function calculateVestedLiquidity(uint256 escrowId) external view returns (uint128) {
         Escrow storage escrow = _escrows[escrowId];
         if (escrow.createdAt == 0) revert EscrowNotFound();
-        return _calculateVestedLiquidity(escrow, _vestingSchedules[escrowId]);
+        return _calculateVestedLiquidity(escrow);
     }
 
     /// @inheritdoc IEscrowVault
@@ -274,11 +263,9 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         IssuerCommitment memory current = escrow.commitment;
 
         bool isStricter = newCommitment.dailyWithdrawLimit <= current.dailyWithdrawLimit
-            && newCommitment.lockDuration >= current.lockDuration
             && newCommitment.maxSellPercent <= current.maxSellPercent;
 
         bool isChanged = newCommitment.dailyWithdrawLimit != current.dailyWithdrawLimit
-            || newCommitment.lockDuration != current.lockDuration
             || newCommitment.maxSellPercent != current.maxSellPercent;
 
         if (!isStricter || !isChanged) revert CommitmentNotStricter();
@@ -303,21 +290,12 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
         status.remainingLiquidity = escrow.totalLiquidity - escrow.removedLiquidity;
 
-        {
-            VestingStep[] storage schedule = _vestingSchedules[escrowId];
-            uint256 elapsed = block.timestamp - escrow.createdAt;
-            uint256 effectiveElapsed = elapsed > escrow.commitment.lockDuration
-                ? elapsed - escrow.commitment.lockDuration
-                : 0;
-
-            for (uint256 i; i < schedule.length; ++i) {
-                if (schedule[i].timeOffset > effectiveElapsed) {
-                    status.nextUnlockTime =
-                        escrow.createdAt + escrow.commitment.lockDuration + schedule[i].timeOffset;
-                    break;
-                }
-            }
+        // nextUnlockTime: when does the lock period end (i.e., when vesting starts)?
+        uint256 lockEnd = uint256(escrow.createdAt) + uint256(escrow.lockDuration);
+        if (block.timestamp < lockEnd) {
+            status.nextUnlockTime = uint40(lockEnd);
         }
+        // If already past lock, nextUnlockTime = 0 (vesting is actively happening or complete)
     }
 
     /// @inheritdoc IEscrowVault
@@ -334,10 +312,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         Escrow storage escrow = _escrows[escrowId];
         if (escrow.createdAt == 0) return 0;
 
-        VestingStep[] storage schedule = _vestingSchedules[escrowId];
-        if (schedule.length == 0) return 0;
-
-        endTime = escrow.createdAt + escrow.commitment.lockDuration + schedule[schedule.length - 1].timeOffset;
+        endTime = uint256(escrow.createdAt) + uint256(escrow.lockDuration) + uint256(escrow.vestingDuration);
     }
 
     // ─── Internal Functions ───────────────────────────────────────────
@@ -346,63 +321,24 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         return uint256(keccak256(abi.encode(poolId, issuer)));
     }
 
-    function _validateSchedule(VestingStep[] calldata schedule) internal pure {
-        uint256 len = schedule.length;
-        if (len == 0) revert EmptySchedule();
-        if (len > MAX_SCHEDULE_LENGTH) revert ScheduleTooLong();
-
-        uint40 prevTime = 0;
-        uint16 prevBps = 0;
-
-        for (uint256 i; i < len; ++i) {
-            if (i > 0) {
-                if (schedule[i].timeOffset <= prevTime) revert ScheduleTimesNotIncreasing();
-                if (schedule[i].basisPoints <= prevBps) revert ScheduleBpsNotIncreasing();
-            }
-            if (schedule[i].basisPoints > BPS_BASE) revert ScheduleBpsExceedsMax();
-
-            prevTime = schedule[i].timeOffset;
-            prevBps = schedule[i].basisPoints;
-        }
-
-        if (schedule[len - 1].timeOffset < MIN_VESTING_DURATION) revert VestingBelowMinDuration();
-        if (schedule[len - 1].basisPoints != BPS_BASE) revert ScheduleFinalBpsNot10000();
-    }
-
-    function _calculateVestedLiquidity(Escrow storage escrow, VestingStep[] storage schedule)
+    /// @dev Linear vesting: 0 during lock, then linearly from 0 to totalLiquidity over vestingDuration
+    function _calculateVestedLiquidity(Escrow storage escrow)
         internal
         view
         returns (uint128)
     {
         uint256 elapsed = block.timestamp - escrow.createdAt;
 
-        // Respect lockDuration: no vesting until lock period passes
-        if (elapsed <= escrow.commitment.lockDuration) return 0;
-        uint256 effectiveElapsed = elapsed - escrow.commitment.lockDuration;
+        // During lock period: nothing vested
+        if (elapsed < escrow.lockDuration) return 0;
 
-        uint16 vestedBps = 0;
-        for (uint256 i; i < schedule.length; ++i) {
-            if (schedule[i].timeOffset <= effectiveElapsed) {
-                vestedBps = schedule[i].basisPoints;
-            } else {
-                break;
-            }
-        }
+        uint256 vestingElapsed = elapsed - escrow.lockDuration;
 
-        return uint128((uint256(escrow.totalLiquidity) * vestedBps) / BPS_BASE);
-    }
+        // Fully vested
+        if (vestingElapsed >= escrow.vestingDuration) return escrow.totalLiquidity;
 
-    /// @dev Compute the cumulative bps a schedule would have released at a given timeOffset.
-    function _bpsAtTime(VestingStep[] storage schedule, uint40 timeOffset) internal view returns (uint16) {
-        uint16 bps = 0;
-        for (uint256 i; i < schedule.length; ++i) {
-            if (schedule[i].timeOffset <= timeOffset) {
-                bps = schedule[i].basisPoints;
-            } else {
-                break;
-            }
-        }
-        return bps;
+        // Linear interpolation
+        return uint128((uint256(escrow.totalLiquidity) * vestingElapsed) / escrow.vestingDuration);
     }
 
     // ─── Strictness View Functions ────────────────────────────────────
@@ -411,77 +347,58 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     function isStricterThanDefault(uint256 escrowId) external view returns (bool) {
         Escrow storage escrow = _escrows[escrowId];
         if (escrow.createdAt == 0) revert EscrowNotFound();
-        return _getStrictnessLevel(escrowId) >= 1;
+        return _getStrictnessLevel(escrow) >= 1;
     }
 
     /// @inheritdoc IEscrowVault
     function getVestingStrictnessLevel(uint256 escrowId) external view returns (uint8) {
         Escrow storage escrow = _escrows[escrowId];
         if (escrow.createdAt == 0) revert EscrowNotFound();
-        return _getStrictnessLevel(escrowId);
+        return _getStrictnessLevel(escrow);
     }
 
     /// @inheritdoc IEscrowVault
-    function getVestingSchedule(uint256 escrowId) external view returns (VestingStep[] memory) {
-        Escrow storage escrow = _escrows[escrowId];
-        if (escrow.createdAt == 0) revert EscrowNotFound();
-        return _vestingSchedules[escrowId];
-    }
-
-    /// @inheritdoc IEscrowVault
-    function getEscrowInfo(uint256 escrowId) external view returns (uint40 createdAt, IssuerCommitment memory commitment) {
+    function getEscrowInfo(uint256 escrowId)
+        external
+        view
+        returns (uint40 createdAt, uint40 lockDuration, uint40 vestingDuration, IssuerCommitment memory commitment)
+    {
         Escrow storage escrow = _escrows[escrowId];
         if (escrow.createdAt == 0) revert EscrowNotFound();
         createdAt = escrow.createdAt;
+        lockDuration = escrow.lockDuration;
+        vestingDuration = escrow.vestingDuration;
         commitment = escrow.commitment;
     }
 
     /// @dev Returns 2 = stricter, 1 = same as default, 0 = looser
-    function _getStrictnessLevel(uint256 escrowId) internal view returns (uint8) {
-        uint256 score = _getStrictnessScore(escrowId);
-        if (score == 0) {
-            VestingStep[] storage schedule = _vestingSchedules[escrowId];
-            if (schedule.length == 0) return 0;
-            uint40 totalDuration = schedule[schedule.length - 1].timeOffset;
-            if (totalDuration < DEFAULT_STEP3_TIME) return 0;
-            uint16 bps1 = _bpsAtTime(schedule, DEFAULT_STEP1_TIME);
-            uint16 bps2 = _bpsAtTime(schedule, DEFAULT_STEP2_TIME);
-            uint16 bps3 = _bpsAtTime(schedule, DEFAULT_STEP3_TIME);
-            if (bps1 > DEFAULT_STEP1_BPS || bps2 > DEFAULT_STEP2_BPS || bps3 > DEFAULT_STEP3_BPS) {
-                return 0;
-            }
-            return 1;
+    ///      Stricter means total duration >= default AND lock >= default lock
+    function _getStrictnessLevel(Escrow storage escrow) internal view returns (uint8) {
+        uint40 totalDuration = escrow.lockDuration + escrow.vestingDuration;
+
+        if (totalDuration < DEFAULT_TOTAL_DURATION) return 0;
+
+        if (escrow.lockDuration == DEFAULT_LOCK_DURATION && escrow.vestingDuration == DEFAULT_VESTING_DURATION) {
+            return 1; // same as default
         }
-        return 2;
+
+        if (totalDuration > DEFAULT_TOTAL_DURATION) return 2; // stricter
+        // totalDuration == DEFAULT_TOTAL_DURATION but different split
+        if (escrow.lockDuration >= DEFAULT_LOCK_DURATION) return 1; // at least same
+        return 0; // shorter lock with same total = looser
     }
 
     /// @dev Proportional strictness score (0..200).
-    function _getStrictnessScore(uint256 escrowId) internal view returns (uint256) {
-        VestingStep[] storage schedule = _vestingSchedules[escrowId];
-        if (schedule.length == 0) return 0;
+    ///      Based on how much the total duration exceeds the default.
+    function _getStrictnessScore(Escrow storage escrow) internal view returns (uint256) {
+        uint40 totalDuration = escrow.lockDuration + escrow.vestingDuration;
+        if (totalDuration <= DEFAULT_TOTAL_DURATION) return 0;
 
-        uint40 totalDuration = schedule[schedule.length - 1].timeOffset;
-        if (totalDuration < DEFAULT_STEP3_TIME) return 0;
-
-        uint16 bps1 = _bpsAtTime(schedule, DEFAULT_STEP1_TIME);
-        uint16 bps2 = _bpsAtTime(schedule, DEFAULT_STEP2_TIME);
-        uint16 bps3 = _bpsAtTime(schedule, DEFAULT_STEP3_TIME);
-
-        if (bps1 > DEFAULT_STEP1_BPS || bps2 > DEFAULT_STEP2_BPS || bps3 > DEFAULT_STEP3_BPS) {
-            return 0;
-        }
-
-        uint256 saving1 = uint256(DEFAULT_STEP1_BPS - bps1) * BPS_BASE / DEFAULT_STEP1_BPS;
-        uint256 saving2 = uint256(DEFAULT_STEP2_BPS - bps2) * BPS_BASE / DEFAULT_STEP2_BPS;
-        uint256 saving3 = uint256(DEFAULT_STEP3_BPS - bps3) * BPS_BASE / DEFAULT_STEP3_BPS;
-
-        uint256 extraDuration = totalDuration > DEFAULT_STEP3_TIME
-            ? uint256(totalDuration - DEFAULT_STEP3_TIME)
-            : 0;
-        uint256 durationBonus = extraDuration * BPS_BASE / uint256(DEFAULT_STEP3_TIME);
-        if (durationBonus > BPS_BASE) durationBonus = BPS_BASE;
-
-        return ((saving1 + saving2 + saving3 + durationBonus) * 200) / (4 * BPS_BASE);
+        // Extra duration ratio capped at 200
+        uint256 extraDuration = uint256(totalDuration) - uint256(DEFAULT_TOTAL_DURATION);
+        uint256 score = (extraDuration * 200) / uint256(DEFAULT_TOTAL_DURATION);
+        if (score > 200) score = 200;
+        return score;
     }
 
     /// @notice Returns a proportional strictness score (0..200) for reputation scoring.
@@ -490,6 +407,6 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     function getVestingStrictnessScore(uint256 escrowId) external view returns (uint256 score) {
         Escrow storage escrow = _escrows[escrowId];
         if (escrow.createdAt == 0) revert EscrowNotFound();
-        return _getStrictnessScore(escrowId);
+        return _getStrictnessScore(escrow);
     }
 }

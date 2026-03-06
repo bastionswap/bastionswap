@@ -13,27 +13,17 @@ interface IEscrowVault {
 
     /// @notice Defines the issuer's up-front commitments that are enforced on-chain.
     /// @param dailyWithdrawLimit Maximum percentage (basis points) of LP the issuer can withdraw per day
-    /// @param lockDuration Minimum total lock duration in seconds before any vesting begins
     /// @param maxSellPercent Maximum percentage (basis points) of token supply the issuer may sell per 24h window
     struct IssuerCommitment {
         uint16 dailyWithdrawLimit;
-        uint40 lockDuration;
         uint16 maxSellPercent;
-    }
-
-    /// @notice Defines a single step in a vesting schedule.
-    /// @param timeOffset Seconds after escrow creation when this tranche unlocks
-    /// @param basisPoints Cumulative percentage (basis points, max 10_000) of total escrowed liquidity released
-    struct VestingStep {
-        uint40 timeOffset;
-        uint16 basisPoints;
     }
 
     /// @notice Full status snapshot of an escrow position.
     /// @param totalLiquidity Original liquidity amount locked
     /// @param removedLiquidity Cumulative liquidity already removed by the issuer
     /// @param remainingLiquidity Liquidity still locked
-    /// @param nextUnlockTime Timestamp of the next vesting tranche unlock (0 if fully vested)
+    /// @param nextUnlockTime Timestamp when linear vesting begins (end of lock period), 0 if already unlocking
     struct EscrowStatus {
         uint128 totalLiquidity;
         uint128 removedLiquidity;
@@ -48,7 +38,9 @@ interface IEscrowVault {
     /// @param poolId Uniswap V4 pool identifier
     /// @param issuer Address of the token issuer
     /// @param liquidity Total liquidity locked
-    event EscrowCreated(uint256 indexed escrowId, PoolId indexed poolId, address indexed issuer, uint128 liquidity);
+    /// @param lockDuration Lock duration in seconds
+    /// @param vestingDuration Linear vesting duration in seconds
+    event EscrowCreated(uint256 indexed escrowId, PoolId indexed poolId, address indexed issuer, uint128 liquidity, uint40 lockDuration, uint40 vestingDuration);
 
     /// @notice Emitted when additional liquidity is added to an escrow.
     /// @param escrowId Escrow identifier
@@ -83,14 +75,16 @@ interface IEscrowVault {
     /// @param poolId Uniswap V4 pool identifier
     /// @param issuer Address of the token issuer whose LP is being escrowed
     /// @param liquidity Total liquidity amount to lock
-    /// @param vestingSchedule Ordered array of vesting steps defining the release schedule
+    /// @param lockDuration Duration in seconds before vesting starts (min 7 days)
+    /// @param vestingDuration Duration in seconds for linear vesting after lock (min 7 days)
     /// @param commitment Issuer's up-front commitment parameters
     /// @return escrowId Unique identifier for the newly created escrow
     function createEscrow(
         PoolId poolId,
         address issuer,
         uint128 liquidity,
-        VestingStep[] calldata vestingSchedule,
+        uint40 lockDuration,
+        uint40 vestingDuration,
         IssuerCommitment calldata commitment
     ) external returns (uint256 escrowId);
 
@@ -143,32 +137,31 @@ interface IEscrowVault {
     /// @return True if the escrow's removedLiquidity equals its totalLiquidity
     function isFullyVested(PoolId poolId) external view returns (bool);
 
-    /// @notice Returns the timestamp when the last vesting tranche unlocks.
+    /// @notice Returns the timestamp when vesting fully completes (lock + vesting).
     /// @param poolId Uniswap V4 pool identifier
     /// @return endTime Timestamp of the final vesting unlock
     function getVestingEndTime(PoolId poolId) external view returns (uint256 endTime);
 
     /// @notice Checks if the escrow's vesting schedule is at least as strict as the default.
     /// @param escrowId Identifier of the escrow position
-    /// @return True if at every default milestone time point, the custom schedule
-    ///         has vested <= the default amount AND total duration >= 90 days
+    /// @return True if total duration >= 90 days
     function isStricterThanDefault(uint256 escrowId) external view returns (bool);
 
-    /// @notice Returns the strictness level of the escrow's vesting schedule vs default.
+    /// @notice Returns the strictness level of the escrow's vesting vs default.
     /// @param escrowId Identifier of the escrow position
     /// @return level 2 = stricter than default, 1 = same as default, 0 = looser than default
     function getVestingStrictnessLevel(uint256 escrowId) external view returns (uint8 level);
 
-    /// @notice Returns the vesting schedule for an escrow position.
-    /// @param escrowId Identifier of the escrow position
-    /// @return schedule Array of vesting steps
-    function getVestingSchedule(uint256 escrowId) external view returns (VestingStep[] memory schedule);
-
-    /// @notice Returns the escrow's creation timestamp and commitment parameters.
+    /// @notice Returns the escrow's creation timestamp, lock/vesting durations, and commitment.
     /// @param escrowId Identifier of the escrow position
     /// @return createdAt Timestamp when the escrow was created
+    /// @return lockDuration Lock duration in seconds
+    /// @return vestingDuration Vesting duration in seconds
     /// @return commitment The issuer's commitment parameters
-    function getEscrowInfo(uint256 escrowId) external view returns (uint40 createdAt, IssuerCommitment memory commitment);
+    function getEscrowInfo(uint256 escrowId)
+        external
+        view
+        returns (uint40 createdAt, uint40 lockDuration, uint40 vestingDuration, IssuerCommitment memory commitment);
 
     /// @notice Returns a proportional strictness score (0..200) for reputation scoring.
     /// @param escrowId Identifier of the escrow position

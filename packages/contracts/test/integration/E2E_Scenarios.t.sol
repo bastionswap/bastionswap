@@ -157,12 +157,8 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     // ─── Helpers ─────────────────────────────────────────────────────
 
-    function _vestingSchedule() internal pure returns (IEscrowVault.VestingStep[] memory s) {
-        s = new IEscrowVault.VestingStep[](3);
-        s[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        s[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        s[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
-    }
+    uint40 constant DEFAULT_LOCK = 7 days;
+    uint40 constant DEFAULT_VESTING = 83 days;
 
     function _triggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
@@ -181,7 +177,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         returns (bytes memory)
     {
         return abi.encode(
-            issuerAddr, address(issuedToken), _vestingSchedule(), commitment, _triggerConfig()
+            issuerAddr, address(issuedToken), DEFAULT_LOCK, DEFAULT_VESTING, commitment, _triggerConfig()
         );
     }
 
@@ -239,7 +235,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         // Phase 1: Pool creation
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, lockDuration: 0, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
 
         _initPool(commitment);
 
@@ -380,7 +376,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("=== SCENARIO 2: Legitimate Project (LP Permission Model) ===");
 
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 500, lockDuration: 0, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 500, maxSellPercent: 200});
 
         _initPool(commitment);
 
@@ -391,23 +387,29 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario2_vestingMilestones() internal {
-        // Day 7: 10% vested
-        vm.warp(block.timestamp + 7 days);
+        // During lock (7 days): 0 vested
+        vm.warp(block.timestamp + 6 days);
         uint128 vested = escrowVault.calculateVestedLiquidity(_escrowId);
-        assertGt(vested, 0, "should have vested liquidity at 7d");
-        console.log("  Day 7 vested liquidity:", uint256(vested));
+        assertEq(vested, 0, "should have 0 vested during lock");
+        console.log("  Day 6 vested liquidity:", uint256(vested));
+
+        // Day 8: past lock, linear vesting begins
+        vm.warp(block.timestamp + 2 days); // now at day 8
+        vested = escrowVault.calculateVestedLiquidity(_escrowId);
+        assertGt(vested, 0, "should have vested liquidity after lock");
+        console.log("  Day 8 vested liquidity:", uint256(vested));
 
         uint128 removable = escrowVault.getRemovableLiquidity(_escrowId);
-        assertGt(removable, 0, "should have removable liquidity at 7d");
-        console.log("  Day 7 removable liquidity:", uint256(removable));
+        assertGt(removable, 0, "should have removable liquidity after lock");
+        console.log("  Day 8 removable liquidity:", uint256(removable));
 
-        // Day 30: 30% vested
-        vm.warp(block.timestamp + 23 days);
+        // Day 45: ~46% vested (38 days into 83-day vesting)
+        vm.warp(block.timestamp + 37 days); // now at day 45
         vested = escrowVault.calculateVestedLiquidity(_escrowId);
-        console.log("  Day 30 vested liquidity:", uint256(vested));
+        console.log("  Day 45 vested liquidity:", uint256(vested));
 
-        // Day 90: 100% vested
-        vm.warp(block.timestamp + 60 days);
+        // Day 90: 100% vested (lock 7 + vesting 83 = 90 days)
+        vm.warp(block.timestamp + 45 days); // now at day 90
         vested = escrowVault.calculateVestedLiquidity(_escrowId);
         console.log("  Day 90 vested liquidity:", uint256(vested));
 
@@ -431,7 +433,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("=== SCENARIO 3: Issuer Dump (LP Permission Model) ===");
 
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, lockDuration: 0, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
 
         _initPool(commitment);
 

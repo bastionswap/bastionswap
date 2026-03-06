@@ -30,7 +30,6 @@ contract ReputationEngineTest is Test {
     function _defaultCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
         return IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 500, // 5%
-            lockDuration: 180 days,
             maxSellPercent: 1000 // 10%
         });
     }
@@ -38,7 +37,6 @@ contract ReputationEngineTest is Test {
     function _strictCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
         return IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 100, // 1%
-            lockDuration: 365 days,
             maxSellPercent: 200 // 2%
         });
     }
@@ -57,6 +55,12 @@ contract ReputationEngineTest is Test {
         uint256 escrowId,
         uint256 vestingScore
     ) internal {
+        // Mock the getEscrowInfo call on escrowVault (lockDuration=7d, vestingDuration=83d)
+        vm.mockCall(
+            escrowVault,
+            abi.encodeWithSelector(IEscrowVault.getEscrowInfo.selector, escrowId),
+            abi.encode(uint40(block.timestamp), uint40(7 days), uint40(83 days), _defaultCommitment())
+        );
         // Mock the getVestingStrictnessScore call on escrowVault
         vm.mockCall(
             escrowVault,
@@ -384,10 +388,9 @@ contract ReputationEngineTest is Test {
     }
 
     function test_edge_scoreClampedAt1000() public {
-        // Maximally strict commitment: 0% withdraw, 365d lock, 0% sell → commitment score = 200
+        // Maximally strict commitment: 0% withdraw, 0% sell → commitment score = 200
         IEscrowVault.IssuerCommitment memory maxStrict = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
-            lockDuration: 365 days,
             maxSellPercent: 0
         });
 

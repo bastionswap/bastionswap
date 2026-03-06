@@ -202,14 +202,11 @@ contract E2ESimulation is Script {
         console2.log("Pool initialized at SQRT_PRICE_1_1");
 
         // Issuer adds first LP with hookData → triggers escrow creation
-        IEscrowVault.VestingStep[] memory vesting = new IEscrowVault.VestingStep[](3);
-        vesting[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        vesting[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        vesting[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
+        uint40 lockDuration = 7 days;
+        uint40 vestingDuration = 83 days;
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
-            lockDuration: 0,
             maxSellPercent: 200
         });
 
@@ -223,7 +220,7 @@ contract E2ESimulation is Script {
         });
 
         bytes memory hookData = abi.encode(
-            deployer, address(issuedToken), vesting, commitment, triggerConfig
+            deployer, address(issuedToken), lockDuration, vestingDuration, commitment, triggerConfig
         );
 
         lpRouter.modifyLiquidity(

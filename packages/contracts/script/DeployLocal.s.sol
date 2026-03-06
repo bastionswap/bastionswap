@@ -183,14 +183,11 @@ contract DeployLocal is Script {
     }
 
     function _buildHookData(address deployer, address token) internal pure returns (bytes memory) {
-        IEscrowVault.VestingStep[] memory vesting = new IEscrowVault.VestingStep[](3);
-        vesting[0] = IEscrowVault.VestingStep({timeOffset: 7 days, basisPoints: 1000});
-        vesting[1] = IEscrowVault.VestingStep({timeOffset: 30 days, basisPoints: 3000});
-        vesting[2] = IEscrowVault.VestingStep({timeOffset: 90 days, basisPoints: 10000});
+        uint40 lockDuration = 7 days;
+        uint40 vestingDuration = 83 days;
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 500,
-            lockDuration: 90 days,
             maxSellPercent: 300
         });
 
@@ -203,7 +200,7 @@ contract DeployLocal is Script {
             slowRugCumulativeThreshold: 8000
         });
 
-        return abi.encode(deployer, token, vesting, commitment, triggerConfig);
+        return abi.encode(deployer, token, lockDuration, vestingDuration, commitment, triggerConfig);
     }
 
     function _printSummary(Addresses memory a, Deployed memory d) internal pure {

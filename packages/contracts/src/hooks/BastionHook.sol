@@ -178,7 +178,7 @@ contract BastionHook is BaseTestHooks {
     /// @notice Called before liquidity is added. First LP provider becomes the issuer
     ///         and their LP is registered in EscrowVault.
     /// @dev hookData encoding for issuer's first LP:
-    ///      abi.encode(issuer, token, vestingSchedule, commitment, triggerConfig)
+    ///      abi.encode(issuer, token, lockDuration, vestingDuration, commitment, triggerConfig)
     function beforeAddLiquidity(
         address sender,
         PoolKey calldata key,
@@ -492,12 +492,13 @@ contract BastionHook is BaseTestHooks {
         (
             address issuer,
             address token,
-            IEscrowVault.VestingStep[] memory vestingSchedule,
+            uint40 lockDuration,
+            uint40 vestingDuration,
             IEscrowVault.IssuerCommitment memory commitment,
             ITriggerOracle.TriggerConfig memory triggerConfig
         ) = abi.decode(
             hookData,
-            (address, address, IEscrowVault.VestingStep[], IEscrowVault.IssuerCommitment, ITriggerOracle.TriggerConfig)
+            (address, address, uint40, uint40, IEscrowVault.IssuerCommitment, ITriggerOracle.TriggerConfig)
         );
 
         // Register issuer
@@ -513,7 +514,7 @@ contract BastionHook is BaseTestHooks {
 
         // Create escrow — no token transfers, just record liquidity
         uint256 escrowId = escrowVault.createEscrow(
-            poolId, issuer, liquidity, vestingSchedule, commitment
+            poolId, issuer, liquidity, lockDuration, vestingDuration, commitment
         );
         _escrowIds[poolId] = escrowId;
 
