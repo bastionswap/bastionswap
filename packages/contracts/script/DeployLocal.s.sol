@@ -177,12 +177,39 @@ contract DeployLocal is Script {
         btt.transfer(TRADER, 100_000e18);
         console2.log("Sent 100,000 BTT to trader:", TRADER);
 
-        // ALPHA: approve router + Permit2 and send to trader (pool creation left to user)
+        // ALPHA: approve router + Permit2 and send to trader
         TestToken alpha = TestToken(d.alpha);
         alpha.approve(d.router, type(uint256).max);
         alpha.approve(PERMIT2, type(uint256).max);
+        alpha.approve(d.lpRouter, type(uint256).max);
         alpha.transfer(TRADER, 100_000e18);
         console2.log("Sent 100,000 ALPHA to trader:", TRADER);
+
+        // Create ETH/ALPHA pool
+        PoolKey memory alphaPoolKey = PoolKey(
+            Currency.wrap(address(0)),
+            Currency.wrap(d.alpha),
+            3000,
+            60,
+            IHooks(d.hook)
+        );
+
+        IPoolManager(POOL_MANAGER).initialize(alphaPoolKey, SQRT_PRICE_1_1);
+        console2.log("Pool initialized: ALPHA/ETH");
+
+        bytes memory alphaHookData = _buildHookData(deployer, d.alpha);
+
+        PoolModifyLiquidityTest(d.lpRouter).modifyLiquidity{value: 10 ether}(
+            alphaPoolKey,
+            ModifyLiquidityParams({
+                tickLower: TICK_LOWER,
+                tickUpper: TICK_UPPER,
+                liquidityDelta: 10e18,
+                salt: 0
+            }),
+            alphaHookData
+        );
+        console2.log("ALPHA/ETH LP added with escrow");
 
         PoolSwapTest(d.swapRouter).swap{value: 0.01 ether}(
             poolKey,

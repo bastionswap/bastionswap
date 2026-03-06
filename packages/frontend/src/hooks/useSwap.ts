@@ -371,6 +371,228 @@ export function useFaucet(faucetAddress: `0x${string}` | undefined, account: `0x
   };
 }
 
+// ─── Multi-Hop Swap ──────────────────────────────────
+
+import type { SwapStep } from "@/hooks/useSwapRoute";
+
+export interface MultiHopSwapConfig {
+  steps: SwapStep[];
+  amountIn: bigint;
+  minAmountOut: bigint;
+  deadline: bigint;
+  inputToken: `0x${string}`;
+  value?: bigint;
+}
+
+export function useExecuteMultiHopSwap() {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+
+  const {
+    signTypedData,
+    data: signature,
+    error: signError,
+    reset: resetSign,
+    isPending: isSigning,
+  } = useSignTypedData();
+
+  const {
+    writeContract,
+    data: hash,
+    isPending: isWriting,
+    error: writeError,
+    reset: resetWrite,
+  } = useWriteContract();
+
+  const { isLoading: isConfirming, isSuccess } =
+    useWaitForTransactionReceipt({ hash });
+
+  const [pendingSwap, setPendingSwap] = useState<MultiHopSwapConfig | null>(null);
+  const [permitNonce, setPermitNonce] = useState<bigint>(0n);
+  const [permitDeadline, setPermitDeadline] = useState<bigint>(0n);
+
+  // When signature is received, submit the multi-hop swap with Permit2
+  useEffect(() => {
+    if (signature && pendingSwap && contracts) {
+      const config = pendingSwap;
+
+      const permitSingle = {
+        permit: {
+          permitted: {
+            token: config.inputToken,
+            amount: config.amountIn,
+          },
+          nonce: permitNonce,
+          deadline: permitDeadline,
+        },
+        signature,
+      };
+
+      writeContract({
+        address: contracts.BastionRouter as `0x${string}`,
+        abi: BastionRouterABI,
+        functionName: "swapMultiHopPermit2",
+        args: [
+          config.steps,
+          config.amountIn,
+          config.minAmountOut,
+          config.deadline,
+          permitSingle,
+        ],
+        value: 0n,
+      });
+      setPendingSwap(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
+  const swap = (config: MultiHopSwapConfig) => {
+    if (!contracts) return;
+
+    const isNativeInput = config.inputToken === "0x0000000000000000000000000000000000000000";
+
+    if (isNativeInput) {
+      writeContract({
+        address: contracts.BastionRouter as `0x${string}`,
+        abi: BastionRouterABI,
+        functionName: "swapMultiHop",
+        args: [
+          config.steps,
+          config.amountIn,
+          config.minAmountOut,
+          config.deadline,
+        ],
+        value: config.value || 0n,
+      });
+    } else {
+      const nonce = generatePermit2Nonce();
+      const deadline = config.deadline;
+      const routerAddress = contracts.BastionRouter as `0x${string}`;
+
+      setPendingSwap(config);
+      setPermitNonce(nonce);
+      setPermitDeadline(deadline);
+
+      signTypedData({
+        domain: {
+          name: "Permit2",
+          chainId,
+          verifyingContract: PERMIT2_ADDRESS,
+        },
+        types: PERMIT_TRANSFER_FROM_TYPES,
+        primaryType: "PermitTransferFrom",
+        message: {
+          permitted: {
+            token: config.inputToken,
+            amount: config.amountIn,
+          },
+          spender: routerAddress,
+          nonce,
+          deadline,
+        },
+      });
+    }
+  };
+
+  const reset = () => {
+    resetSign();
+    resetWrite();
+    setPendingSwap(null);
+  };
+
+  return {
+    swap,
+    hash,
+    isWriting: isWriting || isSigning,
+    isConfirming,
+    isSuccess,
+    error: signError || writeError,
+    reset,
+  };
+}
+
+// ─── Multi-Hop Quote (on-chain simulation) ──────────────────────────────────
+
+export interface MultiHopQuoteParams {
+  steps: SwapStep[];
+  amountIn: bigint;
+  inputToken: `0x${string}`;
+}
+
+export function useMultiHopQuote(params: MultiHopQuoteParams | null) {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+  const publicClient = usePublicClient();
+
+  return useQuery({
+    queryKey: [
+      "multiHopQuote",
+      params?.steps?.length,
+      params?.amountIn?.toString(),
+      params?.inputToken,
+      // Include step details for cache key
+      params?.steps?.map(s => `${s.poolKey.currency0}-${s.poolKey.currency1}-${s.zeroForOne}`).join("|"),
+    ],
+    queryFn: async () => {
+      if (!publicClient || !params || !contracts || params.amountIn <= 0n) return null;
+
+      const routerAddr = contracts.BastionRouter as `0x${string}`;
+
+      const data = encodeFunctionData({
+        abi: BastionRouterABI,
+        functionName: "swapMultiHop",
+        args: [
+          params.steps,
+          params.amountIn,
+          0n, // minAmountOut = 0 for quote
+          BigInt(Math.floor(Date.now() / 1000) + 3600),
+        ],
+      });
+
+      const isNativeInput = params.inputToken === "0x0000000000000000000000000000000000000000";
+      const { balSlot, allowSlot } = computeStorageSlots(QUOTE_ACCOUNT, routerAddr);
+
+      try {
+        const result = await publicClient.call({
+          to: routerAddr,
+          data,
+          account: QUOTE_ACCOUNT,
+          value: isNativeInput ? params.amountIn : 0n,
+          stateOverride: isNativeInput
+            ? [
+                {
+                  address: QUOTE_ACCOUNT,
+                  balance: params.amountIn * 2n,
+                },
+              ]
+            : [
+                {
+                  address: params.inputToken,
+                  stateDiff: [
+                    { slot: balSlot, value: MAX_UINT256_HEX },
+                    { slot: allowSlot, value: MAX_UINT256_HEX },
+                  ],
+                },
+              ],
+        });
+
+        if (!result.data) return null;
+
+        return decodeFunctionResult({
+          abi: BastionRouterABI,
+          functionName: "swapMultiHop",
+          data: result.data,
+        }) as bigint;
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!publicClient && !!params && params.amountIn > 0n,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  });
+}
+
 // ─── Quote (on-chain simulation) ──────────────────────────────────
 
 export interface QuoteParams {

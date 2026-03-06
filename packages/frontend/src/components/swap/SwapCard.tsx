@@ -11,13 +11,16 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { TokenSelectModal } from "./TokenSelectModal";
 import {
   useExecuteSwap,
+  useExecuteMultiHopSwap,
   useTokenAllowance,
   useTokenBalance,
   useApprove,
   useFaucet,
   useSwapQuote,
+  useMultiHopQuote,
   FAUCETS,
 } from "@/hooks/useSwap";
+import { useSwapRoute } from "@/hooks/useSwapRoute";
 import { usePoolReserves } from "@/hooks/usePools";
 import { getContracts } from "@/config/contracts";
 import { explorerUrl } from "@/lib/formatters";
@@ -43,8 +46,26 @@ export function SwapCard() {
   const [showSlippage, setShowSlippage] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
+  // Route finding
+  const route = useSwapRoute(
+    tokenIn?.address,
+    tokenOut?.address,
+    tokenIn?.symbol,
+    tokenOut?.symbol
+  );
+  const isMultiHop = route?.type === "multi-hop";
+
   // Swap execution
-  const { swap, hash: swapHash, isWriting, isConfirming, isSuccess, error: swapError, reset: resetSwap } = useExecuteSwap();
+  const { swap: swapDirect, hash: swapDirectHash, isWriting: isWritingDirect, isConfirming: isConfirmingDirect, isSuccess: isSuccessDirect, error: swapDirectError, reset: resetSwapDirect } = useExecuteSwap();
+  const { swap: swapMultiHop, hash: swapMultiHopHash, isWriting: isWritingMultiHop, isConfirming: isConfirmingMultiHop, isSuccess: isSuccessMultiHop, error: swapMultiHopError, reset: resetSwapMultiHop } = useExecuteMultiHopSwap();
+
+  // Unified swap state
+  const swapHash = isMultiHop ? swapMultiHopHash : swapDirectHash;
+  const isWriting = isMultiHop ? isWritingMultiHop : isWritingDirect;
+  const isConfirming = isMultiHop ? isConfirmingMultiHop : isConfirmingDirect;
+  const isSuccess = isMultiHop ? isSuccessMultiHop : isSuccessDirect;
+  const swapError = isMultiHop ? swapMultiHopError : swapDirectError;
+  const resetSwap = () => { resetSwapDirect(); resetSwapMultiHop(); };
 
   // Token approval
   const {
@@ -110,28 +131,20 @@ export function SwapCard() {
     setAmountIn("");
   };
 
-  // Compute PoolKey parameters
+  // Compute PoolKey parameters (for direct routes)
   const poolKey = useMemo(() => {
-    if (!tokenIn || !tokenOut || !contracts) return null;
+    if (!route || route.type !== "direct" || route.steps.length !== 1) return null;
 
-    const addrA = tokenIn.address.toLowerCase();
-    const addrB = tokenOut.address.toLowerCase();
-    const [currency0, currency1] =
-      addrA < addrB
-        ? [tokenIn.address, tokenOut.address]
-        : [tokenOut.address, tokenIn.address];
-
-    const zeroForOne = tokenIn.address.toLowerCase() === currency0.toLowerCase();
-
+    const step = route.steps[0];
     return {
-      currency0: currency0 as `0x${string}`,
-      currency1: currency1 as `0x${string}`,
-      fee: 3000,
-      tickSpacing: 60,
-      hooks: contracts.BastionHook as `0x${string}`,
-      zeroForOne,
+      currency0: step.poolKey.currency0,
+      currency1: step.poolKey.currency1,
+      fee: step.poolKey.fee,
+      tickSpacing: step.poolKey.tickSpacing,
+      hooks: step.poolKey.hooks,
+      zeroForOne: step.zeroForOne,
     };
-  }, [tokenIn, tokenOut, contracts]);
+  }, [route]);
 
   const parsedAmountIn = useMemo(() => {
     if (!amountIn || parseFloat(amountIn) <= 0) return 0n;
@@ -142,13 +155,28 @@ export function SwapCard() {
     }
   }, [amountIn]);
 
-  // On-chain swap quote
-  const quoteParams = useMemo(() => {
-    if (!poolKey || parsedAmountIn <= 0n) return null;
+  // On-chain swap quote (direct)
+  const directQuoteParams = useMemo(() => {
+    if (!poolKey || parsedAmountIn <= 0n || isMultiHop) return null;
     return { ...poolKey, amountIn: parsedAmountIn };
-  }, [poolKey, parsedAmountIn]);
+  }, [poolKey, parsedAmountIn, isMultiHop]);
 
-  const { data: quotedOut, isLoading: isQuoteLoading } = useSwapQuote(quoteParams);
+  const { data: directQuotedOut, isLoading: isDirectQuoteLoading } = useSwapQuote(directQuoteParams);
+
+  // Multi-hop quote
+  const multiHopQuoteParams = useMemo(() => {
+    if (!route || !isMultiHop || parsedAmountIn <= 0n || !tokenIn) return null;
+    return {
+      steps: route.steps,
+      amountIn: parsedAmountIn,
+      inputToken: tokenIn.address as `0x${string}`,
+    };
+  }, [route, isMultiHop, parsedAmountIn, tokenIn]);
+
+  const { data: multiHopQuotedOut, isLoading: isMultiHopQuoteLoading } = useMultiHopQuote(multiHopQuoteParams);
+
+  const quotedOut = isMultiHop ? multiHopQuotedOut : directQuotedOut;
+  const isQuoteLoading = isMultiHop ? isMultiHopQuoteLoading : isDirectQuoteLoading;
 
   // Pool reserves for spot price calculation
   const { data: poolReserves } = usePoolReserves(tokenIn?.address, tokenOut?.address);
@@ -193,17 +221,28 @@ export function SwapCard() {
   };
 
   const handleSwap = () => {
-    if (!poolKey || parsedAmountIn <= 0n || !quotedOut) return;
+    if (!route || parsedAmountIn <= 0n || !quotedOut || !tokenIn) return;
 
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200); // 20 min
 
-    swap({
-      ...poolKey,
-      amountIn: parsedAmountIn,
-      minAmountOut,
-      deadline,
-      value: tokenInIsNative ? parsedAmountIn : 0n,
-    });
+    if (isMultiHop) {
+      swapMultiHop({
+        steps: route.steps,
+        amountIn: parsedAmountIn,
+        minAmountOut,
+        deadline,
+        inputToken: tokenIn.address as `0x${string}`,
+        value: tokenInIsNative ? parsedAmountIn : 0n,
+      });
+    } else if (poolKey) {
+      swapDirect({
+        ...poolKey,
+        amountIn: parsedAmountIn,
+        minAmountOut,
+        deadline,
+        value: tokenInIsNative ? parsedAmountIn : 0n,
+      });
+    }
   };
 
   const formatBalance = (bal: bigint | undefined) => {
@@ -371,7 +410,7 @@ export function SwapCard() {
         </div>
 
         {/* Bastion Protected Pool info */}
-        {tokenIn && tokenOut && (
+        {tokenIn && tokenOut && route && (
           <div className="mt-3 rounded-xl bg-bastion-50 border border-bastion-100 px-3 py-2">
             <div className="flex items-center gap-2">
               <Badge variant="protected">Protected</Badge>
@@ -379,6 +418,29 @@ export function SwapCard() {
                 Insurance fee ({(INSURANCE_FEE_BPS / 100).toFixed(0)}%) protects you against rug pulls
               </span>
             </div>
+          </div>
+        )}
+
+        {/* Route display */}
+        {tokenIn && tokenOut && route && route.type === "multi-hop" && (
+          <div className="mt-3 rounded-xl bg-blue-50 border border-blue-100 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <svg className="h-4 w-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+              <span className="text-xs text-blue-700">
+                Route: {route.pathSymbols.join(" → ")} ({route.numHops} hops)
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* No route found */}
+        {tokenIn && tokenOut && !route && (
+          <div className="mt-3 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2">
+            <span className="text-xs text-amber-700">
+              No route found for this pair
+            </span>
           </div>
         )}
 
@@ -440,7 +502,11 @@ export function SwapCard() {
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Pool Fee</span>
-              <span className="text-gray-700">0.30%</span>
+              <span className="text-gray-700">
+                {route && route.numHops > 1
+                  ? `0.30% × ${route.numHops} hops`
+                  : "0.30%"}
+              </span>
             </div>
           </div>
         )}
@@ -491,6 +557,10 @@ export function SwapCard() {
             <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2 opacity-60">
               <LoadingSpinner size="sm" />
               Fetching price...
+            </button>
+          ) : !route ? (
+            <button disabled className="w-full rounded-xl bg-amber-50 border border-amber-200 py-4 text-base font-semibold text-amber-600 cursor-not-allowed">
+              No Route Found
             </button>
           ) : !quotedOut || quotedOut <= 0n ? (
             <button disabled className="w-full rounded-xl bg-red-50 border border-red-200 py-4 text-base font-semibold text-red-600 cursor-not-allowed">

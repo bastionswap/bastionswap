@@ -36,9 +36,18 @@ contract BastionRouter is IUnlockCallback {
     uint8 private constant ACTION_FORCE_REMOVE = 4;
     uint8 private constant ACTION_SWAP_PERMIT2 = 5;
     uint8 private constant ACTION_CREATE_POOL_PERMIT2 = 6;
+    uint8 private constant ACTION_MULTI_HOP_SWAP = 7;
+    uint8 private constant ACTION_MULTI_HOP_SWAP_PERMIT2 = 8;
+
+    uint8 private constant MAX_HOPS = 4;
 
     /// @dev BastionHook address for access control on forceRemoveLiquidity
     address public bastionHook;
+
+    struct SwapStep {
+        PoolKey poolKey;
+        bool zeroForOne;
+    }
 
     struct CreatePoolParams {
         PoolKey key;
@@ -67,6 +76,8 @@ contract BastionRouter is IUnlockCallback {
     error HookNotSet();
     error InsufficientOutput(uint256 amountOut, uint256 minAmountOut);
     error ExcessiveInput(uint256 amountIn, uint256 maxAmountIn);
+    error TooManyHops();
+    error ZeroHops();
 
     constructor(IPoolManager _poolManager, ISignatureTransfer _permit2) {
         poolManager = _poolManager;
@@ -227,6 +238,60 @@ contract BastionRouter is IUnlockCallback {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  MULTI-HOP SWAP FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════
+
+    /// @notice Execute a multi-hop swap through a series of pools.
+    /// @param steps Array of SwapStep (poolKey + direction) defining the route.
+    /// @param amountIn Amount of input token to swap.
+    /// @param minAmountOut Minimum output amount (slippage protection).
+    /// @param deadline Timestamp after which the tx reverts.
+    function swapMultiHop(
+        SwapStep[] calldata steps,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external payable returns (uint256 amountOut) {
+        if (block.timestamp > deadline) revert Expired();
+        if (steps.length == 0) revert ZeroHops();
+        if (steps.length > MAX_HOPS) revert TooManyHops();
+
+        amountOut = abi.decode(
+            poolManager.unlock(abi.encode(ACTION_MULTI_HOP_SWAP, msg.sender, steps, amountIn)),
+            (uint256)
+        );
+
+        if (amountOut < minAmountOut) revert InsufficientOutput(amountOut, minAmountOut);
+
+        _refundETH();
+    }
+
+    /// @notice Execute a multi-hop swap using Permit2 for the input token.
+    function swapMultiHopPermit2(
+        SwapStep[] calldata steps,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline,
+        Permit2Single calldata permitSingle
+    ) external payable returns (uint256 amountOut) {
+        if (block.timestamp > deadline) revert Expired();
+        if (steps.length == 0) revert ZeroHops();
+        if (steps.length > MAX_HOPS) revert TooManyHops();
+
+        amountOut = abi.decode(
+            poolManager.unlock(abi.encode(
+                ACTION_MULTI_HOP_SWAP_PERMIT2, msg.sender, steps, amountIn,
+                permitSingle.permit, permitSingle.signature
+            )),
+            (uint256)
+        );
+
+        if (amountOut < minAmountOut) revert InsufficientOutput(amountOut, minAmountOut);
+
+        _refundETH();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  PERMIT2-ENABLED FUNCTIONS
     // ═══════════════════════════════════════════════════════════════
 
@@ -381,6 +446,10 @@ contract BastionRouter is IUnlockCallback {
             return _handleSwapPermit2(data);
         } else if (action == ACTION_CREATE_POOL_PERMIT2) {
             return _handleCreatePoolPermit2(data);
+        } else if (action == ACTION_MULTI_HOP_SWAP) {
+            return _handleMultiHopSwap(data);
+        } else if (action == ACTION_MULTI_HOP_SWAP_PERMIT2) {
+            return _handleMultiHopSwapPermit2(data);
         }
 
         revert("Unknown action");
@@ -663,6 +732,142 @@ contract BastionRouter is IUnlockCallback {
         _settleToRecipient(key.currency1, recipient, delta.amount1());
 
         return abi.encode(delta);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  MULTI-HOP HANDLERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function _handleMultiHopSwap(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, SwapStep[] memory steps, uint256 amountIn) =
+            abi.decode(data, (uint8, address, SwapStep[], uint256));
+
+        uint256 currentAmount = amountIn;
+
+        for (uint256 i = 0; i < steps.length; i++) {
+            SwapParams memory params = SwapParams({
+                zeroForOne: steps[i].zeroForOne,
+                amountSpecified: -int256(currentAmount),
+                sqrtPriceLimitX96: steps[i].zeroForOne
+                    ? TickMath.MIN_SQRT_PRICE + 1
+                    : TickMath.MAX_SQRT_PRICE - 1
+            });
+
+            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
+
+            // Output is the positive side of the delta
+            currentAmount = steps[i].zeroForOne
+                ? uint256(int256(delta.amount1()))
+                : uint256(int256(delta.amount0()));
+        }
+
+        // Settle all currency deltas
+        uint256 amountOut = _settleAllDeltas(steps, sender);
+
+        return abi.encode(amountOut);
+    }
+
+    function _handleMultiHopSwapPermit2(bytes calldata data) internal returns (bytes memory) {
+        (
+            , address sender, SwapStep[] memory steps, uint256 amountIn,
+            ISignatureTransfer.PermitTransferFrom memory permitTransfer, bytes memory sig
+        ) = abi.decode(data, (
+            uint8, address, SwapStep[], uint256,
+            ISignatureTransfer.PermitTransferFrom, bytes
+        ));
+
+        uint256 currentAmount = amountIn;
+
+        for (uint256 i = 0; i < steps.length; i++) {
+            SwapParams memory params = SwapParams({
+                zeroForOne: steps[i].zeroForOne,
+                amountSpecified: -int256(currentAmount),
+                sqrtPriceLimitX96: steps[i].zeroForOne
+                    ? TickMath.MIN_SQRT_PRICE + 1
+                    : TickMath.MAX_SQRT_PRICE - 1
+            });
+
+            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
+
+            currentAmount = steps[i].zeroForOne
+                ? uint256(int256(delta.amount1()))
+                : uint256(int256(delta.amount0()));
+        }
+
+        uint256 amountOut = _settleAllDeltasPermit2(steps, sender, permitTransfer, sig);
+
+        return abi.encode(amountOut);
+    }
+
+    /// @dev Collect unique currencies from all swap steps.
+    function _collectCurrencies(SwapStep[] memory steps) internal pure returns (Currency[] memory) {
+        // Max unique currencies = steps.length + 1 (for 2-hop: A, B, C = 3 currencies)
+        Currency[] memory temp = new Currency[](steps.length * 2);
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < steps.length; i++) {
+            bool found0 = false;
+            bool found1 = false;
+            for (uint256 j = 0; j < count; j++) {
+                if (Currency.unwrap(temp[j]) == Currency.unwrap(steps[i].poolKey.currency0)) found0 = true;
+                if (Currency.unwrap(temp[j]) == Currency.unwrap(steps[i].poolKey.currency1)) found1 = true;
+            }
+            if (!found0) { temp[count] = steps[i].poolKey.currency0; count++; }
+            if (!found1) { temp[count] = steps[i].poolKey.currency1; count++; }
+        }
+
+        Currency[] memory result = new Currency[](count);
+        for (uint256 i = 0; i < count; i++) result[i] = temp[i];
+        return result;
+    }
+
+    /// @dev Settle all non-zero currency deltas after multi-hop swap. Returns the output amount.
+    function _settleAllDeltas(SwapStep[] memory steps, address sender) internal returns (uint256 amountOut) {
+        Currency[] memory currencies = _collectCurrencies(steps);
+
+        for (uint256 i = 0; i < currencies.length; i++) {
+            int256 delta = poolManager.currencyDelta(address(this), currencies[i]);
+            if (delta < 0) {
+                // Negative delta = we owe the pool → pull from sender
+                uint256 amount = uint256(-delta);
+                if (currencies[i].isAddressZero()) {
+                    poolManager.settle{value: amount}();
+                } else {
+                    poolManager.sync(currencies[i]);
+                    IERC20Minimal(Currency.unwrap(currencies[i])).transferFrom(
+                        sender, address(poolManager), amount
+                    );
+                    poolManager.settle();
+                }
+            } else if (delta > 0) {
+                // Positive delta = pool owes us → send to sender
+                uint256 amount = uint256(delta);
+                poolManager.take(currencies[i], sender, amount);
+                amountOut = amount; // The last positive delta is the output
+            }
+        }
+    }
+
+    /// @dev Settle all non-zero deltas using Permit2 for the input token.
+    function _settleAllDeltasPermit2(
+        SwapStep[] memory steps,
+        address sender,
+        ISignatureTransfer.PermitTransferFrom memory permitTransfer,
+        bytes memory sig
+    ) internal returns (uint256 amountOut) {
+        Currency[] memory currencies = _collectCurrencies(steps);
+
+        for (uint256 i = 0; i < currencies.length; i++) {
+            int256 delta = poolManager.currencyDelta(address(this), currencies[i]);
+            if (delta < 0) {
+                uint256 amount = uint256(-delta);
+                _settleWithPermit2(currencies[i], sender, amount, permitTransfer, sig);
+            } else if (delta > 0) {
+                uint256 amount = uint256(delta);
+                poolManager.take(currencies[i], sender, amount);
+                amountOut = amount;
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
