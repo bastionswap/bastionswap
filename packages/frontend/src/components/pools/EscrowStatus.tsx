@@ -55,8 +55,8 @@ function formatCompact(n: number): string {
   if (n === 0) return "0";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  if (n >= 1) return n.toFixed(2);
-  return n.toFixed(4);
+  if (n >= 1) return n.toFixed(4);
+  return n.toFixed(6);
 }
 
 function Countdown({ targetTs, label }: { targetTs: number; label?: string }) {

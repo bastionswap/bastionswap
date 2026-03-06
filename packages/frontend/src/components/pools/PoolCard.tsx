@@ -30,8 +30,8 @@ export function PoolCard({ pool }: PoolCardProps) {
     if (tokenDecimals) n = n / Math.pow(10, tokenDecimals);
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
-    if (n >= 1) return n.toFixed(2);
-    return n.toFixed(4);
+    if (n >= 1) return n.toFixed(4);
+    return n.toFixed(6);
   };
 
   return (
@@ -87,7 +87,7 @@ export function PoolCard({ pool }: PoolCardProps) {
             },
             {
               label: "LP Escrowed",
-              value: pool.escrow ? `${parseFloat(pool.escrow.totalLiquidity).toFixed(2)}` : "—",
+              value: pool.escrow ? `${parseFloat(pool.escrow.totalLiquidity).toFixed(6)}` : "—",
               sub: pool.escrow ? `LP · ${(parseFloat(pool.escrow.removedLiquidity) / parseFloat(pool.escrow.totalLiquidity) * 100 || 0).toFixed(0)}% removed` : "LP",
             },
             {
