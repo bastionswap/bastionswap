@@ -196,15 +196,20 @@ export function SwapCard() {
     ? (quotedOut * BigInt(10000 - slippageBps)) / 10000n
     : 0n;
 
-  // Price impact: compare effective price vs composite spot rate
+  // Price impact: compare actual output vs fee-adjusted ideal output (spot × fee discount)
+  // Uniswap takes fee from input, so ideal output = amountIn × (1 - fee)^hops × spotRate
+  // Price impact = only the slippage from trade size, excluding fees
+  const POOL_FEE_RATE = 0.003; // 0.3%
+
   const priceImpact = useMemo(() => {
     if (!quotedOut || parsedAmountIn <= 0n || !route) return 0;
 
-    const effectiveRate = Number(quotedOut) / Number(parsedAmountIn);
-    if (effectiveRate <= 0) return 0;
+    const numHops = route.numHops;
+    const feeMultiplier = (1 - POOL_FEE_RATE) ** numHops;
+    const actualOut = Number(quotedOut);
+    if (actualOut <= 0) return 0;
 
     if (route.type === "direct") {
-      // Direct: use poolReserves for spot rate
       if (!poolReserves) return 0;
       const r0 = parseFloat(poolReserves.reserve0 || "0");
       const r1 = parseFloat(poolReserves.reserve1 || "0");
@@ -219,11 +224,15 @@ export function SwapCard() {
       const reserveOut = isZeroForOne ? r1 : r0;
       const spotRate = reserveOut / reserveIn;
 
-      const impact = (1 - effectiveRate / spotRate) * 100;
+      // Ideal output after fee but before slippage
+      const idealOut = Number(parsedAmountIn) * feeMultiplier * spotRate;
+      if (idealOut <= 0) return 0;
+
+      const impact = (1 - actualOut / idealOut) * 100;
       return Math.max(impact, 0);
     }
 
-    // Multi-hop: compute composite spot rate from each hop's pool reserves
+    // Multi-hop: composite spot rate from each hop's pool reserves
     if (!pools || pools.length === 0) return 0;
 
     let compositeSpotRate = 1;
@@ -231,7 +240,6 @@ export function SwapCard() {
       const c0 = step.poolKey.currency0.toLowerCase();
       const c1 = step.poolKey.currency1.toLowerCase();
 
-      // Find the pool matching this step
       const pool = pools.find(
         (p) => p.token0.toLowerCase() === c0 && p.token1.toLowerCase() === c1
       );
@@ -241,13 +249,17 @@ export function SwapCard() {
       const r1 = parseFloat(pool.reserve1 || "0");
       if (r0 <= 0 || r1 <= 0) return 0;
 
-      // Spot rate for this hop: output/input
       const hopSpotRate = step.zeroForOne ? r1 / r0 : r0 / r1;
       compositeSpotRate *= hopSpotRate;
     }
 
     if (compositeSpotRate <= 0) return 0;
-    const impact = (1 - effectiveRate / compositeSpotRate) * 100;
+
+    // Ideal output = amountIn × (1 - fee)^hops × compositeSpotRate
+    const idealOut = Number(parsedAmountIn) * feeMultiplier * compositeSpotRate;
+    if (idealOut <= 0) return 0;
+
+    const impact = (1 - actualOut / idealOut) * 100;
     return Math.max(impact, 0);
   }, [quotedOut, poolReserves, parsedAmountIn, tokenIn?.address, tokenOut?.address, route, pools]);
 
