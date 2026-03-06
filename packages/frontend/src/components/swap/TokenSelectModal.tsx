@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { useChainId } from "wagmi";
+import { useState, useMemo } from "react";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { Badge } from "@/components/ui/Badge";
-import { LOCAL_CONTRACTS } from "@/config/contracts.generated";
+import { useAllPools, useBastionPools } from "@/hooks/usePools";
+import { useTokenInfo } from "@/hooks/useTokenInfo";
 
 interface Token {
   address: string;
@@ -13,38 +13,11 @@ interface Token {
   isProtected?: boolean;
 }
 
-const SEPOLIA_TOKENS: Token[] = [
-  {
-    address: "0x410521668Ad1625527562CA90475406b1b9cB8Af",
-    symbol: "BTT",
-    name: "Bastion Test Token",
-    isProtected: true,
-  },
-  {
-    address: "0x69ce9bACB558F35bCAC2e6fd54caa8770AEE85d4",
-    symbol: "BTST",
-    name: "Base Test Token",
-  },
-];
-
-const LOCAL_TOKENS: Token[] = [
-  {
-    address: "0x0000000000000000000000000000000000000000",
-    symbol: "ETH",
-    name: "Ether",
-  },
-  {
-    address: (LOCAL_CONTRACTS as Record<number, Record<string, string>>)[31337]?.TestToken ?? "",
-    symbol: "BTT",
-    name: "Bastion Test Token",
-    isProtected: true,
-  },
-  {
-    address: (LOCAL_CONTRACTS as Record<number, Record<string, string>>)[31337]?.AlphaToken ?? "",
-    symbol: "ALPHA",
-    name: "Alpha Token",
-  },
-];
+const ETH_TOKEN: Token = {
+  address: "0x0000000000000000000000000000000000000000",
+  symbol: "ETH",
+  name: "Ether",
+};
 
 interface TokenSelectModalProps {
   isOpen: boolean;
@@ -53,29 +26,107 @@ interface TokenSelectModalProps {
   protectedTokens?: string[];
 }
 
+/** Extract unique token addresses from pool data */
+function usePoolTokens(): Token[] {
+  const { data: allPools } = useAllPools();
+  const { data: bastionPools } = useBastionPools();
+
+  return useMemo(() => {
+    if (!allPools || allPools.length === 0) return [ETH_TOKEN];
+
+    const bastionTokens = new Set(
+      (bastionPools ?? [])
+        .filter((p) => p.issuedToken)
+        .map((p) => p.issuedToken!.toLowerCase())
+    );
+
+    // Collect unique token addresses from all pools
+    const seen = new Set<string>();
+    const tokens: Token[] = [ETH_TOKEN];
+    seen.add(ETH_TOKEN.address);
+
+    for (const pool of allPools) {
+      for (const addr of [pool.token0, pool.token1]) {
+        const lower = addr.toLowerCase();
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+
+        tokens.push({
+          address: addr,
+          symbol: "", // filled by TokenEntry component
+          name: "",
+          isProtected: bastionTokens.has(lower),
+        });
+      }
+    }
+
+    return tokens;
+  }, [allPools, bastionPools]);
+}
+
+/** Single token entry that resolves its own name/symbol on-chain */
+function TokenEntry({
+  token,
+  isProtected,
+  onSelect,
+  onClose,
+}: {
+  token: Token;
+  isProtected: boolean;
+  onSelect: (token: Token) => void;
+  onClose: () => void;
+}) {
+  const info = useTokenInfo(token.address as `0x${string}`);
+  const symbol = token.symbol || info.symbol || `${token.address.slice(0, 6)}…`;
+  const name = token.name || info.name || "Unknown Token";
+
+  return (
+    <button
+      onClick={() => {
+        onSelect({ ...token, symbol, name });
+        onClose();
+      }}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 hover:bg-gray-50 transition-colors"
+    >
+      <TokenIcon address={token.address} size={36} />
+      <div className="text-left flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-gray-900">{symbol}</span>
+          {(token.isProtected || isProtected) && (
+            <Badge variant="protected">Protected</Badge>
+          )}
+        </div>
+        <span className="text-xs text-gray-400 truncate block">{name}</span>
+      </div>
+    </button>
+  );
+}
+
 export function TokenSelectModal({
   isOpen,
   onClose,
   onSelect,
   protectedTokens = [],
 }: TokenSelectModalProps) {
-  const chainId = useChainId();
   const [search, setSearch] = useState("");
-
-  const POPULAR_TOKENS = chainId === 31337 ? LOCAL_TOKENS : SEPOLIA_TOKENS;
+  const poolTokens = usePoolTokens();
 
   if (!isOpen) return null;
 
-  const filtered = POPULAR_TOKENS.filter(
-    (t) =>
-      t.symbol.toLowerCase().includes(search.toLowerCase()) ||
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      t.address.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(search);
   const isProtected = (addr: string) =>
     protectedTokens.includes(addr.toLowerCase());
+
+  const filtered = poolTokens.filter((t) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      t.symbol.toLowerCase().includes(q) ||
+      t.name.toLowerCase().includes(q) ||
+      t.address.toLowerCase().includes(q)
+    );
+  });
+
+  const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(search);
 
   return (
     <div
@@ -104,25 +155,13 @@ export function TokenSelectModal({
         />
         <div className="max-h-80 space-y-1 overflow-y-auto">
           {filtered.map((token) => (
-            <button
+            <TokenEntry
               key={token.address}
-              onClick={() => {
-                onSelect(token);
-                onClose();
-              }}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 hover:bg-gray-50 transition-colors"
-            >
-              <TokenIcon address={token.address} size={36} />
-              <div className="text-left">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-900">{token.symbol}</span>
-                  {isProtected(token.address) && (
-                    <Badge variant="protected">Protected</Badge>
-                  )}
-                </div>
-                <span className="text-xs text-gray-400">{token.name}</span>
-              </div>
-            </button>
+              token={token}
+              isProtected={isProtected(token.address)}
+              onSelect={onSelect}
+              onClose={onClose}
+            />
           ))}
           {isValidAddress && filtered.length === 0 && (
             <button
