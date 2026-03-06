@@ -200,7 +200,7 @@ export function useCreateBastionPool() {
   // Base permit2 approval confirmed → sign
   useEffect(() => {
     if (isApproveBaseConfirmed && step === "confirming-permit2-base") {
-      _requestSignature();
+      _requestSignature(input ?? undefined);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isApproveBaseConfirmed, step]);
@@ -253,17 +253,17 @@ export function useCreateBastionPool() {
   }
 
   // --- After token is approved to Permit2 ---
+  // Called from useEffect where `input` state is available after re-render
   async function _afterTokenPermit2Approved() {
     if (!input || !contracts) return;
     const isNativeBase = input.baseToken === ZERO_ADDR;
 
     if (isNativeBase) {
-      // No base approval needed for native ETH
-      _requestSignature();
+      _requestSignature(input);
     } else {
       const baseAllowance = await _checkPermit2Allowance(input.baseToken);
       if (baseAllowance >= parseUnits(input.baseAmount, input.baseDecimals)) {
-        _requestSignature();
+        _requestSignature(input);
       } else {
         setStep("approving-permit2-base");
         writeApproveBase({
@@ -277,13 +277,14 @@ export function useCreateBastionPool() {
   }
 
   // --- Request EIP-712 signature ---
-  function _requestSignature() {
-    if (!input || !contracts || !address) return;
+  function _requestSignature(overrideInput?: CreatePoolInput) {
+    const params = overrideInput || input;
+    if (!params || !contracts || !address) return;
     setStep("signing");
 
-    const isNativeBase = input.baseToken === ZERO_ADDR;
-    const tokenWei = parseEther(input.tokenAmount);
-    const baseWei = parseUnits(input.baseAmount, input.baseDecimals);
+    const isNativeBase = params.baseToken === ZERO_ADDR;
+    const tokenWei = parseEther(params.tokenAmount);
+    const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
     const nonce = generatePermit2Nonce();
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800); // 30 min
 
@@ -303,7 +304,7 @@ export function useCreateBastionPool() {
         primaryType: "PermitTransferFrom",
         message: {
           permitted: {
-            token: input.tokenAddress,
+            token: params.tokenAddress,
             amount: tokenWei,
           },
           spender: routerAddress,
@@ -314,18 +315,18 @@ export function useCreateBastionPool() {
     } else {
       // Batch permit for both tokens
       // Tokens must be ordered: currency0 (lower address) first
-      const baseAddr = input.baseToken.toLowerCase();
-      const tokenAddr = input.tokenAddress.toLowerCase();
+      const baseAddr = params.baseToken.toLowerCase();
+      const tokenAddr = params.tokenAddress.toLowerCase();
       const baseIsCurrency0 = baseAddr < tokenAddr;
 
       const permitted = baseIsCurrency0
         ? [
-            { token: input.baseToken, amount: baseWei },
-            { token: input.tokenAddress, amount: tokenWei },
+            { token: params.baseToken, amount: baseWei },
+            { token: params.tokenAddress, amount: tokenWei },
           ]
         : [
-            { token: input.tokenAddress, amount: tokenWei },
-            { token: input.baseToken, amount: baseWei },
+            { token: params.tokenAddress, amount: tokenWei },
+            { token: params.baseToken, amount: baseWei },
           ];
 
       setPermitState({ nonce, deadline, isBatch: true });
@@ -476,43 +477,57 @@ export function useCreateBastionPool() {
 
       setStep("checking-permit2");
 
-      const tokenWei = parseEther(params.tokenAmount);
-      const isNativeBase = params.baseToken === ZERO_ADDR;
-      const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
+      try {
+        // Validate token has deployed code
+        if (publicClient) {
+          const code = await publicClient.getCode({ address: params.tokenAddress });
+          if (!code || code === "0x") {
+            setError(new Error(`No contract found at token address ${params.tokenAddress}. Make sure the token is deployed.`));
+            setStep("error");
+            return;
+          }
+        }
 
-      // Check token allowance to Permit2
-      const tokenAllowance = await _checkPermit2Allowance(params.tokenAddress);
-      const needTokenApproval = tokenAllowance < tokenWei;
+        const tokenWei = parseEther(params.tokenAmount);
+        const isNativeBase = params.baseToken === ZERO_ADDR;
+        const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
 
-      // Check base allowance to Permit2 (only for ERC20 base)
-      let needBaseApproval = false;
-      if (!isNativeBase) {
-        const baseAllowance = await _checkPermit2Allowance(params.baseToken);
-        needBaseApproval = baseAllowance < baseWei;
-      }
+        // Check token allowance to Permit2
+        const tokenAllowance = await _checkPermit2Allowance(params.tokenAddress);
+        const needTokenApproval = tokenAllowance < tokenWei;
 
-      if (!needTokenApproval && !needBaseApproval) {
-        // Both approved to Permit2 — go straight to signing
-        // Use setTimeout to allow state to settle
-        setTimeout(() => _requestSignature(), 0);
-      } else if (!needTokenApproval && needBaseApproval) {
-        // Token already approved to Permit2, need base approval
-        setStep("approving-permit2-base");
-        writeApproveBase({
-          address: params.baseToken,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [PERMIT2_ADDRESS, MAX_UINT256],
-        });
-      } else {
-        // Need token approval to Permit2
-        setStep("approving-permit2-token");
-        writeApproveToken({
-          address: params.tokenAddress,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [PERMIT2_ADDRESS, MAX_UINT256],
-        });
+        // Check base allowance to Permit2 (only for ERC20 base)
+        let needBaseApproval = false;
+        if (!isNativeBase) {
+          const baseAllowance = await _checkPermit2Allowance(params.baseToken);
+          needBaseApproval = baseAllowance < baseWei;
+        }
+
+        if (!needTokenApproval && !needBaseApproval) {
+          // Both approved to Permit2 — go straight to signing
+          _requestSignature(params);
+        } else if (!needTokenApproval && needBaseApproval) {
+          // Token already approved to Permit2, need base approval
+          setStep("approving-permit2-base");
+          writeApproveBase({
+            address: params.baseToken,
+            abi: erc20Abi,
+            functionName: "approve",
+            args: [PERMIT2_ADDRESS, MAX_UINT256],
+          });
+        } else {
+          // Need token approval to Permit2
+          setStep("approving-permit2-token");
+          writeApproveToken({
+            address: params.tokenAddress,
+            abi: erc20Abi,
+            functionName: "approve",
+            args: [PERMIT2_ADDRESS, MAX_UINT256],
+          });
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error(String(err)));
+        setStep("error");
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
