@@ -19,6 +19,38 @@ import Link from "next/link";
 
 type Step = 1 | 2 | 3 | 4;
 
+const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as `0x${string}`;
+
+// Base token options per chain
+interface BaseTokenOption {
+  address: `0x${string}`;
+  symbol: string;
+  name: string;
+  decimals: number;
+  minAmount: string; // minimum amount for pool creation
+}
+
+const BASE_TOKENS: Record<number, BaseTokenOption[]> = {
+  // Base mainnet fork (Anvil)
+  31337: [
+    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18, minAmount: "1" },
+    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18, minAmount: "1" },
+    { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", name: "USD Coin", decimals: 6, minAmount: "2000" },
+  ],
+  // Base Sepolia
+  84532: [
+    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18, minAmount: "1" },
+    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18, minAmount: "1" },
+    { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", symbol: "USDC", name: "USD Coin", decimals: 6, minAmount: "2000" },
+  ],
+  // Base mainnet
+  8453: [
+    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18, minAmount: "1" },
+    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18, minAmount: "1" },
+    { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", name: "USD Coin", decimals: 6, minAmount: "2000" },
+  ],
+};
+
 const DEFAULT_COMMITMENT = {
   dailyWithdrawLimit: 500, // 5% in bps
   maxSellPercent: 300, // 3% in bps
@@ -53,14 +85,17 @@ function computeStrictnessLevel(
 
 const STEP_LABELS = ["Token", "Liquidity", "Commitment", "Confirm"];
 
-function getStepLabel(poolStep: CreatePoolStep): string {
+function getStepLabel(poolStep: CreatePoolStep, totalSteps: number): string {
   switch (poolStep) {
-    case "approving-router":
-    case "confirming-router-approval":
-      return "Approve LP Tokens (1/2)";
+    case "approving-token":
+    case "confirming-token-approval":
+      return `Approve Token (1/${totalSteps})`;
+    case "approving-base":
+    case "confirming-base-approval":
+      return `Approve Base Token (2/${totalSteps})`;
     case "creating":
     case "confirming-creation":
-      return "Creating Pool (2/2)";
+      return `Creating Pool (${totalSteps}/${totalSteps})`;
     case "done":
       return "Pool Created!";
     case "error":
@@ -72,7 +107,8 @@ function getStepLabel(poolStep: CreatePoolStep): string {
 
 function isStepConfirming(poolStep: CreatePoolStep): boolean {
   return [
-    "confirming-router-approval",
+    "confirming-token-approval",
+    "confirming-base-approval",
     "confirming-creation",
   ].includes(poolStep);
 }
@@ -88,9 +124,14 @@ function formatCompact(n: number): string {
 
 export default function CreatePoolPage() {
   const { isConnected, address } = useAccount();
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+  const baseTokenOptions = BASE_TOKENS[chainId] ?? BASE_TOKENS[31337];
+
   const [step, setStep] = useState<Step>(1);
   const [tokenAddress, setTokenAddress] = useState("");
-  const [ethAmount, setEthAmount] = useState("");
+  const [selectedBaseToken, setSelectedBaseToken] = useState<BaseTokenOption>(baseTokenOptions[0]);
+  const [baseAmount, setBaseAmount] = useState("");
   const [tokenAmount, setTokenAmount] = useState("");
   const [commitment, setCommitment] = useState(DEFAULT_COMMITMENT);
   const [vestingMode, setVestingMode] = useState<VestingMode>("standard");
@@ -112,11 +153,9 @@ export default function CreatePoolPage() {
     hash,
     startCreation,
     reset: resetPool,
+    totalSteps,
     isActive,
   } = useCreateBastionPool();
-
-  const chainId = useChainId();
-  const contracts = getContracts(chainId);
 
   // Look up existing pool when PoolAlreadyInitialized error occurs
   const { data: existingPoolId } = usePoolByToken(
@@ -129,7 +168,9 @@ export default function CreatePoolPage() {
 
     startCreation({
       tokenAddress: tokenAddr,
-      ethAmount,
+      baseToken: selectedBaseToken.address,
+      baseAmount,
+      baseDecimals: selectedBaseToken.decimals,
       tokenAmount,
       lockDuration: activeLockDays * 86400,
       vestingDuration: activeVestingDays * 86400,
@@ -264,7 +305,7 @@ export default function CreatePoolPage() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Initial Liquidity</h2>
               <p className="text-sm text-gray-500">
-                Set the initial token and ETH amounts for your pool
+                Set the initial token and base amounts for your pool
               </p>
             </div>
           </div>
@@ -279,12 +320,41 @@ export default function CreatePoolPage() {
                 className="input-base text-lg"
               />
             </div>
+
+            {/* Base Token Selector */}
             <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">ETH Amount</label>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Base Token</label>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {baseTokenOptions.map((bt) => (
+                  <button
+                    key={bt.address}
+                    onClick={() => {
+                      setSelectedBaseToken(bt);
+                      setBaseAmount("");
+                    }}
+                    className={`rounded-xl border px-3 py-2.5 text-center transition-all ${
+                      selectedBaseToken.address === bt.address
+                        ? "border-bastion-600 bg-bastion-50 ring-1 ring-bastion-600"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <p className={`text-sm font-medium ${
+                      selectedBaseToken.address === bt.address ? "text-bastion-700" : "text-gray-700"
+                    }`}>{bt.symbol}</p>
+                    <p className="text-[11px] text-gray-400">{bt.name}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                {selectedBaseToken.symbol} Amount
+              </label>
               <input
                 type="number"
-                value={ethAmount}
-                onChange={(e) => setEthAmount(e.target.value)}
+                value={baseAmount}
+                onChange={(e) => setBaseAmount(e.target.value)}
                 placeholder="0"
                 className="input-base text-lg"
               />
@@ -300,7 +370,7 @@ export default function CreatePoolPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-emerald-800">Escrow Protection</p>
-                  {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 ? (
+                  {tokenAmount && baseAmount && parseFloat(tokenAmount) > 0 && parseFloat(baseAmount) > 0 ? (
                     <p className="text-sm text-emerald-700 mt-1">
                       Your LP position will be locked. You can remove LP according to the vesting schedule below.
                       This protects token buyers and cannot be disabled.
@@ -315,7 +385,7 @@ export default function CreatePoolPage() {
             </div>
 
             {/* Vesting Schedule Preview */}
-            {tokenAmount && ethAmount && parseFloat(tokenAmount) > 0 && parseFloat(ethAmount) > 0 && (
+            {tokenAmount && baseAmount && parseFloat(tokenAmount) > 0 && parseFloat(baseAmount) > 0 && (
               <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">LP Vesting Schedule</p>
                 <div className="space-y-2.5">
@@ -344,14 +414,14 @@ export default function CreatePoolPage() {
             )}
 
             {/* Minimum liquidity warning */}
-            {ethAmount && parseFloat(ethAmount) > 0 && parseFloat(ethAmount) < 1 && (
+            {baseAmount && parseFloat(baseAmount) > 0 && parseFloat(baseAmount) < parseFloat(selectedBaseToken.minAmount) && (
               <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 flex items-start gap-2.5">
                 <svg className="h-5 w-5 text-red-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
                 <div>
-                  <p className="text-sm font-medium text-red-700">Minimum 1 ETH required</p>
-                  <p className="text-xs text-red-600/70">Bastion pools require a minimum initial liquidity of 1 ETH to prevent spam.</p>
+                  <p className="text-sm font-medium text-red-700">Minimum {selectedBaseToken.minAmount} {selectedBaseToken.symbol} required</p>
+                  <p className="text-xs text-red-600/70">Bastion pools require minimum initial liquidity to prevent spam.</p>
                 </div>
               </div>
             )}
@@ -365,7 +435,7 @@ export default function CreatePoolPage() {
             </button>
             <button
               onClick={() => setStep(3)}
-              disabled={!ethAmount || !tokenAmount || parseFloat(ethAmount) < 1}
+              disabled={!baseAmount || !tokenAmount || parseFloat(baseAmount) < parseFloat(selectedBaseToken.minAmount)}
               className="btn-primary flex-1 py-3.5 disabled:opacity-40"
             >
               Continue
@@ -677,7 +747,7 @@ export default function CreatePoolPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Liquidity</span>
-              <span className="text-gray-900 font-medium">{tokenAmount} tokens + {ethAmount} ETH</span>
+              <span className="text-gray-900 font-medium">{tokenAmount} tokens + {baseAmount} {selectedBaseToken.symbol}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Escrowed LP</span>
@@ -791,12 +861,14 @@ export default function CreatePoolPage() {
               <div className="flex items-center gap-3 mb-3">
                 <LoadingSpinner size="sm" />
                 <span className="text-sm font-medium text-bastion-700">
-                  {getStepLabel(poolStep)}
+                  {getStepLabel(poolStep, totalSteps)}
                 </span>
               </div>
               <div className="flex gap-1.5">
-                {[1, 2].map((s) => {
-                  const stepNum = poolStep.includes("router") ? 1 : 2;
+                {Array.from({ length: totalSteps }, (_, i) => i + 1).map((s) => {
+                  const stepNum = poolStep.includes("token") ? 1
+                    : poolStep.includes("base") ? 2
+                    : totalSteps;
                   return (
                     <div
                       key={s}
@@ -832,7 +904,7 @@ export default function CreatePoolPage() {
                 "Created!"
               ) : isActive ? (
                 <span className="flex items-center justify-center gap-2">
-                  <LoadingSpinner size="sm" /> {getStepLabel(poolStep)}
+                  <LoadingSpinner size="sm" /> {getStepLabel(poolStep, totalSteps)}
                 </span>
               ) : poolStep === "error" ? (
                 "Retry"
