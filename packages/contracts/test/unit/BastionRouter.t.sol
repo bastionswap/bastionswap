@@ -14,6 +14,7 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SortTokens} from "@uniswap/v4-core/test/utils/SortTokens.sol";
 
+import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 import {BastionRouter} from "../../src/router/BastionRouter.sol";
 import {BastionHook} from "../../src/hooks/BastionHook.sol";
 import {EscrowVault} from "../../src/core/EscrowVault.sol";
@@ -60,7 +61,7 @@ contract BastionRouterTest is Test, Deployers {
         deployFreshManagerAndRouters();
 
         // Deploy BastionRouter
-        router = new BastionRouter(manager);
+        router = new BastionRouter(manager, ISignatureTransfer(address(0)));
 
         // Deploy hook at correct flag address
         uint160 flags = uint160(
@@ -265,7 +266,7 @@ contract BastionRouterTest is Test, Deployers {
 
     function test_createPool_HookNotSet_Reverts() public {
         // Deploy a fresh router without setting hook
-        BastionRouter freshRouter = new BastionRouter(manager);
+        BastionRouter freshRouter = new BastionRouter(manager, ISignatureTransfer(address(0)));
 
         vm.expectRevert(BastionRouter.HookNotSet.selector);
         freshRouter.createPool(

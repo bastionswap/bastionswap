@@ -8,9 +8,10 @@ import {
   useBalance,
   usePublicClient,
   useChainId,
+  useSignTypedData,
 } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
-import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionResult } from "viem";
+import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionResult, encodeAbiParameters, parseAbiParameters } from "viem";
 import { getContracts } from "@/config/contracts";
 import { BastionRouterABI } from "@/config/abis";
 
@@ -61,7 +62,30 @@ const FAUCET_ABI = [
   },
 ] as const;
 
-// ─── Token Allowance ──────────────────────────────────
+const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as `0x${string}`;
+const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+// EIP-712 types for Permit2 SignatureTransfer
+const PERMIT_TRANSFER_FROM_TYPES = {
+  PermitTransferFrom: [
+    { name: "permitted", type: "TokenPermissions" },
+    { name: "spender", type: "address" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+  TokenPermissions: [
+    { name: "token", type: "address" },
+    { name: "amount", type: "uint256" },
+  ],
+} as const;
+
+function generatePermit2Nonce(): bigint {
+  const timestamp = BigInt(Date.now());
+  const random = BigInt(Math.floor(Math.random() * 0xFFFFFFFF));
+  return (timestamp << 32n) | random;
+}
+
+// ─── Token Allowance (checks against Permit2) ──────────────────────────────────
 
 export function useTokenAllowance(
   token: `0x${string}` | undefined,
@@ -69,12 +93,13 @@ export function useTokenAllowance(
   spender: `0x${string}` | undefined
 ) {
   const isNative = token === "0x0000000000000000000000000000000000000000";
+  // Check allowance against Permit2 (not the router)
   const { data, refetch } = useReadContract({
     address: token,
     abi: ERC20_ABI,
     functionName: "allowance",
-    args: owner && spender ? [owner, spender] : undefined,
-    query: { enabled: !!token && !!owner && !!spender && !isNative },
+    args: owner ? [owner, PERMIT2_ADDRESS] : undefined,
+    query: { enabled: !!token && !!owner && !isNative },
   });
 
   return {
@@ -111,7 +136,7 @@ export function useTokenBalance(
   };
 }
 
-// ─── Approve ──────────────────────────────────
+// ─── Approve (to Permit2, one-time max approval) ──────────────────────────────────
 
 export function useApprove() {
   const {
@@ -125,19 +150,20 @@ export function useApprove() {
   const { isLoading: isConfirming, isSuccess } =
     useWaitForTransactionReceipt({ hash });
 
-  const approve = (token: `0x${string}`, spender: `0x${string}`, amount: bigint) => {
+  const approve = (token: `0x${string}`, _spender: `0x${string}`, _amount: bigint) => {
+    // Always approve to Permit2 with max approval (one-time, reusable)
     writeContract({
       address: token,
       abi: ERC20_ABI,
       functionName: "approve",
-      args: [spender, amount],
+      args: [PERMIT2_ADDRESS, MAX_UINT256],
     });
   };
 
   return { approve, hash, isPending, isConfirming, isSuccess, error, reset };
 }
 
-// ─── Swap ──────────────────────────────────
+// ─── Swap with Permit2 ──────────────────────────────────
 
 export interface SwapConfig {
   currency0: `0x${string}`;
@@ -157,47 +183,142 @@ export function useExecuteSwap() {
   const contracts = getContracts(chainId);
 
   const {
+    signTypedData,
+    data: signature,
+    error: signError,
+    reset: resetSign,
+    isPending: isSigning,
+  } = useSignTypedData();
+
+  const {
     writeContract,
     data: hash,
     isPending: isWriting,
     error: writeError,
-    reset,
+    reset: resetWrite,
   } = useWriteContract();
 
   const { isLoading: isConfirming, isSuccess } =
     useWaitForTransactionReceipt({ hash });
 
+  const [pendingSwap, setPendingSwap] = useState<SwapConfig | null>(null);
+  const [permitNonce, setPermitNonce] = useState<bigint>(0n);
+  const [permitDeadline, setPermitDeadline] = useState<bigint>(0n);
+
+  // When signature is received, submit the swap with Permit2
+  useEffect(() => {
+    if (signature && pendingSwap && contracts) {
+      const config = pendingSwap;
+      const inputToken = config.zeroForOne ? config.currency0 : config.currency1;
+
+      const permitSingle = {
+        permit: {
+          permitted: {
+            token: inputToken,
+            amount: config.amountIn,
+          },
+          nonce: permitNonce,
+          deadline: permitDeadline,
+        },
+        signature,
+      };
+
+      writeContract({
+        address: contracts.BastionRouter as `0x${string}`,
+        abi: BastionRouterABI,
+        functionName: "swapExactInputPermit2",
+        args: [
+          {
+            currency0: config.currency0,
+            currency1: config.currency1,
+            fee: config.fee,
+            tickSpacing: config.tickSpacing,
+            hooks: config.hooks,
+          },
+          config.zeroForOne,
+          config.amountIn,
+          config.minAmountOut,
+          config.deadline,
+          permitSingle,
+        ],
+        value: 0n,
+      });
+      setPendingSwap(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
   const swap = (config: SwapConfig) => {
     if (!contracts) return;
 
-    writeContract({
-      address: contracts.BastionRouter as `0x${string}`,
-      abi: BastionRouterABI,
-      functionName: "swapExactInput",
-      args: [
-        {
-          currency0: config.currency0,
-          currency1: config.currency1,
-          fee: config.fee,
-          tickSpacing: config.tickSpacing,
-          hooks: config.hooks,
+    const inputToken = config.zeroForOne ? config.currency0 : config.currency1;
+    const isNativeInput = inputToken === "0x0000000000000000000000000000000000000000";
+
+    if (isNativeInput) {
+      // Native ETH — use original swapExactInput directly (no permit needed)
+      writeContract({
+        address: contracts.BastionRouter as `0x${string}`,
+        abi: BastionRouterABI,
+        functionName: "swapExactInput",
+        args: [
+          {
+            currency0: config.currency0,
+            currency1: config.currency1,
+            fee: config.fee,
+            tickSpacing: config.tickSpacing,
+            hooks: config.hooks,
+          },
+          config.zeroForOne,
+          config.amountIn,
+          config.minAmountOut,
+          config.deadline,
+        ],
+        value: config.value || 0n,
+      });
+    } else {
+      // ERC20 input — sign Permit2 first, then submit swap
+      const nonce = generatePermit2Nonce();
+      const deadline = config.deadline;
+      const routerAddress = contracts.BastionRouter as `0x${string}`;
+
+      setPendingSwap(config);
+      setPermitNonce(nonce);
+      setPermitDeadline(deadline);
+
+      signTypedData({
+        domain: {
+          name: "Permit2",
+          chainId,
+          verifyingContract: PERMIT2_ADDRESS,
         },
-        config.zeroForOne,
-        config.amountIn,
-        config.minAmountOut,
-        config.deadline,
-      ],
-      value: config.value || 0n,
-    });
+        types: PERMIT_TRANSFER_FROM_TYPES,
+        primaryType: "PermitTransferFrom",
+        message: {
+          permitted: {
+            token: inputToken,
+            amount: config.amountIn,
+          },
+          spender: routerAddress,
+          nonce,
+          deadline,
+        },
+      });
+    }
+  };
+
+  const reset = () => {
+    resetSign();
+    resetWrite();
+    setPendingSwap(null);
   };
 
   return {
     swap,
     hash,
-    isWriting,
+    isWriting: isWriting || isSigning,
     isConfirming,
     isSuccess,
-    error: writeError,
+    error: signError || writeError,
     reset,
   };
 }
@@ -264,12 +385,10 @@ export interface QuoteParams {
 
 // Dummy account for quoting — we override its balance/allowance via eth_call stateOverride
 const QUOTE_ACCOUNT = "0x0000000000000000000000000000000000000001" as const;
-const MAX_UINT256 = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" as `0x${string}`;
+const MAX_UINT256_HEX = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" as `0x${string}`;
 
 function computeStorageSlots(account: `0x${string}`, spender: `0x${string}`) {
   // Solmate ERC20 layout: balanceOf at slot 3, allowance at slot 4
-  // balanceOf[account] = keccak256(abi.encode(account, 3))
-  // allowance[account][spender] = keccak256(abi.encode(spender, keccak256(abi.encode(account, 4))))
   const { keccak256: k, encodeAbiParameters } = require("viem") as typeof import("viem");
   const addrUint = [{ type: "address" as const }, { type: "uint256" as const }] as const;
   const balSlot = k(encodeAbiParameters(addrUint, [account, 3n]));
@@ -300,6 +419,7 @@ export function useSwapQuote(params: QuoteParams | null) {
       const inputToken = params.zeroForOne ? params.currency0 : params.currency1;
       const routerAddr = contracts.BastionRouter as `0x${string}`;
 
+      // Quote uses the original swapExactInput (no permit needed for simulation)
       const data = encodeFunctionData({
         abi: BastionRouterABI,
         functionName: "swapExactInput",
@@ -330,7 +450,6 @@ export function useSwapQuote(params: QuoteParams | null) {
           stateOverride: isNativeInput
             ? [
                 {
-                  // Give the dummy account enough ETH
                   address: QUOTE_ACCOUNT,
                   balance: params.amountIn * 2n,
                 },
@@ -339,8 +458,8 @@ export function useSwapQuote(params: QuoteParams | null) {
                 {
                   address: inputToken,
                   stateDiff: [
-                    { slot: balSlot, value: MAX_UINT256 },
-                    { slot: allowSlot, value: MAX_UINT256 },
+                    { slot: balSlot, value: MAX_UINT256_HEX },
+                    { slot: allowSlot, value: MAX_UINT256_HEX },
                   ],
                 },
               ],

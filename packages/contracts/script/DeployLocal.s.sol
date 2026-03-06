@@ -23,6 +23,7 @@ import {BastionRouter} from "../src/router/BastionRouter.sol";
 import {TestToken} from "../src/test/TestToken.sol";
 import {IEscrowVault} from "../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../src/interfaces/ITriggerOracle.sol";
+import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 
 import {BastionDeployer} from "./BastionDeployer.sol";
 import {HookMiner} from "./HookMiner.sol";
@@ -40,6 +41,9 @@ contract DeployLocal is Script {
     // Base WETH and USDC
     address constant WETH = 0x4200000000000000000000000000000000000006;
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+
+    // Permit2 canonical address (same on all chains)
+    address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     // Hook permission flags
     uint160 constant HOOK_FLAGS =
@@ -116,7 +120,7 @@ contract DeployLocal is Script {
         address deployedHook = factory.deploy(a.salt, a.hookCreationCode);
         require(deployedHook == a.hook, "Hook address mismatch");
 
-        BastionRouter router = new BastionRouter(IPoolManager(POOL_MANAGER));
+        BastionRouter router = new BastionRouter(IPoolManager(POOL_MANAGER), ISignatureTransfer(PERMIT2));
 
         // Wire up hook ↔ router cross-references
         BastionHook(payable(deployedHook)).setBastionRouter(address(router));
@@ -151,6 +155,7 @@ contract DeployLocal is Script {
         btt.approve(d.lpRouter, type(uint256).max);
         btt.approve(d.swapRouter, type(uint256).max);
         btt.approve(d.router, type(uint256).max);
+        btt.approve(PERMIT2, type(uint256).max);
 
         bytes memory hookData = _buildHookData(deployer, d.btt);
 
@@ -172,9 +177,10 @@ contract DeployLocal is Script {
         btt.transfer(TRADER, 100_000e18);
         console2.log("Sent 100,000 BTT to trader:", TRADER);
 
-        // ALPHA: approve router and send to trader (pool creation left to user)
+        // ALPHA: approve router + Permit2 and send to trader (pool creation left to user)
         TestToken alpha = TestToken(d.alpha);
         alpha.approve(d.router, type(uint256).max);
+        alpha.approve(PERMIT2, type(uint256).max);
         alpha.transfer(TRADER, 100_000e18);
         console2.log("Sent 100,000 ALPHA to trader:", TRADER);
 

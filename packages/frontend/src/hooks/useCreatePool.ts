@@ -4,6 +4,8 @@ import {
   useWaitForTransactionReceipt,
   useAccount,
   useChainId,
+  usePublicClient,
+  useSignTypedData,
 } from "wagmi";
 import { parseAbi, encodeAbiParameters, parseAbiParameters, parseEther, parseUnits } from "viem";
 import { getContracts } from "@/config/contracts";
@@ -11,16 +13,21 @@ import { BastionRouterABI } from "@/config/abis";
 
 const erc20Abi = parseAbi([
   "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
 ]);
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as `0x${string}`;
+const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as `0x${string}`;
+const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
 export type CreatePoolStep =
   | "idle"
-  | "approving-token"
-  | "confirming-token-approval"
-  | "approving-base"
-  | "confirming-base-approval"
+  | "checking-permit2"
+  | "approving-permit2-token"
+  | "confirming-permit2-token"
+  | "approving-permit2-base"
+  | "confirming-permit2-base"
+  | "signing"
   | "creating"
   | "confirming-creation"
   | "done"
@@ -78,16 +85,50 @@ function sqrt(x: bigint): bigint {
   return z;
 }
 
+function generatePermit2Nonce(): bigint {
+  const timestamp = BigInt(Date.now());
+  const random = BigInt(Math.floor(Math.random() * 0xFFFFFFFF));
+  return (timestamp << 32n) | random;
+}
+
+// EIP-712 types for Permit2 SignatureTransfer
+const PERMIT_TRANSFER_FROM_TYPES = {
+  PermitTransferFrom: [
+    { name: "permitted", type: "TokenPermissions" },
+    { name: "spender", type: "address" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+  TokenPermissions: [
+    { name: "token", type: "address" },
+    { name: "amount", type: "uint256" },
+  ],
+} as const;
+
+const PERMIT_BATCH_TRANSFER_FROM_TYPES = {
+  PermitBatchTransferFrom: [
+    { name: "permitted", type: "TokenPermissions[]" },
+    { name: "spender", type: "address" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+  TokenPermissions: [
+    { name: "token", type: "address" },
+    { name: "amount", type: "uint256" },
+  ],
+} as const;
+
 export function useCreateBastionPool() {
   const { address } = useAccount();
   const chainId = useChainId();
   const contracts = getContracts(chainId);
+  const publicClient = usePublicClient();
 
   const [step, setStep] = useState<CreatePoolStep>("idle");
   const [error, setError] = useState<Error | null>(null);
   const [input, setInput] = useState<CreatePoolInput | null>(null);
 
-  // Approve issued token → router
+  // Approve token → Permit2
   const {
     writeContract: writeApproveToken,
     data: approveTokenHash,
@@ -97,7 +138,7 @@ export function useCreateBastionPool() {
   const { isSuccess: isApproveTokenConfirmed } =
     useWaitForTransactionReceipt({ hash: approveTokenHash });
 
-  // Approve base token (WETH/USDC) → router
+  // Approve base token → Permit2
   const {
     writeContract: writeApproveBase,
     data: approveBaseHash,
@@ -106,6 +147,14 @@ export function useCreateBastionPool() {
   } = useWriteContract();
   const { isSuccess: isApproveBaseConfirmed } =
     useWaitForTransactionReceipt({ hash: approveBaseHash });
+
+  // Sign Permit2 typed data
+  const {
+    signTypedData,
+    data: signature,
+    error: signError,
+    reset: resetSign,
+  } = useSignTypedData();
 
   // Create pool
   const {
@@ -117,53 +166,53 @@ export function useCreateBastionPool() {
   const { isSuccess: isCreatePoolConfirmed } =
     useWaitForTransactionReceipt({ hash: createPoolHash });
 
+  // Stored permit data for use after signing
+  const [permitState, setPermitState] = useState<{
+    nonce: bigint;
+    deadline: bigint;
+    isBatch: boolean;
+  } | null>(null);
+
   // --- State machine transitions ---
 
-  // Token approval tx submitted → confirming
+  // Token permit2 approval tx submitted → confirming
   useEffect(() => {
-    if (approveTokenHash && step === "approving-token") {
-      setStep("confirming-token-approval");
+    if (approveTokenHash && step === "approving-permit2-token") {
+      setStep("confirming-permit2-token");
     }
   }, [approveTokenHash, step]);
 
-  // Token approval confirmed → approve base (if ERC20) or create pool (if native ETH)
+  // Token permit2 approval confirmed → check base or sign
   useEffect(() => {
-    if (isApproveTokenConfirmed && step === "confirming-token-approval" && input && contracts) {
-      const isNativeBase = input.baseToken === ZERO_ADDR;
-      if (isNativeBase) {
-        // Skip base approval, go straight to create
-        setStep("creating");
-        _submitCreatePool();
-      } else {
-        // Need to approve base token too
-        setStep("approving-base");
-        const baseWei = parseUnits(input.baseAmount, input.baseDecimals);
-        writeApproveBase({
-          address: input.baseToken,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [contracts.BastionRouter as `0x${string}`, baseWei],
-        });
-      }
+    if (isApproveTokenConfirmed && step === "confirming-permit2-token" && input && contracts) {
+      _afterTokenPermit2Approved();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isApproveTokenConfirmed, step]);
 
-  // Base approval tx submitted → confirming
+  // Base permit2 approval tx submitted → confirming
   useEffect(() => {
-    if (approveBaseHash && step === "approving-base") {
-      setStep("confirming-base-approval");
+    if (approveBaseHash && step === "approving-permit2-base") {
+      setStep("confirming-permit2-base");
     }
   }, [approveBaseHash, step]);
 
-  // Base approval confirmed → create pool
+  // Base permit2 approval confirmed → sign
   useEffect(() => {
-    if (isApproveBaseConfirmed && step === "confirming-base-approval") {
-      setStep("creating");
-      _submitCreatePool();
+    if (isApproveBaseConfirmed && step === "confirming-permit2-base") {
+      _requestSignature();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isApproveBaseConfirmed, step]);
+
+  // Signature received → submit createPoolPermit2
+  useEffect(() => {
+    if (signature && step === "signing" && input && contracts && permitState) {
+      setStep("creating");
+      _submitCreatePoolPermit2(input, signature);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, step]);
 
   // Create pool tx submitted → confirming
   useEffect(() => {
@@ -181,24 +230,134 @@ export function useCreateBastionPool() {
 
   // Error handling
   useEffect(() => {
-    const err = approveTokenError || approveBaseError || createPoolError;
+    const err = approveTokenError || approveBaseError || signError || createPoolError;
     if (err) {
       setError(err);
       setStep("error");
     }
-  }, [approveTokenError, approveBaseError, createPoolError]);
+  }, [approveTokenError, approveBaseError, signError, createPoolError]);
 
-  // --- Submit create pool transaction ---
-  function _submitCreatePool() {
+  // --- Check Permit2 allowance ---
+  async function _checkPermit2Allowance(token: `0x${string}`): Promise<bigint> {
+    if (!publicClient || !address) return 0n;
+    try {
+      return await publicClient.readContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [address, PERMIT2_ADDRESS],
+      });
+    } catch {
+      return 0n;
+    }
+  }
+
+  // --- After token is approved to Permit2 ---
+  async function _afterTokenPermit2Approved() {
+    if (!input || !contracts) return;
+    const isNativeBase = input.baseToken === ZERO_ADDR;
+
+    if (isNativeBase) {
+      // No base approval needed for native ETH
+      _requestSignature();
+    } else {
+      const baseAllowance = await _checkPermit2Allowance(input.baseToken);
+      if (baseAllowance >= parseUnits(input.baseAmount, input.baseDecimals)) {
+        _requestSignature();
+      } else {
+        setStep("approving-permit2-base");
+        writeApproveBase({
+          address: input.baseToken,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [PERMIT2_ADDRESS, MAX_UINT256],
+        });
+      }
+    }
+  }
+
+  // --- Request EIP-712 signature ---
+  function _requestSignature() {
     if (!input || !contracts || !address) return;
+    setStep("signing");
 
     const isNativeBase = input.baseToken === ZERO_ADDR;
-    const baseWei = parseUnits(input.baseAmount, input.baseDecimals);
     const tokenWei = parseEther(input.tokenAmount);
+    const baseWei = parseUnits(input.baseAmount, input.baseDecimals);
+    const nonce = generatePermit2Nonce();
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800); // 30 min
 
-    // Sort currencies: lower address is currency0
-    const baseAddr = input.baseToken.toLowerCase();
-    const tokenAddr = input.tokenAddress.toLowerCase();
+    const routerAddress = contracts.BastionRouter as `0x${string}`;
+
+    if (isNativeBase) {
+      // Single permit for the issued token only
+      setPermitState({ nonce, deadline, isBatch: false });
+
+      signTypedData({
+        domain: {
+          name: "Permit2",
+          chainId,
+          verifyingContract: PERMIT2_ADDRESS,
+        },
+        types: PERMIT_TRANSFER_FROM_TYPES,
+        primaryType: "PermitTransferFrom",
+        message: {
+          permitted: {
+            token: input.tokenAddress,
+            amount: tokenWei,
+          },
+          spender: routerAddress,
+          nonce,
+          deadline,
+        },
+      });
+    } else {
+      // Batch permit for both tokens
+      // Tokens must be ordered: currency0 (lower address) first
+      const baseAddr = input.baseToken.toLowerCase();
+      const tokenAddr = input.tokenAddress.toLowerCase();
+      const baseIsCurrency0 = baseAddr < tokenAddr;
+
+      const permitted = baseIsCurrency0
+        ? [
+            { token: input.baseToken, amount: baseWei },
+            { token: input.tokenAddress, amount: tokenWei },
+          ]
+        : [
+            { token: input.tokenAddress, amount: tokenWei },
+            { token: input.baseToken, amount: baseWei },
+          ];
+
+      setPermitState({ nonce, deadline, isBatch: true });
+
+      signTypedData({
+        domain: {
+          name: "Permit2",
+          chainId,
+          verifyingContract: PERMIT2_ADDRESS,
+        },
+        types: PERMIT_BATCH_TRANSFER_FROM_TYPES,
+        primaryType: "PermitBatchTransferFrom",
+        message: {
+          permitted,
+          spender: routerAddress,
+          nonce,
+          deadline,
+        },
+      });
+    }
+  }
+
+  // --- Submit createPoolPermit2 ---
+  function _submitCreatePoolPermit2(params: CreatePoolInput, sig: `0x${string}`) {
+    if (!contracts || !address || !permitState) return;
+
+    const isNativeBase = params.baseToken === ZERO_ADDR;
+    const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
+    const tokenWei = parseEther(params.tokenAmount);
+
+    const baseAddr = params.baseToken.toLowerCase();
+    const tokenAddr = params.tokenAddress.toLowerCase();
     const baseIsCurrency0 = baseAddr < tokenAddr;
     const amount0 = baseIsCurrency0 ? baseWei : tokenWei;
     const amount1 = baseIsCurrency0 ? tokenWei : baseWei;
@@ -215,35 +374,83 @@ export function useCreateBastionPool() {
       ]),
       [
         address,
-        input.tokenAddress,
-        input.lockDuration,
-        input.vestingDuration,
+        params.tokenAddress,
+        params.lockDuration,
+        params.vestingDuration,
         [
-          input.commitment.dailyWithdrawLimit,
-          input.commitment.maxSellPercent,
+          params.commitment.dailyWithdrawLimit,
+          params.commitment.maxSellPercent,
         ] as const,
         [
-          input.triggerConfig.lpRemovalThreshold,
-          input.triggerConfig.dumpThresholdPercent,
-          input.triggerConfig.dumpWindowSeconds,
-          input.triggerConfig.taxDeviationThreshold,
-          input.triggerConfig.slowRugWindowSeconds,
-          input.triggerConfig.slowRugCumulativeThreshold,
+          params.triggerConfig.lpRemovalThreshold,
+          params.triggerConfig.dumpThresholdPercent,
+          params.triggerConfig.dumpWindowSeconds,
+          params.triggerConfig.taxDeviationThreshold,
+          params.triggerConfig.slowRugWindowSeconds,
+          params.triggerConfig.slowRugCumulativeThreshold,
         ] as const,
       ],
     );
 
+    // Encode permitData based on single vs batch
+    let permitData: `0x${string}`;
+
+    if (isNativeBase) {
+      // Single permit: encode Permit2Single struct (PermitTransferFrom + signature)
+      permitData = encodeAbiParameters(
+        parseAbiParameters([
+          "((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline)",
+          "bytes",
+        ]),
+        [
+          {
+            permitted: { token: params.tokenAddress, amount: tokenWei },
+            nonce: permitState.nonce,
+            deadline: permitState.deadline,
+          },
+          sig,
+        ],
+      );
+    } else {
+      // Batch permit: encode Permit2Batch struct
+      const permitted = baseIsCurrency0
+        ? [
+            { token: params.baseToken, amount: baseWei },
+            { token: params.tokenAddress, amount: tokenWei },
+          ]
+        : [
+            { token: params.tokenAddress, amount: tokenWei },
+            { token: params.baseToken, amount: baseWei },
+          ];
+
+      permitData = encodeAbiParameters(
+        parseAbiParameters([
+          "((address token, uint256 amount)[] permitted, uint256 nonce, uint256 deadline)",
+          "bytes",
+        ]),
+        [
+          {
+            permitted,
+            nonce: permitState.nonce,
+            deadline: permitState.deadline,
+          },
+          sig,
+        ],
+      );
+    }
+
     writeCreatePool({
       address: contracts.BastionRouter as `0x${string}`,
       abi: BastionRouterABI,
-      functionName: "createPool",
+      functionName: "createPoolPermit2",
       args: [
-        input.tokenAddress,
-        input.baseToken,
+        params.tokenAddress,
+        params.baseToken,
         3000,
         tokenWei,
         sqrtPriceX96,
         hookData,
+        permitData,
       ],
       value: isNativeBase ? baseWei : 0n,
     });
@@ -255,37 +462,82 @@ export function useCreateBastionPool() {
     /PoolAlreadyInitialized|0x7983c051/.test(error.message);
 
   const startCreation = useCallback(
-    (params: CreatePoolInput) => {
-      if (!contracts) return;
+    async (params: CreatePoolInput) => {
+      if (!contracts || !address) return;
 
       setInput(params);
       setError(null);
-      setStep("approving-token");
+      setPermitState(null);
       resetApproveToken();
       resetApproveBase();
+      resetSign();
       resetCreatePool();
 
-      const totalTokenNeeded = parseEther(params.tokenAmount);
-      writeApproveToken({
-        address: params.tokenAddress,
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [contracts.BastionRouter as `0x${string}`, totalTokenNeeded],
-      });
+      setStep("checking-permit2");
+
+      const tokenWei = parseEther(params.tokenAmount);
+      const isNativeBase = params.baseToken === ZERO_ADDR;
+      const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
+
+      // Check token allowance to Permit2
+      const tokenAllowance = await _checkPermit2Allowance(params.tokenAddress);
+      const needTokenApproval = tokenAllowance < tokenWei;
+
+      // Check base allowance to Permit2 (only for ERC20 base)
+      let needBaseApproval = false;
+      if (!isNativeBase) {
+        const baseAllowance = await _checkPermit2Allowance(params.baseToken);
+        needBaseApproval = baseAllowance < baseWei;
+      }
+
+      if (!needTokenApproval && !needBaseApproval) {
+        // Both approved to Permit2 — go straight to signing
+        // Use setTimeout to allow state to settle
+        setTimeout(() => _requestSignature(), 0);
+      } else if (!needTokenApproval && needBaseApproval) {
+        // Token already approved to Permit2, need base approval
+        setStep("approving-permit2-base");
+        writeApproveBase({
+          address: params.baseToken,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [PERMIT2_ADDRESS, MAX_UINT256],
+        });
+      } else {
+        // Need token approval to Permit2
+        setStep("approving-permit2-token");
+        writeApproveToken({
+          address: params.tokenAddress,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [PERMIT2_ADDRESS, MAX_UINT256],
+        });
+      }
     },
-    [contracts, writeApproveToken, resetApproveToken, resetApproveBase, resetCreatePool],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [contracts, address, writeApproveToken, writeApproveBase, resetApproveToken, resetApproveBase, resetSign, resetCreatePool, publicClient],
   );
 
   const reset = useCallback(() => {
     setStep("idle");
     setError(null);
     setInput(null);
+    setPermitState(null);
     resetApproveToken();
     resetApproveBase();
+    resetSign();
     resetCreatePool();
-  }, [resetApproveToken, resetApproveBase, resetCreatePool]);
+  }, [resetApproveToken, resetApproveBase, resetSign, resetCreatePool]);
 
-  const totalSteps = input && input.baseToken !== ZERO_ADDR ? 3 : 2;
+  // Total steps: approve(s) + sign + create
+  const totalSteps = (() => {
+    if (!input) return 2; // sign + create
+    const isNativeBase = input.baseToken === ZERO_ADDR;
+    // Worst case: approve token + approve base + sign + create = 4
+    // Best case: sign + create = 2
+    if (isNativeBase) return 3; // approve token (maybe) + sign + create
+    return 4; // approve token + approve base + sign + create
+  })();
 
   return {
     step,

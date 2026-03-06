@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 
 import {BastionRouter} from "../src/router/BastionRouter.sol";
 
@@ -22,7 +23,7 @@ contract DeployRouter is Script {
 
         vm.startBroadcast(deployerKey);
 
-        BastionRouter router = new BastionRouter(IPoolManager(POOL_MANAGER));
+        BastionRouter router = new BastionRouter(IPoolManager(POOL_MANAGER), ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3));
 
         vm.stopBroadcast();
 

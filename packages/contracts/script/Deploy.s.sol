@@ -11,6 +11,7 @@ import {InsurancePool} from "../src/core/InsurancePool.sol";
 import {TriggerOracle} from "../src/core/TriggerOracle.sol";
 import {ReputationEngine} from "../src/core/ReputationEngine.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 
 import {BastionDeployer} from "./BastionDeployer.sol";
 import {HookMiner} from "./HookMiner.sol";
@@ -81,7 +82,7 @@ contract Deploy is Script {
         require(deployedHook == a.hook, "Hook address mismatch");
 
         // 7. Deploy BastionRouter and wire up cross-references
-        BastionRouter router = new BastionRouter(IPoolManager(poolManager));
+        BastionRouter router = new BastionRouter(IPoolManager(poolManager), ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3));
         BastionHook(payable(deployedHook)).setBastionRouter(address(router));
         router.setBastionHook(deployedHook);
 

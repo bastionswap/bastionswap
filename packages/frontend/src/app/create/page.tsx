@@ -87,12 +87,16 @@ const STEP_LABELS = ["Token", "Liquidity", "Commitment", "Confirm"];
 
 function getStepLabel(poolStep: CreatePoolStep, totalSteps: number): string {
   switch (poolStep) {
-    case "approving-token":
-    case "confirming-token-approval":
-      return `Approve Token (1/${totalSteps})`;
-    case "approving-base":
-    case "confirming-base-approval":
-      return `Approve Base Token (2/${totalSteps})`;
+    case "checking-permit2":
+      return "Checking approvals...";
+    case "approving-permit2-token":
+    case "confirming-permit2-token":
+      return `Approve Token → Permit2 (1/${totalSteps})`;
+    case "approving-permit2-base":
+    case "confirming-permit2-base":
+      return `Approve Base → Permit2 (2/${totalSteps})`;
+    case "signing":
+      return `Sign Permit (${totalSteps - 1}/${totalSteps})`;
     case "creating":
     case "confirming-creation":
       return `Creating Pool (${totalSteps}/${totalSteps})`;
@@ -107,8 +111,9 @@ function getStepLabel(poolStep: CreatePoolStep, totalSteps: number): string {
 
 function isStepConfirming(poolStep: CreatePoolStep): boolean {
   return [
-    "confirming-token-approval",
-    "confirming-base-approval",
+    "checking-permit2",
+    "confirming-permit2-token",
+    "confirming-permit2-base",
     "confirming-creation",
   ].includes(poolStep);
 }
@@ -868,6 +873,7 @@ export default function CreatePoolPage() {
                 {Array.from({ length: totalSteps }, (_, i) => i + 1).map((s) => {
                   const stepNum = poolStep.includes("token") ? 1
                     : poolStep.includes("base") ? 2
+                    : poolStep === "signing" ? totalSteps - 1
                     : totalSteps;
                   return (
                     <div
