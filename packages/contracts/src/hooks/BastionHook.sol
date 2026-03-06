@@ -581,7 +581,8 @@ contract BastionHook is BaseTestHooks {
     }
 
     /// @dev Compute amount0 from liquidity, sqrtPrice, and tick bounds.
-    ///      amount0 = L * (sqrtB - sqrtPrice) / (sqrtPrice * sqrtB) * Q96
+    ///      amount0 = L * (sqrtB - sqrtLower) / (sqrtLower * sqrtB) * Q96
+    ///      Split into two mulDiv calls to avoid intermediate overflow.
     function _getAmount0ForLiquidity(
         uint160 sqrtPriceX96,
         uint160 sqrtPriceAX96,
@@ -592,9 +593,9 @@ contract BastionHook is BaseTestHooks {
         if (sqrtPriceX96 >= sqrtPriceBX96) return 0; // all in token1
         uint160 effectiveLower = sqrtPriceX96 > sqrtPriceAX96 ? sqrtPriceX96 : sqrtPriceAX96;
         return FullMath.mulDiv(
-            uint256(liquidity) << FixedPoint96.RESOLUTION,
-            sqrtPriceBX96 - effectiveLower,
-            uint256(effectiveLower) * sqrtPriceBX96
+            uint256(liquidity),
+            FullMath.mulDiv(FixedPoint96.Q96, sqrtPriceBX96 - effectiveLower, sqrtPriceBX96),
+            effectiveLower
         );
     }
 

@@ -18,6 +18,7 @@ TRIGGER_ORACLE=$(jq -r '[.transactions[] | select(.contractName=="TriggerOracle"
 REPUTATION_ENGINE=$(jq -r '[.transactions[] | select(.contractName=="ReputationEngine" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
 BASTION_ROUTER=$(jq -r '[.transactions[] | select(.contractName=="BastionRouter" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
 TEST_TOKEN=$(jq -r '[.transactions[] | select(.contractName=="TestToken" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
+ALPHA_TOKEN=$(jq -r '[.transactions[] | select(.contractName=="TestToken" and .transactionType=="CREATE")] | .[1].contractAddress' "$BROADCAST_DIR/run-latest.json")
 
 # BastionHook is deployed via CREATE2 through BastionDeployer, not directly
 # It shows up as a CREATE2 transaction from the factory
@@ -54,6 +55,7 @@ export const LOCAL_CONTRACTS = {
     ReputationEngine: "${REPUTATION_ENGINE}",
     BastionRouter: "${BASTION_ROUTER}",
     TestToken: "${TEST_TOKEN}",
+    AlphaToken: "${ALPHA_TOKEN}",
   },
 } as const;
 
@@ -78,4 +80,5 @@ echo "  InsurancePool:    $INSURANCE_POOL"
 echo "  TriggerOracle:    $TRIGGER_ORACLE"
 echo "  ReputationEngine: $REPUTATION_ENGINE"
 echo "  BastionRouter:    $BASTION_ROUTER"
-echo "  TestToken:        $TEST_TOKEN"
+echo "  TestToken (BTT):  $TEST_TOKEN"
+echo "  AlphaToken:       $ALPHA_TOKEN"

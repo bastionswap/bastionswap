@@ -39,6 +39,11 @@ const LOCAL_TOKENS: Token[] = [
     name: "Bastion Test Token",
     isProtected: true,
   },
+  {
+    address: (LOCAL_CONTRACTS as Record<number, Record<string, string>>)[31337]?.AlphaToken ?? "",
+    symbol: "ALPHA",
+    name: "Alpha Token",
+  },
 ];
 
 interface TokenSelectModalProps {

@@ -69,6 +69,7 @@ contract DeployLocal is Script {
         address hook;
         address router;
         address btt;
+        address alpha;
         address lpRouter;
         address swapRouter;
     }
@@ -122,12 +123,14 @@ contract DeployLocal is Script {
         router.setBastionHook(deployedHook);
 
         TestToken btt = new TestToken("Bastion Test Token", "BTT", 18, 1_000_000e18);
+        TestToken alpha = new TestToken("Alpha Token", "ALPHA", 18, 1_000_000e18);
         PoolModifyLiquidityTest lpRouter = new PoolModifyLiquidityTest(IPoolManager(POOL_MANAGER));
         PoolSwapTest swapRouter = new PoolSwapTest(IPoolManager(POOL_MANAGER));
 
         d.hook = deployedHook;
         d.router = address(router);
         d.btt = address(btt);
+        d.alpha = address(alpha);
         d.lpRouter = address(lpRouter);
         d.swapRouter = address(swapRouter);
     }
@@ -168,6 +171,12 @@ contract DeployLocal is Script {
 
         btt.transfer(TRADER, 100_000e18);
         console2.log("Sent 100,000 BTT to trader:", TRADER);
+
+        // ALPHA: approve router and send to trader (pool creation left to user)
+        TestToken alpha = TestToken(d.alpha);
+        alpha.approve(d.router, type(uint256).max);
+        alpha.transfer(TRADER, 100_000e18);
+        console2.log("Sent 100,000 ALPHA to trader:", TRADER);
 
         PoolSwapTest(d.swapRouter).swap{value: 0.01 ether}(
             poolKey,
@@ -215,6 +224,7 @@ contract DeployLocal is Script {
         console2.log("ReputationEngine: ", a.reputation);
         console2.log("BastionRouter:    ", d.router);
         console2.log("TestToken (BTT):  ", d.btt);
+        console2.log("TestToken (ALPHA):", d.alpha);
         console2.log("LPRouter (test):  ", d.lpRouter);
         console2.log("SwapRouter (test):", d.swapRouter);
     }
