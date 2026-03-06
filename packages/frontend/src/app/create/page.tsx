@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount, useChainId, useReadContract } from "wagmi";
 import { ConnectKitButton } from "connectkit";
+import { formatUnits } from "viem";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import {
@@ -15,6 +16,7 @@ import { formatBps } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
 import { VestingChart } from "@/components/ui/VestingChart";
 import { usePoolByToken } from "@/hooks/usePools";
+import BastionHookAbi from "@/config/abis/BastionHook.json";
 import Link from "next/link";
 
 type Step = 1 | 2 | 3 | 4;
@@ -27,27 +29,26 @@ interface BaseTokenOption {
   symbol: string;
   name: string;
   decimals: number;
-  minAmount: string; // minimum amount for pool creation
 }
 
 const BASE_TOKENS: Record<number, BaseTokenOption[]> = {
   // Base mainnet fork (Anvil)
   31337: [
-    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18, minAmount: "1" },
-    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18, minAmount: "1" },
-    { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", name: "USD Coin", decimals: 6, minAmount: "2000" },
+    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18 },
+    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18 },
+    { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", name: "USD Coin", decimals: 6 },
   ],
   // Base Sepolia
   84532: [
-    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18, minAmount: "1" },
-    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18, minAmount: "1" },
-    { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", symbol: "USDC", name: "USD Coin", decimals: 6, minAmount: "2000" },
+    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18 },
+    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18 },
+    { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", symbol: "USDC", name: "USD Coin", decimals: 6 },
   ],
   // Base mainnet
   8453: [
-    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18, minAmount: "1" },
-    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18, minAmount: "1" },
-    { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", name: "USD Coin", decimals: 6, minAmount: "2000" },
+    { address: ZERO_ADDR, symbol: "ETH", name: "Native ETH", decimals: 18 },
+    { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", name: "Wrapped ETH", decimals: 18 },
+    { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", name: "USD Coin", decimals: 6 },
   ],
 };
 
@@ -150,6 +151,19 @@ export default function CreatePoolPage() {
   const strictness = useMemo(() => computeStrictnessLevel(activeLockDays, activeVestingDays), [activeLockDays, activeVestingDays]);
 
   const isVestingValid = activeLockDays >= 7 && activeVestingDays >= 7;
+
+  // Read minBaseAmount from BastionHook contract
+  const hookAddress = contracts?.BastionHook as `0x${string}` | undefined;
+  const { data: minBaseAmountRaw } = useReadContract({
+    address: hookAddress,
+    abi: BastionHookAbi,
+    functionName: "minBaseAmount",
+    args: [selectedBaseToken.address],
+    query: { enabled: !!hookAddress },
+  });
+  const minBaseAmount = minBaseAmountRaw
+    ? formatUnits(minBaseAmountRaw as bigint, selectedBaseToken.decimals)
+    : undefined;
 
   const {
     step: poolStep,
@@ -419,13 +433,13 @@ export default function CreatePoolPage() {
             )}
 
             {/* Minimum liquidity warning */}
-            {baseAmount && parseFloat(baseAmount) > 0 && parseFloat(baseAmount) < parseFloat(selectedBaseToken.minAmount) && (
+            {baseAmount && parseFloat(baseAmount) > 0 && parseFloat(baseAmount) < parseFloat(minBaseAmount ?? "0") && (
               <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 flex items-start gap-2.5">
                 <svg className="h-5 w-5 text-red-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
                 <div>
-                  <p className="text-sm font-medium text-red-700">Minimum {selectedBaseToken.minAmount} {selectedBaseToken.symbol} required</p>
+                  <p className="text-sm font-medium text-red-700">Minimum {minBaseAmount ?? "?"} {selectedBaseToken.symbol} required</p>
                   <p className="text-xs text-red-600/70">Bastion pools require minimum initial liquidity to prevent spam.</p>
                 </div>
               </div>
@@ -440,7 +454,7 @@ export default function CreatePoolPage() {
             </button>
             <button
               onClick={() => setStep(3)}
-              disabled={!baseAmount || !tokenAmount || parseFloat(baseAmount) < parseFloat(selectedBaseToken.minAmount)}
+              disabled={!baseAmount || !tokenAmount || parseFloat(baseAmount) < parseFloat(minBaseAmount ?? "0")}
               className="btn-primary flex-1 py-3.5 disabled:opacity-40"
             >
               Continue

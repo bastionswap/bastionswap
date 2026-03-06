@@ -7,9 +7,9 @@ dataSources:
     name: BastionHook
     network: base-sepolia
     source:
-      address: "0xC85852313B9BE98Be4EA17E212caeb6BB56e4Ac0"
+      address: "0xfeD3C0F50312cB437F999a03D98576115bA90Ac0"
       abi: BastionHook
-      startBlock: 38455316
+      startBlock: 38516081
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -44,7 +44,7 @@ dataSources:
     source:
       address: "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408"
       abi: PoolManager
-      startBlock: 38455316
+      startBlock: 38516081
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -67,9 +67,9 @@ dataSources:
     name: EscrowVault
     network: base-sepolia
     source:
-      address: "0xADdb75264a16a9d5727c5743859a39B4d57CD669"
+      address: "0x83D2A0be3C7f5728a560B76BBB29b0a2fDb97241"
       abi: EscrowVault
-      startBlock: 38455316
+      startBlock: 38516081
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -101,9 +101,9 @@ dataSources:
     name: InsurancePool
     network: base-sepolia
     source:
-      address: "0x86b43706D57f948f704836a13Eb989833EE44611"
+      address: "0x37ce342D5366999D2C526908e88772C61a45bC4a"
       abi: InsurancePool
-      startBlock: 38455316
+      startBlock: 38516081
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -132,9 +132,9 @@ dataSources:
     name: TriggerOracle
     network: base-sepolia
     source:
-      address: "0x221D8a269626C0C43970874571eab5a45a434683"
+      address: "0x624d89EddE24BE86a971bDaf8268561d40D0c730"
       abi: TriggerOracle
-      startBlock: 38455316
+      startBlock: 38516081
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -160,9 +160,9 @@ dataSources:
     name: ReputationEngine
     network: base-sepolia
     source:
-      address: "0x3a3160A9257FDaBbbD1CfEA6f31763B064D24A7f"
+      address: "0xeB8529cD6bE727355C07cc0685140ADE49198A43"
       abi: ReputationEngine
-      startBlock: 38455316
+      startBlock: 38516081
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
