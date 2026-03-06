@@ -9,12 +9,15 @@ BastionSwap is a **Uniswap V4 Hook-based** decentralized exchange protocol that 
 
 When a token issuer creates a liquidity pool, their LP tokens are automatically locked in a time-vested escrow. If malicious behavior is detected — rug-pull, issuer dump, honeypot, hidden tax — the escrow funds are redistributed to an insurance pool from which affected token holders can claim pro-rata compensation.
 
-## Live Testnet
+## Live Demo (Base Sepolia)
+
+> **[bastionswap-frontend.vercel.app](https://bastionswap-frontend.vercel.app/)** — Try it now on Base Sepolia testnet
 
 | Resource | Link |
 |----------|------|
-| Frontend | _Deploy to Vercel (see [Deployment](#vercel-deployment))_ |
-| Subgraph Playground | [Studio Explorer](https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest) |
+| Frontend | [bastionswap-frontend.vercel.app](https://bastionswap-frontend.vercel.app/) |
+| Subgraph Studio | [thegraph.com/studio/subgraph/bastionswap-base-sepolia](https://thegraph.com/studio/subgraph/bastionswap-base-sepolia/) |
+| Subgraph API | [GraphQL Playground](https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest) |
 | Block Explorer | [BaseScan (Sepolia)](https://sepolia.basescan.org) |
 
 ## Contract Addresses (Base Sepolia)
