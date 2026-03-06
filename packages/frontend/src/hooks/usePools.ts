@@ -111,15 +111,11 @@ const POOL_DETAIL_QUERY = gql`
         remainingLiquidity
         isTriggered
         createdAt
+        lockDuration
+        vestingDuration
         commitment {
           dailyWithdrawLimit
-          lockDuration
           maxSellPercent
-        }
-        vestingSchedule {
-          id
-          timestamp
-          basisPoints
         }
       }
       insurancePool {
@@ -177,16 +173,12 @@ export interface SubgraphPool {
     remainingLiquidity: string;
     isTriggered: boolean;
     createdAt?: string;
+    lockDuration?: string;
+    vestingDuration?: string;
     commitment?: {
       dailyWithdrawLimit: string;
-      lockDuration: string;
       maxSellPercent: string;
     } | null;
-    vestingSchedule?: {
-      id: string;
-      timestamp: string;
-      basisPoints: number;
-    }[];
   } | null;
   insurancePool: {
     id: string;
@@ -343,14 +335,7 @@ function useLocalPoolOnChain() {
               functionName: "encodeScoreData",
               args: [issuerAddr],
             },
-            // 3: EscrowVault.getVestingSchedule(escrowId)
-            {
-              address: contracts.EscrowVault as `0x${string}`,
-              abi: EscrowVaultABI,
-              functionName: "getVestingSchedule",
-              args: [escrowId],
-            },
-            // 4: EscrowVault.getEscrowInfo(escrowId)
+            // 3: EscrowVault.getEscrowInfo(escrowId)
             {
               address: contracts.EscrowVault as `0x${string}`,
               abi: EscrowVaultABI,
@@ -399,15 +384,14 @@ function useLocalPoolOnChain() {
     } catch { /* ignore */ }
   }
 
-  // Parse vesting schedule + escrow info
-  const vestingSteps = data2?.[3]?.status === "success"
-    ? (data2[3].result as { timeOffset: bigint; basisPoints: number }[])
-    : null;
-  const escrowInfo = data2?.[4]?.status === "success"
-    ? (data2[4].result as [bigint, { dailyWithdrawLimit: number; lockDuration: bigint; maxSellPercent: number }])
+  // Parse escrow info (createdAt, lockDuration, vestingDuration, commitment)
+  const escrowInfo = data2?.[3]?.status === "success"
+    ? (data2[3].result as [bigint, bigint, bigint, { dailyWithdrawLimit: number; maxSellPercent: number }])
     : null;
   const escrowCreatedAt = escrowInfo ? Number(escrowInfo[0]) : 0;
-  const escrowCommitment = escrowInfo ? escrowInfo[1] : null;
+  const escrowLockDuration = escrowInfo ? Number(escrowInfo[1]) : 0;
+  const escrowVestingDuration = escrowInfo ? Number(escrowInfo[2]) : 0;
+  const escrowCommitment = escrowInfo ? escrowInfo[3] : null;
 
   const pool: SubgraphPool | null =
     isLoading || !contracts
@@ -438,19 +422,13 @@ function useLocalPoolOnChain() {
                 remainingLiquidity: formatUnits(escrowStatus.remainingLiquidity, 18),
                 isTriggered: false,
                 createdAt: escrowCreatedAt > 0 ? escrowCreatedAt.toString() : undefined,
+                lockDuration: escrowLockDuration > 0 ? escrowLockDuration.toString() : undefined,
+                vestingDuration: escrowVestingDuration > 0 ? escrowVestingDuration.toString() : undefined,
                 commitment: escrowCommitment
                   ? {
                       dailyWithdrawLimit: escrowCommitment.dailyWithdrawLimit.toString(),
-                      lockDuration: Number(escrowCommitment.lockDuration).toString(),
                       maxSellPercent: escrowCommitment.maxSellPercent.toString(),
                     }
-                  : undefined,
-                vestingSchedule: vestingSteps
-                  ? vestingSteps.map((s, i) => ({
-                      id: `${escrowId}-${i}`,
-                      timestamp: (escrowCreatedAt + (escrowCommitment ? Number(escrowCommitment.lockDuration) : 0) + Number(s.timeOffset)).toString(),
-                      basisPoints: Number(s.basisPoints),
-                    }))
                   : undefined,
               }
             : null,

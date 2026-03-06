@@ -16,15 +16,16 @@ interface IssuerInfoProps {
   };
   commitment?: {
     dailyWithdrawLimit: string;
-    lockDuration: string;
     maxSellPercent: string;
   } | null;
+  lockDuration?: number;
+  vestingDuration?: number;
   vestingStrictness?: "stricter" | "default" | "looser" | null;
 }
 
 const DEFAULTS = {
   dailyWithdrawLimit: 500,
-  lockDuration: 7_776_000,
+  totalDuration: 7_776_000, // 90 days default
   maxSellPercent: 300,
 };
 
@@ -134,7 +135,7 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   );
 }
 
-export function IssuerInfo({ issuer, commitment, vestingStrictness }: IssuerInfoProps) {
+export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness }: IssuerInfoProps) {
   const score = parseInt(issuer.reputationScore);
   const created = issuer.totalEscrowsCreated ?? 0;
   const completed = issuer.totalEscrowsCompleted ?? 0;
@@ -223,10 +224,10 @@ export function IssuerInfo({ issuer, commitment, vestingStrictness }: IssuerInfo
                 lowerBetter: true,
               },
               {
-                label: "Lock Duration",
-                value: formatDuration(parseInt(commitment.lockDuration)),
-                raw: parseInt(commitment.lockDuration),
-                default_: DEFAULTS.lockDuration,
+                label: "Total Duration",
+                value: formatDuration((lockDuration ?? 0) + (vestingDuration ?? 0)),
+                raw: (lockDuration ?? 0) + (vestingDuration ?? 0),
+                default_: DEFAULTS.totalDuration,
                 lowerBetter: false,
               },
             ].map(({ label, value, raw, default_, lowerBetter }) => (

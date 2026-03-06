@@ -5,23 +5,23 @@
 export const LOCAL_CONTRACTS = {
   31337: {
     PoolManager: "0x498581fF718922c3f8e6A244956aF099B2652b2b",
-    BastionHook: "0x6d62545c9d05171dcd866e5d93f73384cf1e8ac0",
+    BastionHook: "0x8664cef5756350512a77594ceb06aff21592cac0",
     EscrowVault: "0x0852e1e05335b6a759ff01d5a9cfddf7e4ab7e6c",
     InsurancePool: "0xcbc3b03cec91562ecb108de3a3a1f6b9f99dd62e",
     TriggerOracle: "0x63e1abb3403e598b439b4f7053c03139af7ecebf",
     ReputationEngine: "0xebb70be61f4e5e8d1e720d1516e4591f2be2314b",
     BastionRouter: "0xe48d045304fb308350645c7a9d463513d4456378",
-    TestToken: "0x7f380e0f5c12490a9427bf49beec5f4910696be2",
+    TestToken: "0x8689bf0645a22f91155c744c6b70f5b04b0fb168",
   },
 } as const;
 
 export const LOCAL_POOL = {
-  id: "0x83a43dd55d9a3e3d231997f12ac4ff279cc0e1662d8f409be7ce93073284378c",
+  id: "0xc4269ad50fbeeeeafa4953dd8cfc5c5acad635e78dba8bbd6134cf8c7903bf7e",
   token0: "0x0000000000000000000000000000000000000000",
-  token1: "0x7f380e0f5c12490a9427bf49beec5f4910696be2",
-  hook: "0x6d62545c9d05171dcd866e5d93f73384cf1e8ac0",
+  token1: "0x8689bf0645a22f91155c744c6b70f5b04b0fb168",
+  hook: "0x8664cef5756350512a77594ceb06aff21592cac0",
   isBastion: true,
-  issuedToken: "0x7f380e0f5c12490a9427bf49beec5f4910696be2",
+  issuedToken: "0x8689bf0645a22f91155c744c6b70f5b04b0fb168",
   issuer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
   fee: 3000,
   tickSpacing: 60,

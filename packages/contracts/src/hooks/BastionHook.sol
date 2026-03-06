@@ -138,7 +138,7 @@ contract BastionHook is BaseTestHooks {
         triggerOracle = _triggerOracle;
         reputationEngine = _reputationEngine;
         GOVERNANCE = _governance;
-        _owner = msg.sender;
+        _owner = _governance;
 
         // Initialize base tokens
         allowedBaseTokens[address(0)] = true; // native ETH

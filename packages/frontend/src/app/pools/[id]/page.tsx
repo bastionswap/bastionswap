@@ -493,28 +493,16 @@ export default function PoolDetailPage() {
               <IssuerInfo
                 issuer={pool.issuer}
                 commitment={pool.escrow?.commitment}
+                lockDuration={pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : undefined}
+                vestingDuration={pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : undefined}
                 vestingStrictness={(() => {
-                  const ms = pool.escrow?.vestingSchedule;
-                  const created = pool.escrow?.createdAt ? parseInt(pool.escrow.createdAt) : 0;
-                  const lockSec = pool.escrow?.commitment?.lockDuration ? parseInt(pool.escrow.commitment.lockDuration) : 0;
-                  if (!ms || ms.length === 0 || created === 0) return null;
-                  // Convert absolute timestamps to timeOffsets (subtract createdAt + lockDuration)
-                  const sorted = ms.slice().sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp));
-                  const offsets = sorted.map(m => ({
-                    timeOffset: parseInt(m.timestamp) - created - lockSec,
-                    bps: m.basisPoints,
-                  }));
-                  const lastOffset = offsets[offsets.length - 1].timeOffset;
-                  if (lastOffset < 90 * 86400) return "looser" as const;
-                  const defaults = [{ t: 7*86400, b: 1000 }, { t: 30*86400, b: 3000 }, { t: 90*86400, b: 10000 }];
-                  let allSame = true;
-                  for (const d of defaults) {
-                    let bps = 0;
-                    for (const o of offsets) { if (o.timeOffset <= d.t) bps = o.bps; else break; }
-                    if (bps > d.b) return "looser" as const;
-                    if (bps !== d.b) allSame = false;
-                  }
-                  if (allSame && lastOffset === 90 * 86400) return "default" as const;
+                  const lock = pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : 0;
+                  const vesting = pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : 0;
+                  const total = lock + vesting;
+                  if (total === 0) return null;
+                  const defaultTotal = 90 * 86400;
+                  if (total < defaultTotal) return "looser" as const;
+                  if (total === defaultTotal) return "default" as const;
                   return "stricter" as const;
                 })()}
               />
