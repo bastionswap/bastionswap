@@ -30,8 +30,8 @@ export function handleEscrowVaultCreated(event: EscrowCreated): void {
   escrow.totalLiquidity = toDecimal(event.params.liquidity);
   escrow.removedLiquidity = ZERO_BD;
   escrow.remainingLiquidity = toDecimal(event.params.liquidity);
-  escrow.lockDuration = BigInt.fromI32(event.params.lockDuration);
-  escrow.vestingDuration = BigInt.fromI32(event.params.vestingDuration);
+  escrow.lockDuration = event.params.lockDuration;
+  escrow.vestingDuration = event.params.vestingDuration;
   escrow.isTriggered = false;
   escrow.createdAt = event.block.timestamp;
   escrow.save();
