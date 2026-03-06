@@ -151,6 +151,11 @@
         "internalType": "uint256"
       },
       {
+        "name": "baseAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
         "name": "sqrtPriceX96",
         "type": "uint160",
         "internalType": "uint160"

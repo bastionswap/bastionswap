@@ -238,6 +238,7 @@ contract BastionRouter is IUnlockCallback {
         address baseToken,
         uint24 fee,
         uint256 tokenAmount,
+        uint256 baseAmount,
         uint160 sqrtPriceX96,
         bytes calldata hookData,
         bytes calldata permitData
@@ -245,7 +246,7 @@ contract BastionRouter is IUnlockCallback {
         if (bastionHook == address(0)) revert HookNotSet();
 
         (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) =
-            _buildPoolKey(token, baseToken, fee, tokenAmount);
+            _buildPoolKey(token, baseToken, fee, tokenAmount, baseAmount);
 
         poolId = key.toId();
 
@@ -269,19 +270,19 @@ contract BastionRouter is IUnlockCallback {
         address token,
         address baseToken,
         uint24 fee,
-        uint256 tokenAmount
+        uint256 tokenAmount,
+        uint256 baseAmount
     ) internal view returns (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) {
-        bool isNativeBase = baseToken == address(0);
-        uint256 baseAmount = isNativeBase ? msg.value : 0;
+        if (baseToken == address(0)) baseAmount = msg.value;
 
         if (uint160(baseToken) < uint160(token)) {
             key = PoolKey(Currency.wrap(baseToken), Currency.wrap(token), fee, 60, IHooks(bastionHook));
-            amount0Max = isNativeBase ? baseAmount : 0;
+            amount0Max = baseAmount;
             amount1Max = tokenAmount;
         } else {
             key = PoolKey(Currency.wrap(token), Currency.wrap(baseToken), fee, 60, IHooks(bastionHook));
             amount0Max = tokenAmount;
-            amount1Max = isNativeBase ? baseAmount : 0;
+            amount1Max = baseAmount;
         }
     }
 
@@ -521,7 +522,8 @@ contract BastionRouter is IUnlockCallback {
     function _settleCreatePoolNativePermit2(
         PoolKey memory key, address sender, BalanceDelta delta, bytes memory permitData
     ) internal {
-        Permit2Single memory p2 = abi.decode(permitData, (Permit2Single));
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory sig) =
+            abi.decode(permitData, (ISignatureTransfer.PermitTransferFrom, bytes));
 
         int128 amount0 = delta.amount0();
         if (amount0 < 0) {
@@ -532,7 +534,7 @@ contract BastionRouter is IUnlockCallback {
 
         int128 amount1 = delta.amount1();
         if (amount1 < 0) {
-            _settleWithPermit2(key.currency1, sender, uint256(uint128(-amount1)), p2.permit, p2.signature);
+            _settleWithPermit2(key.currency1, sender, uint256(uint128(-amount1)), permit, sig);
         } else if (amount1 > 0) {
             poolManager.take(key.currency1, sender, uint256(uint128(amount1)));
         }
@@ -542,7 +544,8 @@ contract BastionRouter is IUnlockCallback {
     function _settleCreatePoolBatchPermit2(
         PoolKey memory key, address sender, BalanceDelta delta, bytes memory permitData
     ) internal {
-        Permit2Batch memory p2 = abi.decode(permitData, (Permit2Batch));
+        (ISignatureTransfer.PermitBatchTransferFrom memory permit, bytes memory sig) =
+            abi.decode(permitData, (ISignatureTransfer.PermitBatchTransferFrom, bytes));
 
         uint256 needed0 = delta.amount0() < 0 ? uint256(uint128(-delta.amount0())) : 0;
         uint256 needed1 = delta.amount1() < 0 ? uint256(uint128(-delta.amount1())) : 0;
@@ -556,7 +559,7 @@ contract BastionRouter is IUnlockCallback {
             td[0] = ISignatureTransfer.SignatureTransferDetails({to: address(poolManager), requestedAmount: needed0});
             td[1] = ISignatureTransfer.SignatureTransferDetails({to: address(poolManager), requestedAmount: needed1});
 
-            permit2.permitTransferFrom(p2.permit, td, sender, p2.signature);
+            permit2.permitTransferFrom(permit, td, sender, sig);
 
             if (needed0 > 0) poolManager.settle();
             if (needed1 > 0) poolManager.settle();

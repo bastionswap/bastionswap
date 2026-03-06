@@ -448,6 +448,7 @@ export function useCreateBastionPool() {
         params.baseToken,
         3000,
         tokenWei,
+        baseWei,
         sqrtPriceX96,
         hookData,
         permitData,
