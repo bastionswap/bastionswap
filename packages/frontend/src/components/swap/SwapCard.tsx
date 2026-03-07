@@ -81,7 +81,7 @@ export function SwapCard() {
   } = useApprove();
 
   // Allowance check
-  const routerAddr = contracts?.BastionRouter as `0x${string}` | undefined;
+  const routerAddr = contracts?.BastionSwapRouter as `0x${string}` | undefined;
   const { allowance, isNative: tokenInIsNative, refetch: refetchAllowance } = useTokenAllowance(
     tokenIn?.address as `0x${string}` | undefined,
     address,

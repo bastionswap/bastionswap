@@ -19,7 +19,8 @@ import {EscrowVault} from "../src/core/EscrowVault.sol";
 import {InsurancePool} from "../src/core/InsurancePool.sol";
 import {TriggerOracle} from "../src/core/TriggerOracle.sol";
 import {ReputationEngine} from "../src/core/ReputationEngine.sol";
-import {BastionRouter} from "../src/router/BastionRouter.sol";
+import {BastionSwapRouter} from "../src/router/BastionSwapRouter.sol";
+import {BastionPositionRouter} from "../src/router/BastionPositionRouter.sol";
 import {TestToken} from "../src/test/TestToken.sol";
 import {IEscrowVault} from "../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../src/interfaces/ITriggerOracle.sol";
@@ -72,11 +73,12 @@ contract DeployLocal is Script {
 
     struct Deployed {
         address hook;
-        address router;
+        address swapRouter;
+        address positionRouter;
         address btt;
         address alpha;
         address lpRouter;
-        address swapRouter;
+        address testSwapRouter;
     }
 
     function run() external {
@@ -121,23 +123,26 @@ contract DeployLocal is Script {
         address deployedHook = factory.deploy(a.salt, a.hookCreationCode);
         require(deployedHook == a.hook, "Hook address mismatch");
 
-        BastionRouter router = new BastionRouter(IPoolManager(POOL_MANAGER), ISignatureTransfer(PERMIT2));
+        BastionSwapRouter swapRouter = new BastionSwapRouter(IPoolManager(POOL_MANAGER), ISignatureTransfer(PERMIT2));
+        BastionPositionRouter positionRouter = new BastionPositionRouter(IPoolManager(POOL_MANAGER), ISignatureTransfer(PERMIT2));
 
         // Wire up hook ↔ router cross-references
-        BastionHook(payable(deployedHook)).setBastionRouter(address(router));
-        router.setBastionHook(deployedHook);
+        BastionHook(payable(deployedHook)).setBastionRouter(address(positionRouter));
+        swapRouter.setBastionHook(deployedHook);
+        positionRouter.setBastionHook(deployedHook);
 
         TestToken btt = new TestToken("Bastion Test Token", "BTT", 18, 1_000_000e18);
         TestToken alpha = new TestToken("Alpha Token", "ALPHA", 18, 1_000_000e18);
         PoolModifyLiquidityTest lpRouter = new PoolModifyLiquidityTest(IPoolManager(POOL_MANAGER));
-        PoolSwapTest swapRouter = new PoolSwapTest(IPoolManager(POOL_MANAGER));
+        PoolSwapTest testSwapRouter = new PoolSwapTest(IPoolManager(POOL_MANAGER));
 
         d.hook = deployedHook;
-        d.router = address(router);
+        d.swapRouter = address(swapRouter);
+        d.positionRouter = address(positionRouter);
         d.btt = address(btt);
         d.alpha = address(alpha);
         d.lpRouter = address(lpRouter);
-        d.swapRouter = address(swapRouter);
+        d.testSwapRouter = address(testSwapRouter);
     }
 
     function _createPoolAndSeed(address deployer, Deployed memory d) internal {
@@ -154,8 +159,8 @@ contract DeployLocal is Script {
 
         TestToken btt = TestToken(d.btt);
         btt.approve(d.lpRouter, type(uint256).max);
-        btt.approve(d.swapRouter, type(uint256).max);
-        btt.approve(d.router, type(uint256).max);
+        btt.approve(d.testSwapRouter, type(uint256).max);
+        btt.approve(d.positionRouter, type(uint256).max);
         btt.approve(PERMIT2, type(uint256).max);
 
         bytes memory hookData = _buildHookData(deployer, d.btt);
@@ -180,7 +185,7 @@ contract DeployLocal is Script {
 
         // ALPHA: approve router + Permit2 and send to trader
         TestToken alpha = TestToken(d.alpha);
-        alpha.approve(d.router, type(uint256).max);
+        alpha.approve(d.positionRouter, type(uint256).max);
         alpha.approve(PERMIT2, type(uint256).max);
         alpha.approve(d.lpRouter, type(uint256).max);
         alpha.transfer(TRADER, 100_000e18);
@@ -212,7 +217,7 @@ contract DeployLocal is Script {
         );
         console2.log("ALPHA/ETH LP added with escrow");
 
-        PoolSwapTest(d.swapRouter).swap{value: 0.01 ether}(
+        PoolSwapTest(d.testSwapRouter).swap{value: 0.01 ether}(
             poolKey,
             SwapParams({
                 zeroForOne: true,
@@ -224,12 +229,12 @@ contract DeployLocal is Script {
         );
         console2.log("Test swap executed: 0.01 ETH -> BTT");
 
-        // General LP: Trader adds liquidity via BastionRouter V2
+        // General LP: Trader adds liquidity via BastionPositionRouter V2
         vm.stopBroadcast();
         vm.startBroadcast(TRADER_KEY);
 
-        TestToken(d.btt).approve(d.router, type(uint256).max);
-        BastionRouter(payable(d.router)).addLiquidityV2{value: 1 ether}(
+        TestToken(d.btt).approve(d.positionRouter, type(uint256).max);
+        BastionPositionRouter(payable(d.positionRouter)).addLiquidityV2{value: 1 ether}(
             poolKey,
             0, 0, // full-range
             1 ether, 10_000e18,
@@ -265,18 +270,19 @@ contract DeployLocal is Script {
     function _printSummary(Addresses memory a, Deployed memory d) internal pure {
         console2.log("");
         console2.log("=== Deployment Complete ===");
-        console2.log("PoolManager:      ", POOL_MANAGER);
-        console2.log("BastionDeployer:  ", a.factory);
-        console2.log("BastionHook:      ", a.hook);
-        console2.log("EscrowVault:      ", a.escrow);
-        console2.log("InsurancePool:    ", a.insurance);
-        console2.log("TriggerOracle:    ", a.trigger);
-        console2.log("ReputationEngine: ", a.reputation);
-        console2.log("BastionRouter:    ", d.router);
-        console2.log("TestToken (BTT):  ", d.btt);
-        console2.log("TestToken (ALPHA):", d.alpha);
-        console2.log("LPRouter (test):  ", d.lpRouter);
-        console2.log("SwapRouter (test):", d.swapRouter);
+        console2.log("PoolManager:           ", POOL_MANAGER);
+        console2.log("BastionDeployer:       ", a.factory);
+        console2.log("BastionHook:           ", a.hook);
+        console2.log("EscrowVault:           ", a.escrow);
+        console2.log("InsurancePool:         ", a.insurance);
+        console2.log("TriggerOracle:         ", a.trigger);
+        console2.log("ReputationEngine:      ", a.reputation);
+        console2.log("BastionSwapRouter:     ", d.swapRouter);
+        console2.log("BastionPositionRouter: ", d.positionRouter);
+        console2.log("TestToken (BTT):       ", d.btt);
+        console2.log("TestToken (ALPHA):     ", d.alpha);
+        console2.log("LPRouter (test):       ", d.lpRouter);
+        console2.log("SwapRouter (test):     ", d.testSwapRouter);
     }
 
     function _precompute(address deployer) internal view returns (Addresses memory a) {

@@ -13,7 +13,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionResult, encodeAbiParameters, parseAbiParameters } from "viem";
 import { getContracts } from "@/config/contracts";
-import { BastionRouterABI } from "@/config/abis";
+import { BastionSwapRouterABI } from "@/config/abis";
 
 const ERC20_ABI = [
   {
@@ -224,8 +224,8 @@ export function useExecuteSwap() {
       };
 
       writeContract({
-        address: contracts.BastionRouter as `0x${string}`,
-        abi: BastionRouterABI,
+        address: contracts.BastionSwapRouter as `0x${string}`,
+        abi: BastionSwapRouterABI,
         functionName: "swapExactInputPermit2",
         args: [
           {
@@ -257,8 +257,8 @@ export function useExecuteSwap() {
     if (isNativeInput) {
       // Native ETH — use original swapExactInput directly (no permit needed)
       writeContract({
-        address: contracts.BastionRouter as `0x${string}`,
-        abi: BastionRouterABI,
+        address: contracts.BastionSwapRouter as `0x${string}`,
+        abi: BastionSwapRouterABI,
         functionName: "swapExactInput",
         args: [
           {
@@ -279,7 +279,7 @@ export function useExecuteSwap() {
       // ERC20 input — sign Permit2 first, then submit swap
       const nonce = generatePermit2Nonce();
       const deadline = config.deadline;
-      const routerAddress = contracts.BastionRouter as `0x${string}`;
+      const routerAddress = contracts.BastionSwapRouter as `0x${string}`;
 
       setPendingSwap(config);
       setPermitNonce(nonce);
@@ -429,8 +429,8 @@ export function useExecuteMultiHopSwap() {
       };
 
       writeContract({
-        address: contracts.BastionRouter as `0x${string}`,
-        abi: BastionRouterABI,
+        address: contracts.BastionSwapRouter as `0x${string}`,
+        abi: BastionSwapRouterABI,
         functionName: "swapMultiHopPermit2",
         args: [
           config.steps,
@@ -453,8 +453,8 @@ export function useExecuteMultiHopSwap() {
 
     if (isNativeInput) {
       writeContract({
-        address: contracts.BastionRouter as `0x${string}`,
-        abi: BastionRouterABI,
+        address: contracts.BastionSwapRouter as `0x${string}`,
+        abi: BastionSwapRouterABI,
         functionName: "swapMultiHop",
         args: [
           config.steps,
@@ -467,7 +467,7 @@ export function useExecuteMultiHopSwap() {
     } else {
       const nonce = generatePermit2Nonce();
       const deadline = config.deadline;
-      const routerAddress = contracts.BastionRouter as `0x${string}`;
+      const routerAddress = contracts.BastionSwapRouter as `0x${string}`;
 
       setPendingSwap(config);
       setPermitNonce(nonce);
@@ -536,10 +536,10 @@ export function useMultiHopQuote(params: MultiHopQuoteParams | null) {
     queryFn: async () => {
       if (!publicClient || !params || !contracts || params.amountIn <= 0n) return null;
 
-      const routerAddr = contracts.BastionRouter as `0x${string}`;
+      const routerAddr = contracts.BastionSwapRouter as `0x${string}`;
 
       const data = encodeFunctionData({
-        abi: BastionRouterABI,
+        abi: BastionSwapRouterABI,
         functionName: "swapMultiHop",
         args: [
           params.steps,
@@ -579,7 +579,7 @@ export function useMultiHopQuote(params: MultiHopQuoteParams | null) {
         if (!result.data) return null;
 
         return decodeFunctionResult({
-          abi: BastionRouterABI,
+          abi: BastionSwapRouterABI,
           functionName: "swapMultiHop",
           data: result.data,
         }) as bigint;
@@ -639,11 +639,11 @@ export function useSwapQuote(params: QuoteParams | null) {
       if (!publicClient || !params || !contracts || params.amountIn <= 0n) return null;
 
       const inputToken = params.zeroForOne ? params.currency0 : params.currency1;
-      const routerAddr = contracts.BastionRouter as `0x${string}`;
+      const routerAddr = contracts.BastionSwapRouter as `0x${string}`;
 
       // Quote uses the original swapExactInput (no permit needed for simulation)
       const data = encodeFunctionData({
-        abi: BastionRouterABI,
+        abi: BastionSwapRouterABI,
         functionName: "swapExactInput",
         args: [
           {
@@ -690,7 +690,7 @@ export function useSwapQuote(params: QuoteParams | null) {
         if (!result.data) return null;
 
         return decodeFunctionResult({
-          abi: BastionRouterABI,
+          abi: BastionSwapRouterABI,
           functionName: "swapExactInput",
           data: result.data,
         }) as bigint;

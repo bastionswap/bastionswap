@@ -5,7 +5,8 @@ import {Script, console2} from "forge-std/Script.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 import {BastionHook} from "../src/hooks/BastionHook.sol";
-import {BastionRouter} from "../src/router/BastionRouter.sol";
+import {BastionSwapRouter} from "../src/router/BastionSwapRouter.sol";
+import {BastionPositionRouter} from "../src/router/BastionPositionRouter.sol";
 import {EscrowVault} from "../src/core/EscrowVault.sol";
 import {InsurancePool} from "../src/core/InsurancePool.sol";
 import {TriggerOracle} from "../src/core/TriggerOracle.sol";
@@ -81,10 +82,14 @@ contract Deploy is Script {
         address deployedHook = factory.deploy(a.salt, a.hookCreationCode);
         require(deployedHook == a.hook, "Hook address mismatch");
 
-        // 7. Deploy BastionRouter and wire up cross-references
-        BastionRouter router = new BastionRouter(IPoolManager(poolManager), ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3));
-        BastionHook(payable(deployedHook)).setBastionRouter(address(router));
-        router.setBastionHook(deployedHook);
+        // 7. Deploy routers and wire up cross-references
+        ISignatureTransfer permit2 = ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+        BastionSwapRouter swapRouter = new BastionSwapRouter(IPoolManager(poolManager), permit2);
+        BastionPositionRouter positionRouter = new BastionPositionRouter(IPoolManager(poolManager), permit2);
+
+        BastionHook(payable(deployedHook)).setBastionRouter(address(positionRouter));
+        swapRouter.setBastionHook(deployedHook);
+        positionRouter.setBastionHook(deployedHook);
 
         vm.stopBroadcast();
 
@@ -92,15 +97,16 @@ contract Deploy is Script {
 
         console2.log("");
         console2.log("=== Deployment Complete ===");
-        console2.log("BastionDeployer: ", a.factory);
-        console2.log("BastionHook:     ", a.hook);
-        console2.log("EscrowVault:     ", a.escrow);
-        console2.log("InsurancePool:   ", a.insurance);
-        console2.log("TriggerOracle:   ", a.trigger);
-        console2.log("ReputationEngine:", a.reputation);
-        console2.log("BastionRouter:   ", address(router));
+        console2.log("BastionDeployer:      ", a.factory);
+        console2.log("BastionHook:          ", a.hook);
+        console2.log("EscrowVault:          ", a.escrow);
+        console2.log("InsurancePool:        ", a.insurance);
+        console2.log("TriggerOracle:        ", a.trigger);
+        console2.log("ReputationEngine:     ", a.reputation);
+        console2.log("BastionSwapRouter:    ", address(swapRouter));
+        console2.log("BastionPositionRouter:", address(positionRouter));
 
-        _writeDeploymentJson(a, address(router));
+        _writeDeploymentJson(a, address(swapRouter), address(positionRouter));
     }
 
     // ─── Internal Helpers ───────────────────────────────────────────────
@@ -153,7 +159,7 @@ contract Deploy is Script {
         guardian = vm.envOr("GUARDIAN", deployer);
     }
 
-    function _writeDeploymentJson(Addresses memory a, address router) internal {
+    function _writeDeploymentJson(Addresses memory a, address swapRouter, address positionRouter) internal {
         string memory obj = "deployment";
         vm.serializeUint(obj, "chainId", block.chainid);
         vm.serializeAddress(obj, "bastionDeployer", a.factory);
@@ -162,7 +168,8 @@ contract Deploy is Script {
         vm.serializeAddress(obj, "insurancePool", a.insurance);
         vm.serializeAddress(obj, "triggerOracle", a.trigger);
         vm.serializeAddress(obj, "reputationEngine", a.reputation);
-        string memory json = vm.serializeAddress(obj, "bastionRouter", router);
+        vm.serializeAddress(obj, "bastionSwapRouter", swapRouter);
+        string memory json = vm.serializeAddress(obj, "bastionPositionRouter", positionRouter);
 
         string memory dir = "deployments/";
         vm.createDir(dir, true);

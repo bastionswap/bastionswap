@@ -5,7 +5,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -15,12 +15,11 @@ import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Mini
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
+import {IBastionRouter} from "../interfaces/IBastionRouter.sol";
 
-/// @title BastionRouter
-/// @notice Minimal router for Uniswap V4 pools with BastionHook.
-///         Handles swaps, full pool creation (initialize + LP + hook registration),
-///         and LP removal with user identification in hookData.
-contract BastionRouter is IUnlockCallback {
+/// @title BastionPositionRouter
+/// @notice Pool creation and LP management router for Uniswap V4 pools with BastionHook.
+contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     using CurrencyLibrary for Currency;
     using TransientStateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
@@ -29,36 +28,23 @@ contract BastionRouter is IUnlockCallback {
     IPoolManager public immutable poolManager;
     ISignatureTransfer public immutable permit2;
 
-    uint8 private constant ACTION_SWAP = 0;
-    uint8 private constant ACTION_CREATE_POOL = 1;
-    uint8 private constant ACTION_REMOVE_LP = 2;
-    uint8 private constant ACTION_ADD_LP = 3;
-    uint8 private constant ACTION_FORCE_REMOVE = 4;
-    uint8 private constant ACTION_SWAP_PERMIT2 = 5;
-    uint8 private constant ACTION_CREATE_POOL_PERMIT2 = 6;
-    uint8 private constant ACTION_MULTI_HOP_SWAP = 7;
-    uint8 private constant ACTION_MULTI_HOP_SWAP_PERMIT2 = 8;
-    uint8 private constant ACTION_ADD_LP_V2 = 9;
-    uint8 private constant ACTION_ADD_LP_V2_PERMIT2 = 10;
-    uint8 private constant ACTION_REMOVE_LP_V2 = 11;
-    uint8 private constant ACTION_COLLECT_FEES = 12;
-
-    uint8 private constant MAX_HOPS = 4;
+    uint8 private constant ACTION_CREATE_POOL = 0;
+    uint8 private constant ACTION_ADD_LIQUIDITY_V2 = 1;
+    uint8 private constant ACTION_REMOVE_LIQUIDITY_V2 = 2;
+    uint8 private constant ACTION_COLLECT_FEES = 3;
+    uint8 private constant ACTION_FORCE_REMOVE_ISSUER_LP = 4;
+    uint8 private constant ACTION_CREATE_POOL_PERMIT2 = 5;
+    uint8 private constant ACTION_ADD_LIQUIDITY_V2_PERMIT2 = 6;
 
     /// @dev BastionHook address for access control on forceRemoveLiquidity
     address public bastionHook;
 
-    struct SwapStep {
-        PoolKey poolKey;
-        bool zeroForOne;
-    }
-
     struct CreatePoolParams {
         PoolKey key;
         uint160 sqrtPriceX96;
-        uint256 amount0Max;  // max currency0 for LP
-        uint256 amount1Max;  // max currency1 for LP
-        bytes hookData;      // abi.encode(issuer, token, vesting, commitment, triggerConfig)
+        uint256 amount0Max;
+        uint256 amount1Max;
+        bytes hookData;
     }
 
     /// @dev Permit2 data for a single token transfer
@@ -78,10 +64,6 @@ contract BastionRouter is IUnlockCallback {
     error OnlyHook();
     error HookAlreadySet();
     error HookNotSet();
-    error InsufficientOutput(uint256 amountOut, uint256 minAmountOut);
-    error ExcessiveInput(uint256 amountIn, uint256 maxAmountIn);
-    error TooManyHops();
-    error ZeroHops();
     error SlippageExceeded();
 
     event LiquidityChanged(
@@ -107,13 +89,13 @@ contract BastionRouter is IUnlockCallback {
 
     /// @notice Force-removes liquidity from a pool and sends resulting tokens to recipient.
     /// @dev Called by BastionHook during force removal. Only callable by the hook.
-    function forceRemoveLiquidity(PoolKey calldata key, uint128 liquidity, address recipient) external {
+    function forceRemoveLiquidity(PoolKey calldata key, uint128 liquidity, address recipient) external override {
         if (msg.sender != bastionHook) revert OnlyHook();
-        poolManager.unlock(abi.encode(ACTION_FORCE_REMOVE, recipient, key, liquidity));
+        poolManager.unlock(abi.encode(ACTION_FORCE_REMOVE_ISSUER_LP, recipient, key, liquidity));
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  PUBLIC FUNCTIONS (original — backward compatible)
+    //  POOL CREATION
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Create a pool with initial liquidity and BastionHook registration in one tx.
@@ -172,132 +154,35 @@ contract BastionRouter is IUnlockCallback {
         _refundETH();
     }
 
-    /// @notice Add liquidity to an existing pool.
-    function addLiquidity(PoolKey calldata key, uint256 amount0Max, uint256 amount1Max) external payable {
-        poolManager.unlock(abi.encode(ACTION_ADD_LP, msg.sender, key, amount0Max, amount1Max));
-        _refundETH();
-    }
+    /// @notice Create a pool using Permit2 for token transfers.
+    function createPoolPermit2(
+        address token,
+        address baseToken,
+        uint24 fee,
+        uint256 tokenAmount,
+        uint256 baseAmount,
+        uint160 sqrtPriceX96,
+        bytes calldata hookData,
+        bytes calldata permitData
+    ) external payable returns (PoolId poolId) {
+        if (bastionHook == address(0)) revert HookNotSet();
 
-    /// @notice Remove liquidity from a pool.
-    function removeLiquidity(PoolKey calldata key, uint128 liquidityToRemove) external {
-        poolManager.unlock(abi.encode(ACTION_REMOVE_LP, msg.sender, key, liquidityToRemove));
-        _refundETH();
-    }
+        (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) =
+            _buildPoolKey(token, baseToken, fee, tokenAmount, baseAmount);
 
-    /// @notice Swap exact input amount for as many output tokens as possible.
-    function swapExactInput(
-        PoolKey calldata key,
-        bool zeroForOne,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) external payable returns (uint256 amountOut) {
-        if (block.timestamp > deadline) revert Expired();
+        poolId = key.toId();
 
-        SwapParams memory params = SwapParams({
-            zeroForOne: zeroForOne,
-            amountSpecified: -int256(amountIn),
-            sqrtPriceLimitX96: zeroForOne
-                ? TickMath.MIN_SQRT_PRICE + 1
-                : TickMath.MAX_SQRT_PRICE - 1
-        });
-
-        BalanceDelta delta = abi.decode(
-            poolManager.unlock(abi.encode(ACTION_SWAP, msg.sender, key, params)),
-            (BalanceDelta)
-        );
-
-        amountOut = zeroForOne
-            ? uint256(int256(delta.amount1()))
-            : uint256(int256(delta.amount0()));
-
-        if (amountOut < minAmountOut) revert InsufficientOutput(amountOut, minAmountOut);
-
-        _refundETH();
-    }
-
-    /// @notice Swap for exact output amount, spending at most maxAmountIn.
-    function swapExactOutput(
-        PoolKey calldata key,
-        bool zeroForOne,
-        uint256 amountOut,
-        uint256 maxAmountIn,
-        uint256 deadline
-    ) external payable returns (uint256 amountIn) {
-        if (block.timestamp > deadline) revert Expired();
-
-        SwapParams memory params = SwapParams({
-            zeroForOne: zeroForOne,
-            amountSpecified: int256(amountOut),
-            sqrtPriceLimitX96: zeroForOne
-                ? TickMath.MIN_SQRT_PRICE + 1
-                : TickMath.MAX_SQRT_PRICE - 1
-        });
-
-        BalanceDelta delta = abi.decode(
-            poolManager.unlock(abi.encode(ACTION_SWAP, msg.sender, key, params)),
-            (BalanceDelta)
-        );
-
-        amountIn = zeroForOne
-            ? uint256(-int256(delta.amount0()))
-            : uint256(-int256(delta.amount1()));
-
-        if (amountIn > maxAmountIn) revert ExcessiveInput(amountIn, maxAmountIn);
-
-        _refundETH();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  MULTI-HOP SWAP FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Execute a multi-hop swap through a series of pools.
-    /// @param steps Array of SwapStep (poolKey + direction) defining the route.
-    /// @param amountIn Amount of input token to swap.
-    /// @param minAmountOut Minimum output amount (slippage protection).
-    /// @param deadline Timestamp after which the tx reverts.
-    function swapMultiHop(
-        SwapStep[] calldata steps,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) external payable returns (uint256 amountOut) {
-        if (block.timestamp > deadline) revert Expired();
-        if (steps.length == 0) revert ZeroHops();
-        if (steps.length > MAX_HOPS) revert TooManyHops();
-
-        amountOut = abi.decode(
-            poolManager.unlock(abi.encode(ACTION_MULTI_HOP_SWAP, msg.sender, steps, amountIn)),
-            (uint256)
-        );
-
-        if (amountOut < minAmountOut) revert InsufficientOutput(amountOut, minAmountOut);
-
-        _refundETH();
-    }
-
-    /// @notice Execute a multi-hop swap using Permit2 for the input token.
-    function swapMultiHopPermit2(
-        SwapStep[] calldata steps,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline,
-        Permit2Single calldata permitSingle
-    ) external payable returns (uint256 amountOut) {
-        if (block.timestamp > deadline) revert Expired();
-        if (steps.length == 0) revert ZeroHops();
-        if (steps.length > MAX_HOPS) revert TooManyHops();
-
-        amountOut = abi.decode(
-            poolManager.unlock(abi.encode(
-                ACTION_MULTI_HOP_SWAP_PERMIT2, msg.sender, steps, amountIn,
-                permitSingle.permit, permitSingle.signature
-            )),
-            (uint256)
-        );
-
-        if (amountOut < minAmountOut) revert InsufficientOutput(amountOut, minAmountOut);
+        poolManager.unlock(abi.encode(
+            ACTION_CREATE_POOL_PERMIT2, msg.sender,
+            CreatePoolParams({
+                key: key,
+                sqrtPriceX96: sqrtPriceX96,
+                amount0Max: amount0Max,
+                amount1Max: amount1Max,
+                hookData: hookData
+            }),
+            permitData
+        ));
 
         _refundETH();
     }
@@ -307,12 +192,6 @@ contract BastionRouter is IUnlockCallback {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Add liquidity to an existing pool with per-user position isolation.
-    /// @param key Pool key.
-    /// @param tickLower Lower tick. If both ticks are 0, auto full-range.
-    /// @param tickUpper Upper tick. If both ticks are 0, auto full-range.
-    /// @param amount0Max Max currency0 to deposit.
-    /// @param amount1Max Max currency1 to deposit.
-    /// @param deadline Timestamp after which the tx reverts.
     function addLiquidityV2(
         PoolKey calldata key,
         int24 tickLower,
@@ -324,7 +203,7 @@ contract BastionRouter is IUnlockCallback {
         if (block.timestamp > deadline) revert Expired();
         (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
         poolManager.unlock(abi.encode(
-            ACTION_ADD_LP_V2, msg.sender, key, tickLower, tickUpper, amount0Max, amount1Max
+            ACTION_ADD_LIQUIDITY_V2, msg.sender, key, tickLower, tickUpper, amount0Max, amount1Max
         ));
         _refundETH();
     }
@@ -342,7 +221,7 @@ contract BastionRouter is IUnlockCallback {
         if (block.timestamp > deadline) revert Expired();
         (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
         poolManager.unlock(abi.encode(
-            ACTION_ADD_LP_V2_PERMIT2, msg.sender, key, tickLower, tickUpper, amount0Max, amount1Max, permitData
+            ACTION_ADD_LIQUIDITY_V2_PERMIT2, msg.sender, key, tickLower, tickUpper, amount0Max, amount1Max, permitData
         ));
         _refundETH();
     }
@@ -361,7 +240,7 @@ contract BastionRouter is IUnlockCallback {
         (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
         BalanceDelta delta = abi.decode(
             poolManager.unlock(abi.encode(
-                ACTION_REMOVE_LP_V2, msg.sender, key, tickLower, tickUpper, liquidityToRemove
+                ACTION_REMOVE_LIQUIDITY_V2, msg.sender, key, tickLower, tickUpper, liquidityToRemove
             )),
             (BalanceDelta)
         );
@@ -398,138 +277,6 @@ contract BastionRouter is IUnlockCallback {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  PERMIT2-ENABLED FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Create a pool using Permit2 for token transfers.
-    /// @param permitData For ETH+ERC20: Permit2Single for the ERC20 side.
-    ///                   For ERC20+ERC20: Permit2Batch for both tokens.
-    function createPoolPermit2(
-        address token,
-        address baseToken,
-        uint24 fee,
-        uint256 tokenAmount,
-        uint256 baseAmount,
-        uint160 sqrtPriceX96,
-        bytes calldata hookData,
-        bytes calldata permitData
-    ) external payable returns (PoolId poolId) {
-        if (bastionHook == address(0)) revert HookNotSet();
-
-        (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) =
-            _buildPoolKey(token, baseToken, fee, tokenAmount, baseAmount);
-
-        poolId = key.toId();
-
-        poolManager.unlock(abi.encode(
-            ACTION_CREATE_POOL_PERMIT2, msg.sender,
-            CreatePoolParams({
-                key: key,
-                sqrtPriceX96: sqrtPriceX96,
-                amount0Max: amount0Max,
-                amount1Max: amount1Max,
-                hookData: hookData
-            }),
-            permitData
-        ));
-
-        _refundETH();
-    }
-
-    /// @dev Build PoolKey and sorted amounts for createPool variants.
-    function _buildPoolKey(
-        address token,
-        address baseToken,
-        uint24 fee,
-        uint256 tokenAmount,
-        uint256 baseAmount
-    ) internal view returns (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) {
-        if (baseToken == address(0)) baseAmount = msg.value;
-
-        if (uint160(baseToken) < uint160(token)) {
-            key = PoolKey(Currency.wrap(baseToken), Currency.wrap(token), fee, 60, IHooks(bastionHook));
-            amount0Max = baseAmount;
-            amount1Max = tokenAmount;
-        } else {
-            key = PoolKey(Currency.wrap(token), Currency.wrap(baseToken), fee, 60, IHooks(bastionHook));
-            amount0Max = tokenAmount;
-            amount1Max = baseAmount;
-        }
-    }
-
-    /// @notice Swap exact input using Permit2 for the input token.
-    function swapExactInputPermit2(
-        PoolKey calldata key,
-        bool zeroForOne,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint256 deadline,
-        Permit2Single calldata permitSingle
-    ) external payable returns (uint256 amountOut) {
-        if (block.timestamp > deadline) revert Expired();
-
-        SwapParams memory params = SwapParams({
-            zeroForOne: zeroForOne,
-            amountSpecified: -int256(amountIn),
-            sqrtPriceLimitX96: zeroForOne
-                ? TickMath.MIN_SQRT_PRICE + 1
-                : TickMath.MAX_SQRT_PRICE - 1
-        });
-
-        BalanceDelta delta = abi.decode(
-            poolManager.unlock(abi.encode(
-                ACTION_SWAP_PERMIT2, msg.sender, key, params,
-                permitSingle.permit, permitSingle.signature
-            )),
-            (BalanceDelta)
-        );
-
-        amountOut = zeroForOne
-            ? uint256(int256(delta.amount1()))
-            : uint256(int256(delta.amount0()));
-
-        if (amountOut < minAmountOut) revert InsufficientOutput(amountOut, minAmountOut);
-
-        _refundETH();
-    }
-
-    /// @notice Swap for exact output using Permit2 for the input token.
-    function swapExactOutputPermit2(
-        PoolKey calldata key,
-        bool zeroForOne,
-        uint256 amountOut,
-        uint256 maxAmountIn,
-        uint256 deadline,
-        Permit2Single calldata permitSingle
-    ) external payable returns (uint256 amountIn) {
-        if (block.timestamp > deadline) revert Expired();
-
-        SwapParams memory params = SwapParams({
-            zeroForOne: zeroForOne,
-            amountSpecified: int256(amountOut),
-            sqrtPriceLimitX96: zeroForOne
-                ? TickMath.MIN_SQRT_PRICE + 1
-                : TickMath.MAX_SQRT_PRICE - 1
-        });
-
-        BalanceDelta delta = abi.decode(
-            poolManager.unlock(abi.encode(
-                ACTION_SWAP_PERMIT2, msg.sender, key, params,
-                permitSingle.permit, permitSingle.signature
-            )),
-            (BalanceDelta)
-        );
-
-        amountIn = zeroForOne
-            ? uint256(-int256(delta.amount0()))
-            : uint256(-int256(delta.amount1()));
-
-        if (amountIn > maxAmountIn) revert ExcessiveInput(amountIn, maxAmountIn);
-
-        _refundETH();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
     //  UNLOCK CALLBACK
     // ═══════════════════════════════════════════════════════════════
 
@@ -538,32 +285,20 @@ contract BastionRouter is IUnlockCallback {
 
         uint8 action = abi.decode(data, (uint8));
 
-        if (action == ACTION_SWAP) {
-            return _handleSwap(data);
-        } else if (action == ACTION_CREATE_POOL) {
+        if (action == ACTION_CREATE_POOL) {
             return _handleCreatePool(data);
-        } else if (action == ACTION_REMOVE_LP) {
-            return _handleRemoveLP(data);
-        } else if (action == ACTION_ADD_LP) {
-            return _handleAddLP(data);
-        } else if (action == ACTION_FORCE_REMOVE) {
-            return _handleForceRemoveLP(data);
-        } else if (action == ACTION_SWAP_PERMIT2) {
-            return _handleSwapPermit2(data);
-        } else if (action == ACTION_CREATE_POOL_PERMIT2) {
-            return _handleCreatePoolPermit2(data);
-        } else if (action == ACTION_MULTI_HOP_SWAP) {
-            return _handleMultiHopSwap(data);
-        } else if (action == ACTION_MULTI_HOP_SWAP_PERMIT2) {
-            return _handleMultiHopSwapPermit2(data);
-        } else if (action == ACTION_ADD_LP_V2) {
+        } else if (action == ACTION_ADD_LIQUIDITY_V2) {
             return _handleAddLPV2(data);
-        } else if (action == ACTION_ADD_LP_V2_PERMIT2) {
-            return _handleAddLPV2Permit2(data);
-        } else if (action == ACTION_REMOVE_LP_V2) {
+        } else if (action == ACTION_REMOVE_LIQUIDITY_V2) {
             return _handleRemoveLPV2(data);
         } else if (action == ACTION_COLLECT_FEES) {
             return _handleCollectFees(data);
+        } else if (action == ACTION_FORCE_REMOVE_ISSUER_LP) {
+            return _handleForceRemoveLP(data);
+        } else if (action == ACTION_CREATE_POOL_PERMIT2) {
+            return _handleCreatePoolPermit2(data);
+        } else if (action == ACTION_ADD_LIQUIDITY_V2_PERMIT2) {
+            return _handleAddLPV2Permit2(data);
         }
 
         revert("Unknown action");
@@ -573,61 +308,16 @@ contract BastionRouter is IUnlockCallback {
     //  INTERNAL HANDLERS
     // ═══════════════════════════════════════════════════════════════
 
-    function _handleSwap(bytes calldata data) internal returns (bytes memory) {
-        (, address sender, PoolKey memory key, SwapParams memory params) =
-            abi.decode(data, (uint8, address, PoolKey, SwapParams));
-
-        BalanceDelta delta = poolManager.swap(key, params, "");
-
-        _settle(key.currency0, sender, delta.amount0());
-        _settle(key.currency1, sender, delta.amount1());
-
-        return abi.encode(delta);
-    }
-
-    function _handleSwapPermit2(bytes calldata data) internal returns (bytes memory) {
-        (
-            , address sender, PoolKey memory key, SwapParams memory params,
-            ISignatureTransfer.PermitTransferFrom memory permitTransfer, bytes memory sig
-        ) = abi.decode(data, (
-            uint8, address, PoolKey, SwapParams,
-            ISignatureTransfer.PermitTransferFrom, bytes
-        ));
-
-        BalanceDelta delta = poolManager.swap(key, params, "");
-
-        // Determine which currency is the input (negative delta = tokens owed to pool)
-        int128 amount0 = delta.amount0();
-        int128 amount1 = delta.amount1();
-
-        if (amount0 < 0) {
-            _settleWithPermit2(key.currency0, sender, uint256(uint128(-amount0)), permitTransfer, sig);
-        } else if (amount0 > 0) {
-            poolManager.take(key.currency0, sender, uint256(uint128(amount0)));
-        }
-
-        if (amount1 < 0) {
-            _settleWithPermit2(key.currency1, sender, uint256(uint128(-amount1)), permitTransfer, sig);
-        } else if (amount1 > 0) {
-            poolManager.take(key.currency1, sender, uint256(uint128(amount1)));
-        }
-
-        return abi.encode(delta);
-    }
-
     function _handleCreatePool(bytes calldata data) internal returns (bytes memory) {
         (, address sender, CreatePoolParams memory params) =
             abi.decode(data, (uint8, address, CreatePoolParams));
 
-        // 1. Initialize the pool
         poolManager.initialize(params.key, params.sqrtPriceX96);
 
-        // 2. Compute full-range ticks aligned to tickSpacing
         int24 tickSpacing = params.key.tickSpacing;
         int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
         int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
 
-        // 3. Compute liquidity from amounts
         uint160 sqrtPriceAX96 = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtPriceBX96 = TickMath.getSqrtPriceAtTick(tickUpper);
         uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
@@ -638,7 +328,6 @@ contract BastionRouter is IUnlockCallback {
             params.amount1Max
         );
 
-        // 4. Add liquidity with hookData to trigger BastionHook registration
         (BalanceDelta delta,) = poolManager.modifyLiquidity(
             params.key,
             ModifyLiquidityParams({
@@ -650,7 +339,6 @@ contract BastionRouter is IUnlockCallback {
             params.hookData
         );
 
-        // 5. Settle token deltas
         _settle(params.key.currency0, sender, delta.amount0());
         _settle(params.key.currency1, sender, delta.amount1());
 
@@ -663,7 +351,6 @@ contract BastionRouter is IUnlockCallback {
 
         BalanceDelta delta = _initAndAddLiquidity(params);
 
-        // Settle with Permit2
         if (params.key.currency0.isAddressZero()) {
             _settleCreatePoolNativePermit2(params.key, sender, delta, permitData);
         } else {
@@ -752,88 +439,14 @@ contract BastionRouter is IUnlockCallback {
         if (delta.amount1() > 0) poolManager.take(key.currency1, sender, uint256(uint128(delta.amount1())));
     }
 
-    function _handleAddLP(bytes calldata data) internal returns (bytes memory) {
-        (, address sender, PoolKey memory key, uint256 amount0Max, uint256 amount1Max) =
-            abi.decode(data, (uint8, address, PoolKey, uint256, uint256));
-
-        // Compute full-range ticks
-        int24 tickSpacing = key.tickSpacing;
-        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
-        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
-
-        // Get current price from pool
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
-
-        uint160 sqrtPriceAX96 = TickMath.getSqrtPriceAtTick(tickLower);
-        uint160 sqrtPriceBX96 = TickMath.getSqrtPriceAtTick(tickUpper);
-        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
-            sqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, amount0Max, amount1Max
-        );
-
-        // hookData identifies the actual user to the hook
-        bytes memory hookData = abi.encode(sender);
-
-        (BalanceDelta delta,) = poolManager.modifyLiquidity(
-            key,
-            ModifyLiquidityParams({
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                liquidityDelta: int256(uint256(liquidity)),
-                salt: 0
-            }),
-            hookData
-        );
-
-        _settle(key.currency0, sender, delta.amount0());
-        _settle(key.currency1, sender, delta.amount1());
-
-        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, int256(uint256(liquidity)), delta.amount0(), delta.amount1());
-
-        return abi.encode(delta);
-    }
-
-    function _handleRemoveLP(bytes calldata data) internal returns (bytes memory) {
-        (, address sender, PoolKey memory key, uint128 liquidityToRemove) =
-            abi.decode(data, (uint8, address, PoolKey, uint128));
-
-        // Compute full-range ticks (same as createPool)
-        int24 tickSpacing = key.tickSpacing;
-        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
-        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
-
-        // hookData identifies the actual user to the hook
-        bytes memory hookData = abi.encode(sender);
-
-        (BalanceDelta delta,) = poolManager.modifyLiquidity(
-            key,
-            ModifyLiquidityParams({
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                liquidityDelta: -int256(uint256(liquidityToRemove)),
-                salt: 0
-            }),
-            hookData
-        );
-
-        // Settle deltas back to sender
-        _settle(key.currency0, sender, delta.amount0());
-        _settle(key.currency1, sender, delta.amount1());
-
-        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, -int256(uint256(liquidityToRemove)), delta.amount0(), delta.amount1());
-
-        return abi.encode(delta);
-    }
-
     function _handleForceRemoveLP(bytes calldata data) internal returns (bytes memory) {
         (, address recipient, PoolKey memory key, uint128 liquidity) =
             abi.decode(data, (uint8, address, PoolKey, uint128));
 
-        // Compute full-range ticks
         int24 tickSpacing = key.tickSpacing;
         int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
         int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
 
-        // Force remove with empty hookData (transient flag handles auth in hook)
         (BalanceDelta delta,) = poolManager.modifyLiquidity(
             key,
             ModifyLiquidityParams({
@@ -845,7 +458,6 @@ contract BastionRouter is IUnlockCallback {
             ""
         );
 
-        // Send tokens/ETH to recipient (the hook) — both deltas should be positive (receiving)
         _settleToRecipient(key.currency0, recipient, delta.amount0());
         _settleToRecipient(key.currency1, recipient, delta.amount1());
 
@@ -916,7 +528,6 @@ contract BastionRouter is IUnlockCallback {
             ""
         );
 
-        // Settle: ETH side uses native, ERC20 side uses Permit2
         if (key.currency0.isAddressZero()) {
             _settleCreatePoolNativePermit2(key, sender, delta, permitData);
         } else {
@@ -978,6 +589,10 @@ contract BastionRouter is IUnlockCallback {
         return abi.encode(delta);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  INTERNAL HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
     /// @dev If both ticks are 0, resolve to full-range aligned to tickSpacing.
     function _resolveTicks(int24 tickSpacing, int24 tl, int24 tu) internal pure returns (int24, int24) {
         if (tl == 0 && tu == 0) {
@@ -987,139 +602,24 @@ contract BastionRouter is IUnlockCallback {
         return (tl, tu);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  MULTI-HOP HANDLERS
-    // ═══════════════════════════════════════════════════════════════
+    /// @dev Build PoolKey and sorted amounts for createPool variants.
+    function _buildPoolKey(
+        address token,
+        address baseToken,
+        uint24 fee,
+        uint256 tokenAmount,
+        uint256 baseAmount
+    ) internal view returns (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) {
+        if (baseToken == address(0)) baseAmount = msg.value;
 
-    function _handleMultiHopSwap(bytes calldata data) internal returns (bytes memory) {
-        (, address sender, SwapStep[] memory steps, uint256 amountIn) =
-            abi.decode(data, (uint8, address, SwapStep[], uint256));
-
-        uint256 currentAmount = amountIn;
-
-        for (uint256 i = 0; i < steps.length; i++) {
-            SwapParams memory params = SwapParams({
-                zeroForOne: steps[i].zeroForOne,
-                amountSpecified: -int256(currentAmount),
-                sqrtPriceLimitX96: steps[i].zeroForOne
-                    ? TickMath.MIN_SQRT_PRICE + 1
-                    : TickMath.MAX_SQRT_PRICE - 1
-            });
-
-            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
-
-            // Output is the positive side of the delta
-            currentAmount = steps[i].zeroForOne
-                ? uint256(int256(delta.amount1()))
-                : uint256(int256(delta.amount0()));
-        }
-
-        // Settle all currency deltas
-        uint256 amountOut = _settleAllDeltas(steps, sender);
-
-        return abi.encode(amountOut);
-    }
-
-    function _handleMultiHopSwapPermit2(bytes calldata data) internal returns (bytes memory) {
-        (
-            , address sender, SwapStep[] memory steps, uint256 amountIn,
-            ISignatureTransfer.PermitTransferFrom memory permitTransfer, bytes memory sig
-        ) = abi.decode(data, (
-            uint8, address, SwapStep[], uint256,
-            ISignatureTransfer.PermitTransferFrom, bytes
-        ));
-
-        uint256 currentAmount = amountIn;
-
-        for (uint256 i = 0; i < steps.length; i++) {
-            SwapParams memory params = SwapParams({
-                zeroForOne: steps[i].zeroForOne,
-                amountSpecified: -int256(currentAmount),
-                sqrtPriceLimitX96: steps[i].zeroForOne
-                    ? TickMath.MIN_SQRT_PRICE + 1
-                    : TickMath.MAX_SQRT_PRICE - 1
-            });
-
-            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
-
-            currentAmount = steps[i].zeroForOne
-                ? uint256(int256(delta.amount1()))
-                : uint256(int256(delta.amount0()));
-        }
-
-        uint256 amountOut = _settleAllDeltasPermit2(steps, sender, permitTransfer, sig);
-
-        return abi.encode(amountOut);
-    }
-
-    /// @dev Collect unique currencies from all swap steps.
-    function _collectCurrencies(SwapStep[] memory steps) internal pure returns (Currency[] memory) {
-        // Max unique currencies = steps.length + 1 (for 2-hop: A, B, C = 3 currencies)
-        Currency[] memory temp = new Currency[](steps.length * 2);
-        uint256 count = 0;
-
-        for (uint256 i = 0; i < steps.length; i++) {
-            bool found0 = false;
-            bool found1 = false;
-            for (uint256 j = 0; j < count; j++) {
-                if (Currency.unwrap(temp[j]) == Currency.unwrap(steps[i].poolKey.currency0)) found0 = true;
-                if (Currency.unwrap(temp[j]) == Currency.unwrap(steps[i].poolKey.currency1)) found1 = true;
-            }
-            if (!found0) { temp[count] = steps[i].poolKey.currency0; count++; }
-            if (!found1) { temp[count] = steps[i].poolKey.currency1; count++; }
-        }
-
-        Currency[] memory result = new Currency[](count);
-        for (uint256 i = 0; i < count; i++) result[i] = temp[i];
-        return result;
-    }
-
-    /// @dev Settle all non-zero currency deltas after multi-hop swap. Returns the output amount.
-    function _settleAllDeltas(SwapStep[] memory steps, address sender) internal returns (uint256 amountOut) {
-        Currency[] memory currencies = _collectCurrencies(steps);
-
-        for (uint256 i = 0; i < currencies.length; i++) {
-            int256 delta = poolManager.currencyDelta(address(this), currencies[i]);
-            if (delta < 0) {
-                // Negative delta = we owe the pool → pull from sender
-                uint256 amount = uint256(-delta);
-                if (currencies[i].isAddressZero()) {
-                    poolManager.settle{value: amount}();
-                } else {
-                    poolManager.sync(currencies[i]);
-                    IERC20Minimal(Currency.unwrap(currencies[i])).transferFrom(
-                        sender, address(poolManager), amount
-                    );
-                    poolManager.settle();
-                }
-            } else if (delta > 0) {
-                // Positive delta = pool owes us → send to sender
-                uint256 amount = uint256(delta);
-                poolManager.take(currencies[i], sender, amount);
-                amountOut = amount; // The last positive delta is the output
-            }
-        }
-    }
-
-    /// @dev Settle all non-zero deltas using Permit2 for the input token.
-    function _settleAllDeltasPermit2(
-        SwapStep[] memory steps,
-        address sender,
-        ISignatureTransfer.PermitTransferFrom memory permitTransfer,
-        bytes memory sig
-    ) internal returns (uint256 amountOut) {
-        Currency[] memory currencies = _collectCurrencies(steps);
-
-        for (uint256 i = 0; i < currencies.length; i++) {
-            int256 delta = poolManager.currencyDelta(address(this), currencies[i]);
-            if (delta < 0) {
-                uint256 amount = uint256(-delta);
-                _settleWithPermit2(currencies[i], sender, amount, permitTransfer, sig);
-            } else if (delta > 0) {
-                uint256 amount = uint256(delta);
-                poolManager.take(currencies[i], sender, amount);
-                amountOut = amount;
-            }
+        if (uint160(baseToken) < uint160(token)) {
+            key = PoolKey(Currency.wrap(baseToken), Currency.wrap(token), fee, 60, IHooks(bastionHook));
+            amount0Max = baseAmount;
+            amount1Max = tokenAmount;
+        } else {
+            key = PoolKey(Currency.wrap(token), Currency.wrap(baseToken), fee, 60, IHooks(bastionHook));
+            amount0Max = tokenAmount;
+            amount1Max = baseAmount;
         }
     }
 
@@ -1154,7 +654,6 @@ contract BastionRouter is IUnlockCallback {
         bytes memory sig
     ) internal {
         if (currency.isAddressZero()) {
-            // Native ETH — use msg.value already forwarded
             poolManager.settle{value: amount}();
         } else {
             poolManager.sync(currency);
@@ -1177,7 +676,6 @@ contract BastionRouter is IUnlockCallback {
             uint256 amountToReceive = uint256(uint128(amount));
             poolManager.take(currency, recipient, amountToReceive);
         }
-        // Negative deltas shouldn't happen for removals, but handle defensively
         if (amount < 0) {
             uint256 amountToSend = uint256(uint128(-amount));
             if (currency.isAddressZero()) {

@@ -16,7 +16,8 @@ import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {SortTokens} from "@uniswap/v4-core/test/utils/SortTokens.sol";
 
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
-import {BastionRouter} from "../../src/router/BastionRouter.sol";
+import {BastionSwapRouter} from "../../src/router/BastionSwapRouter.sol";
+import {BastionPositionRouter} from "../../src/router/BastionPositionRouter.sol";
 import {BastionHook} from "../../src/hooks/BastionHook.sol";
 import {EscrowVault} from "../../src/core/EscrowVault.sol";
 import {InsurancePool} from "../../src/core/InsurancePool.sol";
@@ -34,7 +35,8 @@ contract BastionRouterLPTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    BastionRouter public router;
+    BastionSwapRouter public bastionSwapRouter;
+    BastionPositionRouter public bastionPositionRouter;
     BastionHook public hook;
     EscrowVault public escrowVault;
     InsurancePool public insurancePool;
@@ -63,7 +65,8 @@ contract BastionRouterLPTest is Test, Deployers {
 
         deployFreshManagerAndRouters();
 
-        router = new BastionRouter(manager, ISignatureTransfer(address(0)));
+        bastionSwapRouter = new BastionSwapRouter(manager, ISignatureTransfer(address(0)));
+        bastionPositionRouter = new BastionPositionRouter(manager, ISignatureTransfer(address(0)));
 
         uint160 flags = uint160(
             Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG |
@@ -93,6 +96,10 @@ contract BastionRouterLPTest is Test, Deployers {
         vm.etch(hookAddr, deployed.code);
         hook = BastionHook(payable(hookAddr));
 
+        // Wire up routers (hook.setBastionRouter requires _owner which is lost by vm.etch)
+        bastionSwapRouter.setBastionHook(hookAddr);
+        bastionPositionRouter.setBastionHook(hookAddr);
+
         issuedToken = new MockERC20("Issued Token", "ISS", 18);
         baseToken = new MockERC20("Base Token", "BASE", 18);
 
@@ -116,10 +123,12 @@ contract BastionRouterLPTest is Test, Deployers {
         baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         vm.stopPrank();
 
-        // Approve BastionRouter (trader)
+        // Approve both routers (trader)
         vm.startPrank(trader);
-        issuedToken.approve(address(router), type(uint256).max);
-        baseToken.approve(address(router), type(uint256).max);
+        issuedToken.approve(address(bastionSwapRouter), type(uint256).max);
+        baseToken.approve(address(bastionSwapRouter), type(uint256).max);
+        issuedToken.approve(address(bastionPositionRouter), type(uint256).max);
+        baseToken.approve(address(bastionPositionRouter), type(uint256).max);
         vm.stopPrank();
 
         poolKey = PoolKey({
@@ -159,7 +168,7 @@ contract BastionRouterLPTest is Test, Deployers {
         uint256 trader1Before = MockERC20(Currency.unwrap(poolKey.currency1)).balanceOf(trader);
 
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
 
         uint256 trader0After = MockERC20(Currency.unwrap(poolKey.currency0)).balanceOf(trader);
         uint256 trader1After = MockERC20(Currency.unwrap(poolKey.currency1)).balanceOf(trader);
@@ -169,7 +178,7 @@ contract BastionRouterLPTest is Test, Deployers {
         assertLt(trader1After, trader1Before, "Token1 should be spent");
 
         // Position should exist
-        uint128 liq = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liq = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertGt(liq, 0, "Position liquidity should be > 0");
     }
 
@@ -182,9 +191,9 @@ contract BastionRouterLPTest is Test, Deployers {
         int24 tickUpper = 120;
 
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, tickLower, tickUpper, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, tickLower, tickUpper, 10 ether, 10 ether, block.timestamp + 3600);
 
-        uint128 liq = router.getPositionLiquidity(poolKey, trader, tickLower, tickUpper);
+        uint128 liq = bastionPositionRouter.getPositionLiquidity(poolKey, trader, tickLower, tickUpper);
         assertGt(liq, 0, "Custom range position should have liquidity");
     }
 
@@ -196,8 +205,8 @@ contract BastionRouterLPTest is Test, Deployers {
         vm.warp(1000);
 
         vm.prank(trader);
-        vm.expectRevert(BastionRouter.Expired.selector);
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, 999);
+        vm.expectRevert(BastionPositionRouter.Expired.selector);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, 999);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -207,9 +216,9 @@ contract BastionRouterLPTest is Test, Deployers {
     function test_removeLiquidityV2_fullRange() public {
         // First add liquidity
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
 
-        uint128 liq = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liq = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertGt(liq, 0, "Should have liquidity");
 
         uint256 trader0Before = MockERC20(Currency.unwrap(poolKey.currency0)).balanceOf(trader);
@@ -217,7 +226,7 @@ contract BastionRouterLPTest is Test, Deployers {
 
         // Remove all liquidity
         vm.prank(trader);
-        router.removeLiquidityV2(poolKey, 0, 0, liq, 0, 0, block.timestamp + 3600);
+        bastionPositionRouter.removeLiquidityV2(poolKey, 0, 0, liq, 0, 0, block.timestamp + 3600);
 
         uint256 trader0After = MockERC20(Currency.unwrap(poolKey.currency0)).balanceOf(trader);
         uint256 trader1After = MockERC20(Currency.unwrap(poolKey.currency1)).balanceOf(trader);
@@ -227,7 +236,7 @@ contract BastionRouterLPTest is Test, Deployers {
         assertGt(trader1After, trader1Before, "Should receive token1 back");
 
         // Position should be empty
-        uint128 liqAfter = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liqAfter = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertEq(liqAfter, 0, "Position should be empty");
     }
 
@@ -237,16 +246,16 @@ contract BastionRouterLPTest is Test, Deployers {
 
     function test_removeLiquidityV2_partial() public {
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
 
-        uint128 liq = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liq = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
 
         // Remove 50%
         uint128 half = liq / 2;
         vm.prank(trader);
-        router.removeLiquidityV2(poolKey, 0, 0, half, 0, 0, block.timestamp + 3600);
+        bastionPositionRouter.removeLiquidityV2(poolKey, 0, 0, half, 0, 0, block.timestamp + 3600);
 
-        uint128 remaining = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 remaining = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertApproxEqAbs(remaining, liq - half, 1, "Remaining should be ~50%");
     }
 
@@ -256,13 +265,13 @@ contract BastionRouterLPTest is Test, Deployers {
 
     function test_removeLiquidityV2_slippage_reverts() public {
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
 
-        uint128 liq = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liq = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
 
         vm.prank(trader);
-        vm.expectRevert(BastionRouter.SlippageExceeded.selector);
-        router.removeLiquidityV2(poolKey, 0, 0, liq, type(uint256).max, 0, block.timestamp + 3600);
+        vm.expectRevert(BastionPositionRouter.SlippageExceeded.selector);
+        bastionPositionRouter.removeLiquidityV2(poolKey, 0, 0, liq, type(uint256).max, 0, block.timestamp + 3600);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -273,8 +282,8 @@ contract BastionRouterLPTest is Test, Deployers {
         vm.warp(1000);
 
         vm.prank(trader);
-        vm.expectRevert(BastionRouter.Expired.selector);
-        router.removeLiquidityV2(poolKey, 0, 0, 100, 0, 0, 999);
+        vm.expectRevert(BastionPositionRouter.Expired.selector);
+        bastionPositionRouter.removeLiquidityV2(poolKey, 0, 0, 100, 0, 0, 999);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -284,12 +293,12 @@ contract BastionRouterLPTest is Test, Deployers {
     function test_collectFees_afterSwaps() public {
         // Add V2 liquidity
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, 0, 0, 100 ether, 100 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 100 ether, 100 ether, block.timestamp + 3600);
 
         // Execute some swaps to generate fees
         vm.startPrank(trader);
-        router.swapExactInput(poolKey, true, 1 ether, 0, block.timestamp + 3600);
-        router.swapExactInput(poolKey, false, 1 ether, 0, block.timestamp + 3600);
+        bastionSwapRouter.swapExactInput(poolKey, true, 1 ether, 0, block.timestamp + 3600);
+        bastionSwapRouter.swapExactInput(poolKey, false, 1 ether, 0, block.timestamp + 3600);
         vm.stopPrank();
 
         uint256 trader0Before = MockERC20(Currency.unwrap(poolKey.currency0)).balanceOf(trader);
@@ -297,7 +306,7 @@ contract BastionRouterLPTest is Test, Deployers {
 
         // Collect fees
         vm.prank(trader);
-        router.collectFees(poolKey, 0, 0);
+        bastionPositionRouter.collectFees(poolKey, 0, 0);
 
         uint256 trader0After = MockERC20(Currency.unwrap(poolKey.currency0)).balanceOf(trader);
         uint256 trader1After = MockERC20(Currency.unwrap(poolKey.currency1)).balanceOf(trader);
@@ -312,20 +321,19 @@ contract BastionRouterLPTest is Test, Deployers {
     // ═══════════════════════════════════════════════════════════════
 
     function test_generalLP_notEscrowed() public {
-        // Get escrow count before
         // Add V2 LP as non-issuer (trader)
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
 
         // Position should exist (no revert from escrow check)
-        uint128 liq = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liq = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertGt(liq, 0, "General LP should have liquidity");
 
         // Should be able to immediately remove (no vesting)
         vm.prank(trader);
-        router.removeLiquidityV2(poolKey, 0, 0, liq, 0, 0, block.timestamp + 3600);
+        bastionPositionRouter.removeLiquidityV2(poolKey, 0, 0, liq, 0, 0, block.timestamp + 3600);
 
-        uint128 liqAfter = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liqAfter = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertEq(liqAfter, 0, "Should be fully removed");
     }
 
@@ -336,15 +344,15 @@ contract BastionRouterLPTest is Test, Deployers {
     function test_generalLP_notAffectedByTrigger() public {
         // Add V2 LP as trader
         vm.prank(trader);
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
 
-        uint128 liq = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liq = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertGt(liq, 0, "Should have liquidity");
 
         // Execute swaps to change pool state
         vm.startPrank(trader);
-        router.swapExactInput(poolKey, true, 5 ether, 0, block.timestamp + 3600);
-        router.swapExactInput(poolKey, false, 5 ether, 0, block.timestamp + 3600);
+        bastionSwapRouter.swapExactInput(poolKey, true, 5 ether, 0, block.timestamp + 3600);
+        bastionSwapRouter.swapExactInput(poolKey, false, 5 ether, 0, block.timestamp + 3600);
         vm.stopPrank();
 
         // Warp time forward (past issuer lock period)
@@ -352,9 +360,9 @@ contract BastionRouterLPTest is Test, Deployers {
 
         // General LP (V2, salt-isolated) should still be freely removable
         vm.prank(trader);
-        router.removeLiquidityV2(poolKey, 0, 0, liq, 0, 0, block.timestamp + 3600);
+        bastionPositionRouter.removeLiquidityV2(poolKey, 0, 0, liq, 0, 0, block.timestamp + 3600);
 
-        uint128 liqAfter = router.getPositionLiquidity(poolKey, trader, 0, 0);
+        uint128 liqAfter = bastionPositionRouter.getPositionLiquidity(poolKey, trader, 0, 0);
         assertEq(liqAfter, 0, "General LP should be removable anytime");
     }
 
@@ -365,12 +373,12 @@ contract BastionRouterLPTest is Test, Deployers {
     function test_LiquidityChanged_event() public {
         vm.prank(trader);
         vm.expectEmit(true, true, false, false);
-        emit BastionRouter.LiquidityChanged(
+        emit BastionPositionRouter.LiquidityChanged(
             poolId, trader,
             TICK_LOWER, TICK_UPPER,
             0, 0, 0 // We don't check exact values, just indexed fields
         );
-        router.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
+        bastionPositionRouter.addLiquidityV2(poolKey, 0, 0, 10 ether, 10 ether, block.timestamp + 3600);
     }
 
     // ═══════════════════════════════════════════════════════════════

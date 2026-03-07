@@ -15,7 +15,8 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SortTokens} from "@uniswap/v4-core/test/utils/SortTokens.sol";
 
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
-import {BastionRouter} from "../../src/router/BastionRouter.sol";
+import {BastionSwapRouter} from "../../src/router/BastionSwapRouter.sol";
+import {BastionPositionRouter} from "../../src/router/BastionPositionRouter.sol";
 import {BastionHook} from "../../src/hooks/BastionHook.sol";
 import {EscrowVault} from "../../src/core/EscrowVault.sol";
 import {InsurancePool} from "../../src/core/InsurancePool.sol";
@@ -33,7 +34,8 @@ contract BastionRouterTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    BastionRouter public router;
+    BastionSwapRouter public bastionSwapRouter;
+    BastionPositionRouter public bastionPositionRouter;
     BastionHook public hook;
     EscrowVault public escrowVault;
     InsurancePool public insurancePool;
@@ -60,8 +62,9 @@ contract BastionRouterTest is Test, Deployers {
         // Deploy V4 PoolManager and standard routers
         deployFreshManagerAndRouters();
 
-        // Deploy BastionRouter
-        router = new BastionRouter(manager, ISignatureTransfer(address(0)));
+        // Deploy routers
+        bastionSwapRouter = new BastionSwapRouter(manager, ISignatureTransfer(address(0)));
+        bastionPositionRouter = new BastionPositionRouter(manager, ISignatureTransfer(address(0)));
 
         // Deploy hook at correct flag address
         uint160 flags = uint160(
@@ -92,6 +95,10 @@ contract BastionRouterTest is Test, Deployers {
         vm.etch(hookAddr, deployed.code);
         hook = BastionHook(payable(hookAddr));
 
+        // Wire up routers (hook.setBastionRouter requires _owner which is lost by vm.etch)
+        bastionSwapRouter.setBastionHook(hookAddr);
+        bastionPositionRouter.setBastionHook(hookAddr);
+
         // Deploy tokens
         issuedToken = new MockERC20("Issued Token", "ISS", 18);
         baseToken = new MockERC20("Base Token", "BASE", 18);
@@ -117,10 +124,12 @@ contract BastionRouterTest is Test, Deployers {
         baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
         vm.stopPrank();
 
-        // Approve BastionRouter (trader)
+        // Approve both routers (trader)
         vm.startPrank(trader);
-        issuedToken.approve(address(router), type(uint256).max);
-        baseToken.approve(address(router), type(uint256).max);
+        issuedToken.approve(address(bastionSwapRouter), type(uint256).max);
+        baseToken.approve(address(bastionSwapRouter), type(uint256).max);
+        issuedToken.approve(address(bastionPositionRouter), type(uint256).max);
+        baseToken.approve(address(bastionPositionRouter), type(uint256).max);
         vm.stopPrank();
 
         // Create pool key with hook
@@ -167,7 +176,7 @@ contract BastionRouterTest is Test, Deployers {
         uint256 traderIssuedBefore = issuedToken.balanceOf(trader);
 
         vm.prank(trader);
-        uint256 amountOut = router.swapExactInput(
+        uint256 amountOut = bastionSwapRouter.swapExactInput(
             poolKey, zeroForOne, amountIn, 0, block.timestamp + 3600
         );
 
@@ -191,7 +200,7 @@ contract BastionRouterTest is Test, Deployers {
         uint256 traderBaseBefore = baseToken.balanceOf(trader);
 
         vm.prank(trader);
-        uint256 amountOut = router.swapExactInput(
+        uint256 amountOut = bastionSwapRouter.swapExactInput(
             poolKey, zeroForOne, amountIn, 0, block.timestamp + 3600
         );
 
@@ -207,7 +216,7 @@ contract BastionRouterTest is Test, Deployers {
         uint256 traderIssuedBefore = issuedToken.balanceOf(trader);
 
         vm.prank(trader);
-        uint256 amountIn = router.swapExactOutput(
+        uint256 amountIn = bastionSwapRouter.swapExactOutput(
             poolKey, zeroForOne, desiredOut, 10 ether, block.timestamp + 3600
         );
 
@@ -219,8 +228,8 @@ contract BastionRouterTest is Test, Deployers {
         vm.warp(1000);
 
         vm.prank(trader);
-        vm.expectRevert(BastionRouter.Expired.selector);
-        router.swapExactInput(
+        vm.expectRevert(BastionSwapRouter.Expired.selector);
+        bastionSwapRouter.swapExactInput(
             poolKey, true, 1 ether, 0, 999  // deadline in the past
         );
     }
@@ -228,7 +237,7 @@ contract BastionRouterTest is Test, Deployers {
     function test_SwapSlippage_Reverts() public {
         vm.prank(trader);
         vm.expectRevert();  // InsufficientOutput
-        router.swapExactInput(
+        bastionSwapRouter.swapExactInput(
             poolKey, !issuedIsToken0, 1 ether, type(uint256).max, block.timestamp + 3600
         );
     }
@@ -236,7 +245,7 @@ contract BastionRouterTest is Test, Deployers {
     function test_SwapExactOutput_ExcessiveInput_Reverts() public {
         vm.prank(trader);
         vm.expectRevert();  // ExcessiveInput
-        router.swapExactOutput(
+        bastionSwapRouter.swapExactOutput(
             poolKey, !issuedIsToken0, 0.5 ether, 0, block.timestamp + 3600  // maxAmountIn = 0
         );
     }
@@ -247,7 +256,7 @@ contract BastionRouterTest is Test, Deployers {
         uint256 balBefore = trader.balance;
 
         vm.prank(trader);
-        router.swapExactInput{value: 1 ether}(
+        bastionSwapRouter.swapExactInput{value: 1 ether}(
             poolKey, !issuedIsToken0, 1 ether, 0, block.timestamp + 3600
         );
 
@@ -257,8 +266,8 @@ contract BastionRouterTest is Test, Deployers {
     }
 
     function test_OnlyPoolManager_Reverts() public {
-        vm.expectRevert(BastionRouter.OnlyPoolManager.selector);
-        router.unlockCallback("");
+        vm.expectRevert(BastionSwapRouter.OnlyPoolManager.selector);
+        bastionSwapRouter.unlockCallback("");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -266,10 +275,10 @@ contract BastionRouterTest is Test, Deployers {
     // ═══════════════════════════════════════════════════════════════
 
     function test_createPool_HookNotSet_Reverts() public {
-        // Deploy a fresh router without setting hook
-        BastionRouter freshRouter = new BastionRouter(manager, ISignatureTransfer(address(0)));
+        // Deploy a fresh position router without setting hook
+        BastionPositionRouter freshRouter = new BastionPositionRouter(manager, ISignatureTransfer(address(0)));
 
-        vm.expectRevert(BastionRouter.HookNotSet.selector);
+        vm.expectRevert(BastionPositionRouter.HookNotSet.selector);
         freshRouter.createPool(
             address(issuedToken),
             address(0),
@@ -285,16 +294,13 @@ contract BastionRouterTest is Test, Deployers {
         MockERC20 newToken = new MockERC20("New Token", "NEW", 18);
         newToken.mint(issuerAddr, 1_000_000 ether);
 
-        // Set hook on router
-        router.setBastionHook(address(hook));
-
-        // Approve router for both tokens
+        // Approve bastionPositionRouter for both tokens
         vm.startPrank(issuerAddr);
-        newToken.approve(address(router), type(uint256).max);
-        baseToken.approve(address(router), type(uint256).max);
+        newToken.approve(address(bastionPositionRouter), type(uint256).max);
+        baseToken.approve(address(bastionPositionRouter), type(uint256).max);
 
         // Create pool via simplified createPool
-        PoolId newPoolId = router.createPool(
+        PoolId newPoolId = bastionPositionRouter.createPool(
             address(newToken),
             address(baseToken),
             3000,

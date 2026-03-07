@@ -11,7 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { gql } from "graphql-request";
 import { graphClient } from "@/config/subgraph";
 import { getContracts } from "@/config/contracts";
-import { BastionRouterABI } from "@/config/abis";
+import { BastionPositionRouterABI } from "@/config/abis";
 
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as `0x${string}`;
 
@@ -203,8 +203,8 @@ export function useAddLiquidity() {
       }
 
       writeContract({
-        address: contracts.BastionRouter as `0x${string}`,
-        abi: BastionRouterABI,
+        address: contracts.BastionPositionRouter as `0x${string}`,
+        abi: BastionPositionRouterABI,
         functionName: "addLiquidityV2Permit2",
         args: [
           config.poolKey,
@@ -231,8 +231,8 @@ export function useAddLiquidity() {
     if (hasNative && config.amount1Max === 0n) {
       // ETH-only (no ERC20 to permit)
       writeContract({
-        address: contracts.BastionRouter as `0x${string}`,
-        abi: BastionRouterABI,
+        address: contracts.BastionPositionRouter as `0x${string}`,
+        abi: BastionPositionRouterABI,
         functionName: "addLiquidityV2",
         args: [
           config.poolKey,
@@ -250,7 +250,7 @@ export function useAddLiquidity() {
     // Need Permit2 for ERC20(s)
     const nonce = generatePermit2Nonce();
     const deadline = config.deadline;
-    const routerAddress = contracts.BastionRouter as `0x${string}`;
+    const routerAddress = contracts.BastionPositionRouter as `0x${string}`;
 
     setPendingAdd(config);
     setPermitNonce(nonce);
@@ -353,8 +353,8 @@ export function useRemoveLiquidity() {
     if (!contracts) return;
 
     writeContract({
-      address: contracts.BastionRouter as `0x${string}`,
-      abi: BastionRouterABI,
+      address: contracts.BastionPositionRouter as `0x${string}`,
+      abi: BastionPositionRouterABI,
       functionName: "removeLiquidityV2",
       args: [
         config.poolKey,
@@ -410,8 +410,8 @@ export function useCollectFees() {
     if (!contracts) return;
 
     writeContract({
-      address: contracts.BastionRouter as `0x${string}`,
-      abi: BastionRouterABI,
+      address: contracts.BastionPositionRouter as `0x${string}`,
+      abi: BastionPositionRouterABI,
       functionName: "collectFees",
       args: [poolKey, tickLower, tickUpper],
     });

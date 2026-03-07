@@ -9,7 +9,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 import {BastionHook} from "../src/hooks/BastionHook.sol";
-import {BastionRouter} from "../src/router/BastionRouter.sol";
+import {BastionPositionRouter} from "../src/router/BastionPositionRouter.sol";
 import {TestToken} from "../src/test/TestToken.sol";
 import {IEscrowVault} from "../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../src/interfaces/ITriggerOracle.sol";
@@ -48,7 +48,7 @@ contract SeedTestnet is Script {
 
         // 3. Create ETH/BTT pool via BastionRouter
         bytes memory bttHookData = _buildHookData(deployer, address(btt));
-        BastionRouter(payable(ROUTER)).createPool{value: 0.002 ether}(
+        BastionPositionRouter(payable(ROUTER)).createPool{value: 0.002 ether}(
             address(btt),
             address(0),    // ETH as base token
             3000,
@@ -60,7 +60,7 @@ contract SeedTestnet is Script {
 
         // 4. Create ETH/ALPHA pool via BastionRouter
         bytes memory alphaHookData = _buildHookData(deployer, address(alpha));
-        BastionRouter(payable(ROUTER)).createPool{value: 0.002 ether}(
+        BastionPositionRouter(payable(ROUTER)).createPool{value: 0.002 ether}(
             address(alpha),
             address(0),    // ETH as base token
             3000,

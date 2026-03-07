@@ -14,7 +14,8 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
-import {BastionRouter} from "../../src/router/BastionRouter.sol";
+import {BastionSwapRouter} from "../../src/router/BastionSwapRouter.sol";
+import {BastionPositionRouter} from "../../src/router/BastionPositionRouter.sol";
 import {BastionHook} from "../../src/hooks/BastionHook.sol";
 import {EscrowVault} from "../../src/core/EscrowVault.sol";
 import {InsurancePool} from "../../src/core/InsurancePool.sol";
@@ -31,7 +32,8 @@ contract BastionRouterMultiHopTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    BastionRouter public router;
+    BastionSwapRouter public bastionSwapRouter;
+    BastionPositionRouter public bastionPositionRouter;
     BastionHook public hook;
     EscrowVault public escrowVault;
     InsurancePool public insurancePool;
@@ -55,7 +57,8 @@ contract BastionRouterMultiHopTest is Test, Deployers {
 
         deployFreshManagerAndRouters();
 
-        router = new BastionRouter(manager, ISignatureTransfer(address(0)));
+        bastionSwapRouter = new BastionSwapRouter(manager, ISignatureTransfer(address(0)));
+        bastionPositionRouter = new BastionPositionRouter(manager, ISignatureTransfer(address(0)));
 
         // Deploy hook at correct flag address
         uint160 flags = uint160(
@@ -85,6 +88,10 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         assembly { deployed := create(0, add(bytecode, 0x20), mload(bytecode)) }
         vm.etch(hookAddr, deployed.code);
         hook = BastionHook(payable(hookAddr));
+
+        // Wire up routers (hook.setBastionRouter requires _owner which is lost by vm.etch)
+        bastionSwapRouter.setBastionHook(hookAddr);
+        bastionPositionRouter.setBastionHook(hookAddr);
 
         // Deploy tokens — ensure BTT and ALPHA addresses > address(0) for ETH sorting
         btt = new MockERC20("Bastion Test Token", "BTT", 18);
@@ -125,10 +132,12 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         alpha.approve(address(modifyLiquidityRouter), type(uint256).max);
         vm.stopPrank();
 
-        // Approve BastionRouter for trader
+        // Approve both routers for trader
         vm.startPrank(trader);
-        btt.approve(address(router), type(uint256).max);
-        alpha.approve(address(router), type(uint256).max);
+        btt.approve(address(bastionSwapRouter), type(uint256).max);
+        alpha.approve(address(bastionSwapRouter), type(uint256).max);
+        btt.approve(address(bastionPositionRouter), type(uint256).max);
+        alpha.approve(address(bastionPositionRouter), type(uint256).max);
         vm.stopPrank();
 
         // Initialize both pools
@@ -173,14 +182,14 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         // BTT → ETH → ALPHA (trader sells BTT for ALPHA via ETH intermediary)
         uint256 amountIn = 1 ether;
 
-        BastionRouter.SwapStep[] memory steps = new BastionRouter.SwapStep[](2);
+        BastionSwapRouter.SwapStep[] memory steps = new BastionSwapRouter.SwapStep[](2);
         // Step 1: BTT → ETH (sell BTT, currency1→currency0, so zeroForOne=false)
-        steps[0] = BastionRouter.SwapStep({
+        steps[0] = BastionSwapRouter.SwapStep({
             poolKey: poolKeyEthBtt,
             zeroForOne: false  // BTT (currency1) → ETH (currency0)
         });
         // Step 2: ETH → ALPHA (buy ALPHA with ETH, currency0→currency1, so zeroForOne=true)
-        steps[1] = BastionRouter.SwapStep({
+        steps[1] = BastionSwapRouter.SwapStep({
             poolKey: poolKeyEthAlpha,
             zeroForOne: true  // ETH (currency0) → ALPHA (currency1)
         });
@@ -189,7 +198,7 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         uint256 alphaBefore = alpha.balanceOf(trader);
 
         vm.prank(trader);
-        uint256 amountOut = router.swapMultiHop(steps, amountIn, 0, block.timestamp + 3600);
+        uint256 amountOut = bastionSwapRouter.swapMultiHop(steps, amountIn, 0, block.timestamp + 3600);
 
         assertGt(amountOut, 0, "Should receive ALPHA tokens");
         assertEq(btt.balanceOf(trader), bttBefore - amountIn, "BTT should be spent");
@@ -200,14 +209,14 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         // ALPHA → ETH → BTT
         uint256 amountIn = 1 ether;
 
-        BastionRouter.SwapStep[] memory steps = new BastionRouter.SwapStep[](2);
+        BastionSwapRouter.SwapStep[] memory steps = new BastionSwapRouter.SwapStep[](2);
         // Step 1: ALPHA → ETH
-        steps[0] = BastionRouter.SwapStep({
+        steps[0] = BastionSwapRouter.SwapStep({
             poolKey: poolKeyEthAlpha,
             zeroForOne: false  // ALPHA (currency1) → ETH (currency0)
         });
         // Step 2: ETH → BTT
-        steps[1] = BastionRouter.SwapStep({
+        steps[1] = BastionSwapRouter.SwapStep({
             poolKey: poolKeyEthBtt,
             zeroForOne: true  // ETH (currency0) → BTT (currency1)
         });
@@ -216,7 +225,7 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         uint256 bttBefore = btt.balanceOf(trader);
 
         vm.prank(trader);
-        uint256 amountOut = router.swapMultiHop(steps, amountIn, 0, block.timestamp + 3600);
+        uint256 amountOut = bastionSwapRouter.swapMultiHop(steps, amountIn, 0, block.timestamp + 3600);
 
         assertGt(amountOut, 0, "Should receive BTT tokens");
         assertEq(alpha.balanceOf(trader), alphaBefore - amountIn, "ALPHA should be spent");
@@ -227,8 +236,8 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         // ETH → BTT using multi-hop (single step)
         uint256 amountIn = 1 ether;
 
-        BastionRouter.SwapStep[] memory steps = new BastionRouter.SwapStep[](1);
-        steps[0] = BastionRouter.SwapStep({
+        BastionSwapRouter.SwapStep[] memory steps = new BastionSwapRouter.SwapStep[](1);
+        steps[0] = BastionSwapRouter.SwapStep({
             poolKey: poolKeyEthBtt,
             zeroForOne: true  // ETH → BTT
         });
@@ -237,7 +246,7 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         uint256 ethBefore = trader.balance;
 
         vm.prank(trader);
-        uint256 amountOut = router.swapMultiHop{value: amountIn}(steps, amountIn, 0, block.timestamp + 3600);
+        uint256 amountOut = bastionSwapRouter.swapMultiHop{value: amountIn}(steps, amountIn, 0, block.timestamp + 3600);
 
         assertGt(amountOut, 0, "Should receive BTT tokens");
         assertEq(btt.balanceOf(trader), bttBefore + amountOut, "BTT should be received");
@@ -247,43 +256,43 @@ contract BastionRouterMultiHopTest is Test, Deployers {
     function test_multiHopSwap_Slippage_Reverts() public {
         uint256 amountIn = 1 ether;
 
-        BastionRouter.SwapStep[] memory steps = new BastionRouter.SwapStep[](2);
-        steps[0] = BastionRouter.SwapStep({ poolKey: poolKeyEthBtt, zeroForOne: false });
-        steps[1] = BastionRouter.SwapStep({ poolKey: poolKeyEthAlpha, zeroForOne: true });
+        BastionSwapRouter.SwapStep[] memory steps = new BastionSwapRouter.SwapStep[](2);
+        steps[0] = BastionSwapRouter.SwapStep({ poolKey: poolKeyEthBtt, zeroForOne: false });
+        steps[1] = BastionSwapRouter.SwapStep({ poolKey: poolKeyEthAlpha, zeroForOne: true });
 
         vm.prank(trader);
         vm.expectRevert();
-        router.swapMultiHop(steps, amountIn, type(uint256).max, block.timestamp + 3600);
+        bastionSwapRouter.swapMultiHop(steps, amountIn, type(uint256).max, block.timestamp + 3600);
     }
 
     function test_multiHopSwap_Expired_Reverts() public {
         vm.warp(1000);
 
-        BastionRouter.SwapStep[] memory steps = new BastionRouter.SwapStep[](1);
-        steps[0] = BastionRouter.SwapStep({ poolKey: poolKeyEthBtt, zeroForOne: true });
+        BastionSwapRouter.SwapStep[] memory steps = new BastionSwapRouter.SwapStep[](1);
+        steps[0] = BastionSwapRouter.SwapStep({ poolKey: poolKeyEthBtt, zeroForOne: true });
 
         vm.prank(trader);
-        vm.expectRevert(BastionRouter.Expired.selector);
-        router.swapMultiHop(steps, 1 ether, 0, 999);
+        vm.expectRevert(BastionSwapRouter.Expired.selector);
+        bastionSwapRouter.swapMultiHop(steps, 1 ether, 0, 999);
     }
 
     function test_multiHopSwap_TooManyHops_Reverts() public {
-        BastionRouter.SwapStep[] memory steps = new BastionRouter.SwapStep[](5);
+        BastionSwapRouter.SwapStep[] memory steps = new BastionSwapRouter.SwapStep[](5);
         for (uint256 i = 0; i < 5; i++) {
-            steps[i] = BastionRouter.SwapStep({ poolKey: poolKeyEthBtt, zeroForOne: true });
+            steps[i] = BastionSwapRouter.SwapStep({ poolKey: poolKeyEthBtt, zeroForOne: true });
         }
 
         vm.prank(trader);
-        vm.expectRevert(BastionRouter.TooManyHops.selector);
-        router.swapMultiHop{value: 1 ether}(steps, 1 ether, 0, block.timestamp + 3600);
+        vm.expectRevert(BastionSwapRouter.TooManyHops.selector);
+        bastionSwapRouter.swapMultiHop{value: 1 ether}(steps, 1 ether, 0, block.timestamp + 3600);
     }
 
     function test_multiHopSwap_ZeroHops_Reverts() public {
-        BastionRouter.SwapStep[] memory steps = new BastionRouter.SwapStep[](0);
+        BastionSwapRouter.SwapStep[] memory steps = new BastionSwapRouter.SwapStep[](0);
 
         vm.prank(trader);
-        vm.expectRevert(BastionRouter.ZeroHops.selector);
-        router.swapMultiHop(steps, 1 ether, 0, block.timestamp + 3600);
+        vm.expectRevert(BastionSwapRouter.ZeroHops.selector);
+        bastionSwapRouter.swapMultiHop(steps, 1 ether, 0, block.timestamp + 3600);
     }
 
     // ═══════════════════════════════════════════════════════════════

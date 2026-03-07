@@ -9,7 +9,7 @@ import {
 } from "wagmi";
 import { parseAbi, encodeAbiParameters, parseAbiParameters, parseEther, parseUnits } from "viem";
 import { getContracts } from "@/config/contracts";
-import { BastionRouterABI } from "@/config/abis";
+import { BastionPositionRouterABI } from "@/config/abis";
 
 const erc20Abi = parseAbi([
   "function approve(address spender, uint256 amount) returns (bool)",
@@ -288,7 +288,7 @@ export function useCreateBastionPool() {
     const nonce = generatePermit2Nonce();
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800); // 30 min
 
-    const routerAddress = contracts.BastionRouter as `0x${string}`;
+    const routerAddress = contracts.BastionPositionRouter as `0x${string}`;
 
     if (isNativeBase) {
       // Single permit for the issued token only
@@ -441,8 +441,8 @@ export function useCreateBastionPool() {
     }
 
     writeCreatePool({
-      address: contracts.BastionRouter as `0x${string}`,
-      abi: BastionRouterABI,
+      address: contracts.BastionPositionRouter as `0x${string}`,
+      abi: BastionPositionRouterABI,
       functionName: "createPoolPermit2",
       args: [
         params.tokenAddress,
