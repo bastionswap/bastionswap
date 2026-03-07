@@ -1,13 +1,19 @@
 import { BigDecimal, BigInt } from "@graphprotocol/graph-ts";
 import {
   Initialize,
-  Swap,
+  Swap as SwapEvent,
   ModifyLiquidity,
 } from "../../generated/PoolManager/PoolManager";
-import { Pool } from "../../generated/schema";
+import { Pool, Swap } from "../../generated/schema";
+import {
+  ZERO_BD,
+  ZERO_BI,
+  sqrtPriceX96ToPrice,
+  absBigInt,
+  getOrCreatePoolHourData,
+  getOrCreatePoolDayData,
+} from "./helpers";
 
-let ZERO_BD = BigDecimal.fromString("0");
-let ZERO_BI = BigInt.fromI32(0);
 let Q96 = BigInt.fromI32(2).pow(96);
 
 function calculateReserves(
@@ -58,7 +64,7 @@ export function handleInitialize(event: Initialize): void {
   pool.save();
 }
 
-export function handleSwap(event: Swap): void {
+export function handleSwap(event: SwapEvent): void {
   let poolId = event.params.id.toHexString();
   let pool = Pool.load(poolId);
   if (pool == null) return;
@@ -70,6 +76,43 @@ export function handleSwap(event: Swap): void {
   pool.reserve0 = reserves[0];
   pool.reserve1 = reserves[1];
   pool.save();
+
+  // Create Swap entity
+  let swapId = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
+  let swap = new Swap(swapId);
+  swap.pool = poolId;
+  swap.sender = event.params.sender;
+  swap.amount0 = event.params.amount0;
+  swap.amount1 = event.params.amount1;
+  swap.sqrtPriceX96 = event.params.sqrtPriceX96;
+  swap.tick = event.params.tick;
+  swap.timestamp = event.block.timestamp;
+  swap.blockNumber = event.block.number;
+  swap.transaction = event.transaction.hash;
+  swap.save();
+
+  // Update OHLCV data
+  let price = sqrtPriceX96ToPrice(event.params.sqrtPriceX96);
+  let absAmount0 = absBigInt(event.params.amount0);
+  let absAmount1 = absBigInt(event.params.amount1);
+
+  let hourData = getOrCreatePoolHourData(poolId, event.block.timestamp, price);
+  hourData.close = price;
+  if (price.gt(hourData.high)) hourData.high = price;
+  if (price.lt(hourData.low)) hourData.low = price;
+  hourData.volumeToken0 = hourData.volumeToken0.plus(absAmount0);
+  hourData.volumeToken1 = hourData.volumeToken1.plus(absAmount1);
+  hourData.txCount = hourData.txCount + 1;
+  hourData.save();
+
+  let dayData = getOrCreatePoolDayData(poolId, event.block.timestamp, price);
+  dayData.close = price;
+  if (price.gt(dayData.high)) dayData.high = price;
+  if (price.lt(dayData.low)) dayData.low = price;
+  dayData.volumeToken0 = dayData.volumeToken0.plus(absAmount0);
+  dayData.volumeToken1 = dayData.volumeToken1.plus(absAmount1);
+  dayData.txCount = dayData.txCount + 1;
+  dayData.save();
 }
 
 export function handleModifyLiquidity(event: ModifyLiquidity): void {

@@ -17,6 +17,10 @@ type Pool @entity {
   triggerEvents: [TriggerEvent!]! @derivedFrom(field: "pool")
   claims: [Claim!]! @derivedFrom(field: "pool")
   positions: [Position!]! @derivedFrom(field: "pool")
+  swaps: [Swap!]! @derivedFrom(field: "pool")
+  liquidityEvents: [LiquidityEvent!]! @derivedFrom(field: "pool")
+  poolHourData: [PoolHourData!]! @derivedFrom(field: "pool")
+  poolDayData: [PoolDayData!]! @derivedFrom(field: "pool")
   createdAt: BigInt!
   createdTx: Bytes!
 }
@@ -110,4 +114,58 @@ type ProtocolStats @entity {
   totalInsuranceBalance: BigDecimal!
   totalTriggersActivated: Int!
   totalCompensationPaid: BigDecimal!
+}
+
+type Swap @entity {
+  id: ID! # txHash-logIndex
+  pool: Pool!
+  sender: Bytes!
+  amount0: BigInt! # raw signed int128
+  amount1: BigInt! # raw signed int128
+  sqrtPriceX96: BigInt!
+  tick: Int!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transaction: Bytes!
+}
+
+type LiquidityEvent @entity {
+  id: ID! # txHash-logIndex
+  pool: Pool!
+  sender: Bytes!
+  type: String! # "ADD" | "REMOVE"
+  amount0: BigInt! # raw
+  amount1: BigInt! # raw
+  liquidity: BigInt!
+  tickLower: Int!
+  tickUpper: Int!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transaction: Bytes!
+}
+
+type PoolHourData @entity {
+  id: ID! # poolId-hourStartUnix
+  pool: Pool!
+  hourStartUnix: Int!
+  open: BigDecimal!
+  close: BigDecimal!
+  high: BigDecimal!
+  low: BigDecimal!
+  volumeToken0: BigInt! # raw cumulative
+  volumeToken1: BigInt! # raw cumulative
+  txCount: Int!
+}
+
+type PoolDayData @entity {
+  id: ID! # poolId-dayStartUnix
+  pool: Pool!
+  dayStartUnix: Int!
+  open: BigDecimal!
+  close: BigDecimal!
+  high: BigDecimal!
+  low: BigDecimal!
+  volumeToken0: BigInt!
+  volumeToken1: BigInt!
+  txCount: Int!
 }

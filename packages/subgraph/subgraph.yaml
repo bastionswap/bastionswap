@@ -51,6 +51,9 @@ dataSources:
       language: wasm/assemblyscript
       entities:
         - Pool
+        - Swap
+        - PoolHourData
+        - PoolDayData
       abis:
         - name: PoolManager
           file: ./abis/PoolManager.json
@@ -190,6 +193,7 @@ dataSources:
       language: wasm/assemblyscript
       entities:
         - Position
+        - LiquidityEvent
       abis:
         - name: BastionRouter
           file: ../contracts/out/BastionRouter.sol/BastionRouter.json

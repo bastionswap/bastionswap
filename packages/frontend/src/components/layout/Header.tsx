@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/swap", label: "Swap", icon: "M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" },
   { href: "/pools", label: "Pools", icon: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" },
   { href: "/create", label: "Create", icon: "M12 4.5v15m7.5-7.5h-15" },
+  { href: "/history", label: "History", icon: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" },
 ];
 
 export function Header() {

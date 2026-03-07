@@ -18,6 +18,8 @@ import { InsuranceStatus } from "@/components/pools/InsuranceStatus";
 import { IssuerInfo } from "@/components/pools/IssuerInfo";
 import { TriggerHistory } from "@/components/pools/TriggerHistory";
 import { LiquidityPanel } from "@/components/pools/LiquidityPanel";
+import { PriceChart } from "@/components/pools/PriceChart";
+import { RecentTrades } from "@/components/pools/RecentTrades";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { shortenAddress, explorerUrl } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
@@ -430,6 +432,19 @@ export default function PoolDetailPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Price Chart & Recent Trades — shown for all pools */}
+      <div className="mb-6">
+        <PriceChart poolId={pool.id} />
+      </div>
+      <div className="mb-6">
+        <RecentTrades
+          poolId={pool.id}
+          token0={pool.token0}
+          token1={pool.token1}
+          issuedToken={pool.issuedToken ?? undefined}
+        />
       </div>
 
       {pool.isBastion ? (
