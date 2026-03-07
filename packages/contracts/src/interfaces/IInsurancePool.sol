@@ -24,10 +24,16 @@ interface IInsurancePool {
 
     // ─── Events ───────────────────────────────────────────────────────
 
-    /// @notice Emitted when a swap fee is deposited into the insurance pool.
+    /// @notice Emitted when an ETH swap fee is deposited into the insurance pool.
     /// @param poolId Uniswap V4 pool identifier
     /// @param amount Amount deposited
     event FeeDeposited(PoolId indexed poolId, uint256 amount);
+
+    /// @notice Emitted when an ERC-20 base token swap fee is deposited into the insurance pool.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param token Base token address
+    /// @param amount Amount deposited
+    event TokenFeeDeposited(PoolId indexed poolId, address indexed token, uint256 amount);
 
     /// @notice Emitted when a payout is executed after a trigger event.
     /// @param poolId Uniswap V4 pool identifier
@@ -61,10 +67,18 @@ interface IInsurancePool {
 
     // ─── Functions ────────────────────────────────────────────────────
 
-    /// @notice Deposits a portion of swap fees into the insurance pool for a given token pair.
-    /// @dev Called by BastionHook during afterSwap on buy-side transactions.
+    /// @notice Deposits ETH swap fees into the insurance pool.
+    /// @dev Called by BastionHook during beforeSwap on buy-side transactions for ETH-base pools.
     /// @param poolId Uniswap V4 pool identifier
     function depositFee(PoolId poolId) external payable;
+
+    /// @notice Deposits ERC-20 base token swap fees into the insurance pool.
+    /// @dev Called by BastionHook during beforeSwap on buy-side transactions for ERC-20-base pools.
+    ///      Tokens must be transferred to InsurancePool before calling.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param token Base token address
+    /// @param amount Amount of tokens deposited
+    function depositFeeToken(PoolId poolId, address token, uint256 amount) external;
 
     /// @notice Executes a payout from the insurance pool after a trigger event is confirmed.
     /// @dev Can only be called by TriggerOracle. Marks pool as triggered and records snapshot.
@@ -93,12 +107,18 @@ interface IInsurancePool {
         external
         returns (uint256 amount);
 
-    /// @notice Receives ETH and token assets from force-removed issuer LP.
+    /// @notice Receives ETH, issued tokens, and base tokens from force-removed issuer LP.
     /// @dev Called by BastionHook after force removal. Tokens must be transferred before calling.
     /// @param poolId Uniswap V4 pool identifier
-    /// @param token Address of the issued token
-    /// @param tokenAmount Amount of tokens received
-    function receiveEscrowFunds(PoolId poolId, address token, uint256 tokenAmount) external payable;
+    /// @param issuedToken Address of the issued token
+    /// @param issuedTokenAmount Amount of issued tokens received
+    /// @param baseToken Address of the ERC-20 base token (address(0) if ETH-base pool)
+    /// @param baseTokenAmount Amount of base tokens received
+    function receiveEscrowFunds(
+        PoolId poolId,
+        address issuedToken, uint256 issuedTokenAmount,
+        address baseToken, uint256 baseTokenAmount
+    ) external payable;
 
     /// @notice Calculates the compensation amount for a given holder balance.
     /// @param poolId Uniswap V4 pool identifier

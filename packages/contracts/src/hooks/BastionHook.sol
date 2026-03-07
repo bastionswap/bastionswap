@@ -8,7 +8,7 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {BeforeSwapDelta, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
@@ -164,7 +164,7 @@ contract BastionHook is BaseTestHooks {
             afterSwap: true,
             beforeDonate: false,
             afterDonate: false,
-            beforeSwapReturnDelta: false,
+            beforeSwapReturnDelta: true,
             afterSwapReturnDelta: false,
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
@@ -310,7 +310,7 @@ contract BastionHook is BaseTestHooks {
     function beforeSwap(
         address,
         PoolKey calldata key,
-        SwapParams calldata,
+        SwapParams calldata params,
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, BeforeSwapDelta, uint24) {
         PoolId poolId = key.toId();
@@ -323,6 +323,15 @@ contract BastionHook is BaseTestHooks {
 
         if (issuedToken != address(0) && poolIssuer != address(0)) {
             _tstore(_preSwapBalanceSlot(poolId), ERC20(issuedToken).balanceOf(poolIssuer));
+        }
+
+        // Collect insurance fee on exactInput buy swaps
+        if (issuedToken != address(0) && params.amountSpecified < 0) {
+            bool isBuy = _isBuySwap(key, params, issuedToken);
+            if (isBuy) {
+                BeforeSwapDelta feeDelta = _collectInsuranceFee(poolId, key, params, issuedToken);
+                return (IHooks.beforeSwap.selector, feeDelta, 0);
+            }
         }
 
         return (IHooks.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
@@ -341,12 +350,6 @@ contract BastionHook is BaseTestHooks {
         address issuedToken = address(uint160(_tload(_issuedTokenSlot(poolId))));
 
         if (issuedToken != address(0)) {
-            bool isBuy = _isBuySwap(key, params, issuedToken);
-
-            if (isBuy) {
-                _collectInsuranceFee(poolId, delta, key, params, issuedToken);
-            }
-
             // RISK-3: Check if issuer balance decreased (detects router bypass)
             address poolIssuer = address(uint160(_tload(_issuerSlot(poolId))));
             if (poolIssuer != address(0)) {
@@ -416,8 +419,25 @@ contract BastionHook is BaseTestHooks {
             }
         }
 
-        if (ethBalance > 0 || tokenAmount > 0) {
-            insurancePool.receiveEscrowFunds{value: ethBalance}(poolId, token, tokenAmount);
+        // Determine and forward ERC-20 base token (non-ETH base, e.g. USDC)
+        address baseToken;
+        uint256 baseTokenAmount = 0;
+        if (Currency.unwrap(key.currency0) == token) {
+            baseToken = Currency.unwrap(key.currency1);
+        } else {
+            baseToken = Currency.unwrap(key.currency0);
+        }
+        if (baseToken != address(0)) {
+            baseTokenAmount = ERC20(baseToken).balanceOf(address(this));
+            if (baseTokenAmount > 0) {
+                IERC20Minimal(baseToken).transfer(address(insurancePool), baseTokenAmount);
+            }
+        }
+
+        if (ethBalance > 0 || tokenAmount > 0 || baseTokenAmount > 0) {
+            insurancePool.receiveEscrowFunds{value: ethBalance}(
+                poolId, token, tokenAmount, baseToken, baseTokenAmount
+            );
         }
 
         emit ForceRemovalExecuted(poolId, ethBalance, token, tokenAmount);
@@ -623,35 +643,48 @@ contract BastionHook is BaseTestHooks {
         return issuedIsToken0 ? !params.zeroForOne : params.zeroForOne;
     }
 
-    /// @dev Calculate and deposit insurance fee from a buy swap.
+    /// @dev Calculate and collect insurance fee from the swap input via PoolManager delta.
+    ///      Takes fee from the base token (specified currency) using poolManager.take(),
+    ///      then deposits to InsurancePool. Works for both ETH and ERC-20 base tokens.
+    ///      Returns a BeforeSwapDelta so the caller pays for the fee.
     function _collectInsuranceFee(
         PoolId poolId,
-        BalanceDelta delta,
         PoolKey calldata key,
-        SwapParams calldata,
+        SwapParams calldata params,
         address issuedToken
-    ) internal {
+    ) internal returns (BeforeSwapDelta) {
         uint256 cachedFee = _cachedFeeRate;
-        if (cachedFee == 0) return;
+        if (cachedFee == 0) return toBeforeSwapDelta(0, 0);
 
+        // Fee is a percentage of the input amount (exactInput: amountSpecified is negative)
+        uint256 absAmount = uint256(uint128(int128(-params.amountSpecified)));
+        uint256 feeAmount = (absAmount * cachedFee) / 10_000;
+        if (feeAmount == 0) return toBeforeSwapDelta(0, 0);
+
+        // Determine base currency (the input/specified currency for buy swaps)
         bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
-        int128 baseAmount;
-        if (issuedIsToken0) {
-            baseAmount = delta.amount1();
-        } else {
-            baseAmount = delta.amount0();
-        }
+        Currency baseCurrency = issuedIsToken0 ? key.currency1 : key.currency0;
 
-        if (baseAmount >= 0) return;
-        uint256 absBaseAmount = uint256(uint128(int128(-baseAmount)));
+        // Take fee from PoolManager (transfers real tokens to this contract)
+        poolManager.take(baseCurrency, address(this), feeAmount);
 
-        uint256 feeAmount = (absBaseAmount * cachedFee) / 10_000;
-        if (feeAmount == 0) return;
-
-        if (address(this).balance >= feeAmount) {
+        // Deposit to InsurancePool
+        address baseToken = Currency.unwrap(baseCurrency);
+        if (baseToken == address(0)) {
+            // ETH base token
             insurancePool.depositFee{value: feeAmount}(poolId);
-            emit InsuranceFeeDeposited(poolId, feeAmount);
+        } else {
+            // ERC-20 base token (USDC, WETH, etc.)
+            IERC20Minimal(baseToken).transfer(address(insurancePool), feeAmount);
+            insurancePool.depositFeeToken(poolId, baseToken, feeAmount);
         }
+
+        emit InsuranceFeeDeposited(poolId, feeAmount);
+
+        // Return positive deltaSpecified: hook claims this from the specified currency.
+        // The PoolManager will account this delta to the hook and adjust the caller's delta,
+        // so the caller pays the fee on top of the swap amount.
+        return toBeforeSwapDelta(int128(uint128(feeAmount)), 0);
     }
 
     // ─── Transient Storage Helpers (EIP-1153) ──────────────────────────

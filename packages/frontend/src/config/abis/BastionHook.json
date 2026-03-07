@@ -853,7 +853,7 @@
         ]
       },
       {
-        "name": "",
+        "name": "params",
         "type": "tuple",
         "internalType": "struct SwapParams",
         "components": [

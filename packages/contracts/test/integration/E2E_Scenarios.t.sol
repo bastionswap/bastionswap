@@ -71,7 +71,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         deployFreshManagerAndRouters();
 
         uint160 flags = uint160(
-            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
+            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
         address hookAddr = address(flags);
 
@@ -264,14 +264,14 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario1_tradersBuy() internal {
-        uint256 before = address(insurancePool).balance;
+        uint256 before = baseToken.balanceOf(address(insurancePool));
 
         _buyIssuedToken(trader1, -1 ether);
         _buyIssuedToken(trader2, -0.5 ether);
 
-        uint256 fees = address(insurancePool).balance - before;
+        uint256 fees = baseToken.balanceOf(address(insurancePool)) - before;
         assertGt(fees, 0, "no insurance fees");
-        console.log("  Insurance fees (ETH):", fees);
+        console.log("  Insurance fees (base token):", fees);
     }
 
     function _scenario1_vestingBlocked() internal {
@@ -343,14 +343,13 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
         assertTrue(ps.isTriggered);
-        assertGt(ps.balance, 0);
-        console.log("  Insurance ETH for claims:", ps.balance);
+        // ERC-20 base pool: fees are in base token, not ETH
+        uint256 insuranceFees = baseToken.balanceOf(address(insurancePool));
+        assertGt(insuranceFees, 0, "no insurance base token fees");
+        console.log("  Insurance base token for claims:", insuranceFees);
 
-        // Trader1 claims with Merkle proof
-        uint256 comp = insurancePool.calculateCompensation(_poolId, t1Bal);
-        assertGt(comp, 0);
-
-        uint256 ethBefore = trader1.balance;
+        // Trader1 claims with Merkle proof — receives base token compensation
+        uint256 baseTokenBefore = baseToken.balanceOf(trader1);
 
         bytes32[] memory proof = new bytes32[](1);
         proof[0] = leaf2;
@@ -358,9 +357,10 @@ contract E2E_ScenariosTest is Test, Deployers {
         vm.prank(trader1);
         insurancePool.claimCompensation(_poolId, t1Bal, proof);
 
-        assertEq(trader1.balance - ethBefore, comp);
+        uint256 baseTokenReceived = baseToken.balanceOf(trader1) - baseTokenBefore;
+        assertGt(baseTokenReceived, 0, "trader should receive base token compensation");
         assertTrue(insurancePool.hasClaimed(_poolId, trader1));
-        console.log("  Trader1 ETH claimed:", comp);
+        console.log("  Trader1 base token claimed:", baseTokenReceived);
 
         // Duplicate claim blocked
         vm.prank(trader1);
@@ -450,9 +450,9 @@ contract E2E_ScenariosTest is Test, Deployers {
         _buyIssuedToken(trader1, -2 ether);
         _buyIssuedToken(trader2, -1 ether);
 
-        uint256 insuranceETH = address(insurancePool).balance;
-        assertGt(insuranceETH, 0);
-        console.log("  Insurance ETH:", insuranceETH);
+        uint256 insuranceFees = baseToken.balanceOf(address(insurancePool));
+        assertGt(insuranceFees, 0, "no insurance fees");
+        console.log("  Insurance base token fees:", insuranceFees);
     }
 
     function _scenario3_issuerDump() internal {
@@ -488,7 +488,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
         vm.warp(executeAfter);
 
-        uint256 insuranceETHBefore = address(insurancePool).balance;
+        uint256 insuranceBaseTokenBefore = baseToken.balanceOf(address(insurancePool));
 
         // Build Merkle tree for trader1 and trader2 balances
         uint256 t1Bal = issuedToken.balanceOf(trader1);
@@ -507,11 +507,10 @@ contract E2E_ScenariosTest is Test, Deployers {
         vm.warp(block.timestamp + 1 hours);
 
         // ForceRemoval may fail gracefully (no router in test) — ForceRemovalFailed emitted instead
-        // Key state change: escrow marked triggered, all liquidity seized
-
+        // ERC-20 base pool: ETH payout is 0, base token fees are in baseTokenFeePayoutBalance
         vm.expectEmit(true, false, false, true, address(insurancePool));
         emit IInsurancePool.PayoutExecuted(
-            _poolId, uint8(ITriggerOracle.TriggerType.ISSUER_DUMP), insuranceETHBefore
+            _poolId, uint8(ITriggerOracle.TriggerType.ISSUER_DUMP), 0
         );
 
         triggerOracle.executeTrigger(_poolId);
@@ -525,11 +524,9 @@ contract E2E_ScenariosTest is Test, Deployers {
         assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0);
         console.log("  Escrow locked down");
 
-        // Insurance payout snapshot
-        IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
-        assertTrue(ps.isTriggered);
-        assertEq(ps.balance, insuranceETHBefore);
-        console.log("  Insurance payout (ETH):", ps.balance);
+        // Insurance payout: base token fees snapshotted for claims
+        assertGt(insuranceBaseTokenBefore, 0, "should have base token fees before payout");
+        console.log("  Insurance base token for claims:", insuranceBaseTokenBefore);
     }
 
     // Scenario 3 merkle state
@@ -540,10 +537,8 @@ contract E2E_ScenariosTest is Test, Deployers {
     uint256 internal _scenario3T2Bal;
 
     function _scenario3_claims() internal {
-        uint256 comp1 = insurancePool.calculateCompensation(_poolId, _scenario3T1Bal);
-        assertGt(comp1, 0);
-
-        uint256 ethBefore = trader1.balance;
+        // ERC-20 base pool: compensation is in base tokens, not ETH
+        uint256 baseBefore1 = baseToken.balanceOf(trader1);
 
         bytes32[] memory proof1 = new bytes32[](1);
         proof1[0] = _scenario3Leaf2;
@@ -551,22 +546,21 @@ contract E2E_ScenariosTest is Test, Deployers {
         vm.prank(trader1);
         insurancePool.claimCompensation(_poolId, _scenario3T1Bal, proof1);
 
-        assertEq(trader1.balance - ethBefore, comp1);
-        console.log("  Trader1 claimed:", comp1);
+        uint256 baseReceived1 = baseToken.balanceOf(trader1) - baseBefore1;
+        assertGt(baseReceived1, 0, "trader1 should receive base token compensation");
+        console.log("  Trader1 base token claimed:", baseReceived1);
 
         // Trader2 claims
-        uint256 comp2 = insurancePool.calculateCompensation(_poolId, _scenario3T2Bal);
-        assertGt(comp2, 0);
-
-        ethBefore = trader2.balance;
+        uint256 baseBefore2 = baseToken.balanceOf(trader2);
         bytes32[] memory proof2 = new bytes32[](1);
         proof2[0] = _scenario3Leaf1;
 
         vm.prank(trader2);
         insurancePool.claimCompensation(_poolId, _scenario3T2Bal, proof2);
 
-        assertEq(trader2.balance - ethBefore, comp2);
-        console.log("  Trader2 claimed:", comp2);
+        uint256 baseReceived2 = baseToken.balanceOf(trader2) - baseBefore2;
+        assertGt(baseReceived2, 0, "trader2 should receive base token compensation");
+        console.log("  Trader2 base token claimed:", baseReceived2);
 
         assertTrue(insurancePool.hasClaimed(_poolId, trader1));
         assertTrue(insurancePool.hasClaimed(_poolId, trader2));

@@ -45,6 +45,11 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 escrowTokenBalance; // tokens from force-removed issuer LP
         address escrowToken; // token address for escrow funds
         uint256 tokenPayoutBalance; // snapshot of escrow token balance at payout time
+        uint256 baseTokenFeeBalance; // accumulated ERC-20 base token fees (e.g. USDC)
+        address baseTokenFeeToken; // base token address for ERC-20 fee pools
+        uint256 baseTokenFeePayoutBalance; // snapshot at payout time
+        uint256 escrowBaseTokenBalance; // ERC-20 base tokens from force-removed LP
+        address escrowBaseToken; // base token address from escrow
         mapping(address => bool) claimed;
     }
 
@@ -127,13 +132,33 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     }
 
     /// @inheritdoc IInsurancePool
-    function receiveEscrowFunds(PoolId poolId, address token, uint256 tokenAmount) external payable onlyHook {
+    function depositFeeToken(PoolId poolId, address token, uint256 amount) external onlyHook {
+        if (amount == 0) revert ZeroAmount();
+        if (token == address(0)) revert ZeroAddress();
+
+        PoolData storage pool = _getPool(poolId);
+        pool.baseTokenFeeBalance += amount;
+        pool.baseTokenFeeToken = token;
+
+        emit TokenFeeDeposited(poolId, token, amount);
+    }
+
+    /// @inheritdoc IInsurancePool
+    function receiveEscrowFunds(
+        PoolId poolId,
+        address issuedToken, uint256 issuedTokenAmount,
+        address baseToken, uint256 baseTokenAmount
+    ) external payable onlyHook {
         PoolData storage pool = _getPool(poolId);
         pool.escrowEthBalance += msg.value;
-        pool.escrowTokenBalance += tokenAmount;
-        pool.escrowToken = token;
+        pool.escrowTokenBalance += issuedTokenAmount;
+        pool.escrowToken = issuedToken;
+        if (baseTokenAmount > 0 && baseToken != address(0)) {
+            pool.escrowBaseTokenBalance += baseTokenAmount;
+            pool.escrowBaseToken = baseToken;
+        }
 
-        emit EscrowFundsReceived(poolId, msg.value, token, tokenAmount);
+        emit EscrowFundsReceived(poolId, msg.value, issuedToken, issuedTokenAmount);
     }
 
     /// @inheritdoc IInsurancePool
@@ -156,7 +181,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         pool.triggerType = triggerType;
         pool.totalEligibleSupply = totalEligibleSupply;
         pool.payoutBalance = totalPayout;
-        pool.tokenPayoutBalance = pool.escrowTokenBalance; // snapshot token balance
+        pool.tokenPayoutBalance = pool.escrowTokenBalance; // snapshot issued token balance
+        pool.baseTokenFeePayoutBalance = pool.baseTokenFeeBalance + pool.escrowBaseTokenBalance; // snapshot base token fees + escrow
         pool.merkleRoot = merkleRoot;
         pool.useMerkleProof = (merkleRoot != bytes32(0));
         pool.issuedToken = issuedToken;
@@ -192,7 +218,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
         amount = _calculateCompensation(pool, holderBalance);
         uint256 tokenShare = _calculateTokenCompensation(pool, holderBalance);
-        if (amount == 0 && tokenShare == 0) revert ZeroAmount();
+        uint256 baseTokenShare = _calculateBaseTokenCompensation(pool, holderBalance);
+        if (amount == 0 && tokenShare == 0 && baseTokenShare == 0) revert ZeroAmount();
 
         // Safety check: totalClaimed must not exceed pool balance
         if (pool.totalClaimed + amount > pool.payoutBalance) revert ExceedsPoolBalance();
@@ -208,9 +235,17 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
             if (!success) revert TransferFailed();
         }
 
-        // Transfer tokens from escrow funds
+        // Transfer issued tokens from escrow funds
         if (tokenShare > 0 && pool.escrowToken != address(0)) {
             IERC20Minimal(pool.escrowToken).transfer(msg.sender, tokenShare);
+        }
+
+        // Transfer ERC-20 base token fees + escrow base tokens
+        if (baseTokenShare > 0) {
+            address baseToken = pool.baseTokenFeeToken != address(0) ? pool.baseTokenFeeToken : pool.escrowBaseToken;
+            if (baseToken != address(0)) {
+                IERC20Minimal(baseToken).transfer(msg.sender, baseTokenShare);
+            }
         }
 
         emit CompensationClaimed(poolId, msg.sender, amount);
@@ -309,7 +344,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
         PoolData storage pool = _getPool(poolId);
         if (pool.isTriggered) revert AlreadyTriggered();
-        if (pool.balance == 0) revert ZeroAmount();
+        if (pool.balance == 0 && pool.baseTokenFeeBalance == 0) revert ZeroAmount();
 
         // Escrow must be fully vested
         if (!ESCROW_VAULT.isFullyVested(poolId)) revert EscrowNotFullyVested();
@@ -318,13 +353,22 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 vestingEndTime = ESCROW_VAULT.getVestingEndTime(poolId);
         if (block.timestamp < vestingEndTime + TREASURY_GRACE_PERIOD) revert GracePeriodNotPassed();
 
-        uint256 amount = pool.balance;
+        uint256 ethAmount = pool.balance;
         pool.balance = 0;
 
-        (bool success,) = treasury.call{value: amount}("");
-        if (!success) revert TransferFailed();
+        if (ethAmount > 0) {
+            (bool success,) = treasury.call{value: ethAmount}("");
+            if (!success) revert TransferFailed();
+        }
 
-        emit IInsurancePool.TreasuryFundsClaimed(poolId, treasury, amount);
+        // Transfer ERC-20 base token fees to treasury
+        uint256 baseTokenAmount = pool.baseTokenFeeBalance;
+        if (baseTokenAmount > 0 && pool.baseTokenFeeToken != address(0)) {
+            pool.baseTokenFeeBalance = 0;
+            IERC20Minimal(pool.baseTokenFeeToken).transfer(treasury, baseTokenAmount);
+        }
+
+        emit IInsurancePool.TreasuryFundsClaimed(poolId, treasury, ethAmount + baseTokenAmount);
     }
 
     // ─── Internal Functions ───────────────────────────────────────────
@@ -350,5 +394,14 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     {
         if (pool.tokenPayoutBalance == 0) return 0;
         return (pool.tokenPayoutBalance * holderBalance) / pool.totalEligibleSupply;
+    }
+
+    function _calculateBaseTokenCompensation(PoolData storage pool, uint256 holderBalance)
+        internal
+        view
+        returns (uint256)
+    {
+        if (pool.baseTokenFeePayoutBalance == 0) return 0;
+        return (pool.baseTokenFeePayoutBalance * holderBalance) / pool.totalEligibleSupply;
     }
 }

@@ -23,7 +23,7 @@ import {HookMiner} from "./HookMiner.sol";
 contract Deploy is Script {
     // Hook permission flags: beforeAddLiquidity | beforeRemoveLiquidity | beforeSwap | afterSwap
     uint160 constant HOOK_FLAGS =
-        uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
+        uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
 
     struct Addresses {
         address factory;

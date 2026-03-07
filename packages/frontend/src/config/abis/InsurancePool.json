@@ -176,6 +176,29 @@
   },
   {
     "type": "function",
+    "name": "depositFeeToken",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "emergencyRequests",
     "inputs": [
       {
@@ -348,12 +371,22 @@
         "internalType": "PoolId"
       },
       {
-        "name": "token",
+        "name": "issuedToken",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "tokenAmount",
+        "name": "issuedTokenAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "baseToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "baseTokenAmount",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -610,6 +643,31 @@
       },
       {
         "name": "totalPayout",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TokenFeeDeposited",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "PoolId"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
