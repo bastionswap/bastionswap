@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { baseSepolia } from "wagmi/chains";
 import { ConnectKitButton } from "connectkit";
 
@@ -17,6 +17,7 @@ export function Header() {
   const pathname = usePathname();
   const chainId = useChainId();
   const { isConnected } = useAccount();
+  const { switchChain, isPending: isSwitching } = useSwitchChain();
   const [mobileOpen, setMobileOpen] = useState(false);
   const wrongNetwork = isConnected && chainId !== baseSepolia.id && chainId !== 31337;
 
@@ -106,8 +107,15 @@ export function Header() {
       </header>
 
       {wrongNetwork && (
-        <div className="bg-red-50 border-b border-red-200 px-4 py-2.5 text-center text-sm text-red-600 font-medium">
-          Please switch to Base Sepolia to use BastionSwap
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2.5 text-center text-sm text-red-600 font-medium flex items-center justify-center gap-3">
+          <span>Wrong network detected.</span>
+          <button
+            onClick={() => switchChain({ chainId: baseSepolia.id })}
+            disabled={isSwitching}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+          >
+            {isSwitching ? "Switching..." : "Switch to Base Sepolia"}
+          </button>
         </div>
       )}
     </>
