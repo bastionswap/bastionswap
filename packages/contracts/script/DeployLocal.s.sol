@@ -56,6 +56,7 @@ contract DeployLocal is Script {
 
     // Anvil default accounts
     uint256 constant DEPLOYER_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+    uint256 constant TRADER_KEY = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
     address constant TRADER = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
 
     struct Addresses {
@@ -222,6 +223,22 @@ contract DeployLocal is Script {
             ""
         );
         console2.log("Test swap executed: 0.01 ETH -> BTT");
+
+        // General LP: Trader adds liquidity via BastionRouter V2
+        vm.stopBroadcast();
+        vm.startBroadcast(TRADER_KEY);
+
+        TestToken(d.btt).approve(d.router, type(uint256).max);
+        BastionRouter(payable(d.router)).addLiquidityV2{value: 1 ether}(
+            poolKey,
+            0, 0, // full-range
+            1 ether, 10_000e18,
+            block.timestamp + 3600
+        );
+        console2.log("Trader general LP added via addLiquidityV2");
+
+        vm.stopBroadcast();
+        vm.startBroadcast(DEPLOYER_KEY);
     }
 
     function _buildHookData(address deployer, address token) internal pure returns (bytes memory) {

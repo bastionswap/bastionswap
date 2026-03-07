@@ -16,6 +16,7 @@ import { EscrowStatus } from "@/components/pools/EscrowStatus";
 import { InsuranceStatus } from "@/components/pools/InsuranceStatus";
 import { IssuerInfo } from "@/components/pools/IssuerInfo";
 import { TriggerHistory } from "@/components/pools/TriggerHistory";
+import { LiquidityPanel } from "@/components/pools/LiquidityPanel";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { shortenAddress, explorerUrl } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
@@ -513,24 +514,24 @@ export default function PoolDetailPage() {
           {pool.triggerEvents && pool.triggerEvents.length > 0 && (
             <TriggerHistory events={pool.triggerEvents} />
           )}
+
+          {/* General LP management */}
+          <div className="mt-6">
+            <LiquidityPanel pool={pool} />
+          </div>
         </>
       ) : (
-        <Card className="py-16 text-center">
-          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-gray-50">
-            <svg className="h-8 w-8 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-            </svg>
-          </div>
-          <p className="text-lg font-semibold text-gray-600 mb-2">
-            This pool is not protected by BastionSwap
-          </p>
-          <p className="text-sm text-gray-400 mb-8 max-w-md mx-auto">
-            Standard Uniswap V4 pool — no escrow, insurance, or trigger protection.
-          </p>
-          <Link href="/create" className="btn-primary text-sm px-6 py-2.5">
-            Create a Bastion Pool
-          </Link>
-        </Card>
+        <div className="space-y-6">
+          <Card className="py-8 text-center">
+            <p className="text-sm font-medium text-gray-500 mb-1">
+              This pool is not protected by BastionSwap
+            </p>
+            <p className="text-xs text-gray-400">
+              Standard Uniswap V4 pool — no escrow, insurance, or trigger protection.
+            </p>
+          </Card>
+          <LiquidityPanel pool={pool} />
+        </div>
       )}
     </div>
   );

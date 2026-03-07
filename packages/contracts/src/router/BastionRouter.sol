@@ -38,6 +38,10 @@ contract BastionRouter is IUnlockCallback {
     uint8 private constant ACTION_CREATE_POOL_PERMIT2 = 6;
     uint8 private constant ACTION_MULTI_HOP_SWAP = 7;
     uint8 private constant ACTION_MULTI_HOP_SWAP_PERMIT2 = 8;
+    uint8 private constant ACTION_ADD_LP_V2 = 9;
+    uint8 private constant ACTION_ADD_LP_V2_PERMIT2 = 10;
+    uint8 private constant ACTION_REMOVE_LP_V2 = 11;
+    uint8 private constant ACTION_COLLECT_FEES = 12;
 
     uint8 private constant MAX_HOPS = 4;
 
@@ -78,6 +82,13 @@ contract BastionRouter is IUnlockCallback {
     error ExcessiveInput(uint256 amountIn, uint256 maxAmountIn);
     error TooManyHops();
     error ZeroHops();
+    error SlippageExceeded();
+
+    event LiquidityChanged(
+        PoolId indexed poolId, address indexed user,
+        int24 tickLower, int24 tickUpper,
+        int256 liquidityDelta, int128 amount0, int128 amount1
+    );
 
     constructor(IPoolManager _poolManager, ISignatureTransfer _permit2) {
         poolManager = _poolManager;
@@ -292,6 +303,101 @@ contract BastionRouter is IUnlockCallback {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  GENERAL LP FUNCTIONS (V2 — per-user salt isolation)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// @notice Add liquidity to an existing pool with per-user position isolation.
+    /// @param key Pool key.
+    /// @param tickLower Lower tick. If both ticks are 0, auto full-range.
+    /// @param tickUpper Upper tick. If both ticks are 0, auto full-range.
+    /// @param amount0Max Max currency0 to deposit.
+    /// @param amount1Max Max currency1 to deposit.
+    /// @param deadline Timestamp after which the tx reverts.
+    function addLiquidityV2(
+        PoolKey calldata key,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 amount0Max,
+        uint256 amount1Max,
+        uint256 deadline
+    ) external payable {
+        if (block.timestamp > deadline) revert Expired();
+        (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
+        poolManager.unlock(abi.encode(
+            ACTION_ADD_LP_V2, msg.sender, key, tickLower, tickUpper, amount0Max, amount1Max
+        ));
+        _refundETH();
+    }
+
+    /// @notice Add liquidity using Permit2 for ERC20 deposits.
+    function addLiquidityV2Permit2(
+        PoolKey calldata key,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 amount0Max,
+        uint256 amount1Max,
+        uint256 deadline,
+        bytes calldata permitData
+    ) external payable {
+        if (block.timestamp > deadline) revert Expired();
+        (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
+        poolManager.unlock(abi.encode(
+            ACTION_ADD_LP_V2_PERMIT2, msg.sender, key, tickLower, tickUpper, amount0Max, amount1Max, permitData
+        ));
+        _refundETH();
+    }
+
+    /// @notice Remove liquidity from a per-user isolated position.
+    function removeLiquidityV2(
+        PoolKey calldata key,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidityToRemove,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        uint256 deadline
+    ) external {
+        if (block.timestamp > deadline) revert Expired();
+        (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
+        BalanceDelta delta = abi.decode(
+            poolManager.unlock(abi.encode(
+                ACTION_REMOVE_LP_V2, msg.sender, key, tickLower, tickUpper, liquidityToRemove
+            )),
+            (BalanceDelta)
+        );
+        uint256 out0 = delta.amount0() > 0 ? uint256(int256(delta.amount0())) : 0;
+        uint256 out1 = delta.amount1() > 0 ? uint256(int256(delta.amount1())) : 0;
+        if (out0 < amount0Min || out1 < amount1Min) revert SlippageExceeded();
+        _refundETH();
+    }
+
+    /// @notice Collect accumulated fees for a per-user position.
+    function collectFees(
+        PoolKey calldata key,
+        int24 tickLower,
+        int24 tickUpper
+    ) external {
+        (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
+        poolManager.unlock(abi.encode(
+            ACTION_COLLECT_FEES, msg.sender, key, tickLower, tickUpper
+        ));
+        _refundETH();
+    }
+
+    /// @notice View a user's position liquidity.
+    function getPositionLiquidity(
+        PoolKey calldata key,
+        address owner,
+        int24 tickLower,
+        int24 tickUpper
+    ) external view returns (uint128 liquidity) {
+        (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
+        bytes32 salt = bytes32(uint256(uint160(owner)));
+        bytes32 positionKey = keccak256(abi.encodePacked(address(this), tickLower, tickUpper, salt));
+        liquidity = poolManager.getPositionLiquidity(key.toId(), positionKey);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  PERMIT2-ENABLED FUNCTIONS
     // ═══════════════════════════════════════════════════════════════
 
@@ -450,6 +556,14 @@ contract BastionRouter is IUnlockCallback {
             return _handleMultiHopSwap(data);
         } else if (action == ACTION_MULTI_HOP_SWAP_PERMIT2) {
             return _handleMultiHopSwapPermit2(data);
+        } else if (action == ACTION_ADD_LP_V2) {
+            return _handleAddLPV2(data);
+        } else if (action == ACTION_ADD_LP_V2_PERMIT2) {
+            return _handleAddLPV2Permit2(data);
+        } else if (action == ACTION_REMOVE_LP_V2) {
+            return _handleRemoveLPV2(data);
+        } else if (action == ACTION_COLLECT_FEES) {
+            return _handleCollectFees(data);
         }
 
         revert("Unknown action");
@@ -673,6 +787,8 @@ contract BastionRouter is IUnlockCallback {
         _settle(key.currency0, sender, delta.amount0());
         _settle(key.currency1, sender, delta.amount1());
 
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, int256(uint256(liquidity)), delta.amount0(), delta.amount1());
+
         return abi.encode(delta);
     }
 
@@ -703,6 +819,8 @@ contract BastionRouter is IUnlockCallback {
         _settle(key.currency0, sender, delta.amount0());
         _settle(key.currency1, sender, delta.amount1());
 
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, -int256(uint256(liquidityToRemove)), delta.amount0(), delta.amount1());
+
         return abi.encode(delta);
     }
 
@@ -732,6 +850,141 @@ contract BastionRouter is IUnlockCallback {
         _settleToRecipient(key.currency1, recipient, delta.amount1());
 
         return abi.encode(delta);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  V2 LP HANDLERS (per-user salt isolation)
+    // ═══════════════════════════════════════════════════════════════
+
+    function _handleAddLPV2(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, int24 tickLower, int24 tickUpper, uint256 amount0Max, uint256 amount1Max) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24, uint256, uint256));
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            amount0Max,
+            amount1Max
+        );
+
+        bytes32 salt = bytes32(uint256(uint160(sender)));
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: int256(uint256(liquidity)),
+                salt: salt
+            }),
+            ""
+        );
+
+        _settle(key.currency0, sender, delta.amount0());
+        _settle(key.currency1, sender, delta.amount1());
+
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, int256(uint256(liquidity)), delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleAddLPV2Permit2(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, int24 tickLower, int24 tickUpper, uint256 amount0Max, uint256 amount1Max, bytes memory permitData) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24, uint256, uint256, bytes));
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            amount0Max,
+            amount1Max
+        );
+
+        bytes32 salt = bytes32(uint256(uint160(sender)));
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: int256(uint256(liquidity)),
+                salt: salt
+            }),
+            ""
+        );
+
+        // Settle: ETH side uses native, ERC20 side uses Permit2
+        if (key.currency0.isAddressZero()) {
+            _settleCreatePoolNativePermit2(key, sender, delta, permitData);
+        } else {
+            _settleCreatePoolBatchPermit2(key, sender, delta, permitData);
+        }
+
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, int256(uint256(liquidity)), delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleRemoveLPV2(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, int24 tickLower, int24 tickUpper, uint128 liquidityToRemove) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24, uint128));
+
+        bytes32 salt = bytes32(uint256(uint160(sender)));
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: -int256(uint256(liquidityToRemove)),
+                salt: salt
+            }),
+            ""
+        );
+
+        _settle(key.currency0, sender, delta.amount0());
+        _settle(key.currency1, sender, delta.amount1());
+
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, -int256(uint256(liquidityToRemove)), delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleCollectFees(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, int24 tickLower, int24 tickUpper) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24));
+
+        bytes32 salt = bytes32(uint256(uint160(sender)));
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: 0,
+                salt: salt
+            }),
+            ""
+        );
+
+        _settle(key.currency0, sender, delta.amount0());
+        _settle(key.currency1, sender, delta.amount1());
+
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, 0, delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    /// @dev If both ticks are 0, resolve to full-range aligned to tickSpacing.
+    function _resolveTicks(int24 tickSpacing, int24 tl, int24 tu) internal pure returns (int24, int24) {
+        if (tl == 0 && tu == 0) {
+            tl = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+            tu = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        }
+        return (tl, tu);
     }
 
     // ═══════════════════════════════════════════════════════════════

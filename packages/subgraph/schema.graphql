@@ -16,6 +16,7 @@ type Pool @entity {
   insurancePool: InsurancePool # insurance pool state
   triggerEvents: [TriggerEvent!]! @derivedFrom(field: "pool")
   claims: [Claim!]! @derivedFrom(field: "pool")
+  positions: [Position!]! @derivedFrom(field: "pool")
   createdAt: BigInt!
   createdTx: Bytes!
 }
@@ -87,6 +88,18 @@ type Claim @entity {
   tokenAmount: BigDecimal
   claimedAt: BigInt!
   transactionHash: Bytes!
+}
+
+type Position @entity {
+  id: ID! # poolId-user-tickLower-tickUpper
+  pool: Pool!
+  owner: Bytes!
+  tickLower: Int!
+  tickUpper: Int!
+  liquidity: BigInt!
+  isFullRange: Boolean!
+  createdAt: BigInt!
+  lastUpdatedAt: BigInt!
 }
 
 type ProtocolStats @entity {
