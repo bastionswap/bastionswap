@@ -13,6 +13,7 @@ import {
 } from "@/hooks/useCreatePool";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatBps } from "@/lib/formatters";
+import { parseErrorMessage } from "@/utils/errorMessages";
 import { getContracts } from "@/config/contracts";
 import { VestingChart } from "@/components/ui/VestingChart";
 import { usePoolByToken } from "@/hooks/usePools";
@@ -856,7 +857,7 @@ export default function CreatePoolPage() {
                 </div>
               ) : (
                 <p className="text-sm text-red-600">
-                  {error.message.slice(0, 100)}
+                  {parseErrorMessage(error)}
                 </p>
               )}
             </div>

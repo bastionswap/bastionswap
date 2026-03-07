@@ -12,6 +12,7 @@ import { formatUnits } from "viem";
 import { LoadingSpinner, SkeletonCard } from "@/components/ui/LoadingSpinner";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
+import { parseErrorMessage } from "@/utils/errorMessages";
 import { EscrowStatus } from "@/components/pools/EscrowStatus";
 import { InsuranceStatus } from "@/components/pools/InsuranceStatus";
 import { IssuerInfo } from "@/components/pools/IssuerInfo";
@@ -299,7 +300,7 @@ export default function PoolDetailPage() {
           {error ? "Something went wrong" : "Pool not found"}
         </p>
         {error && (
-          <p className="text-sm text-gray-400 mb-6">{error.message}</p>
+          <p className="text-sm text-gray-400 mb-6">{parseErrorMessage(error)}</p>
         )}
         <Link href="/pools" className="btn-secondary text-sm px-5 py-2.5">
           Back to Pools

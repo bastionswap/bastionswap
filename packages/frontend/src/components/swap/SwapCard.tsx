@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { parseErrorMessage } from "@/utils/errorMessages";
 import { TokenSelectModal } from "./TokenSelectModal";
 import {
   useExecuteSwap,
@@ -656,11 +657,7 @@ export function SwapCard() {
         {swapError && (
           <div className="mt-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
             <p className="text-sm text-red-600">
-              {swapError.message.includes("User rejected")
-                ? "Transaction rejected"
-                : swapError.message.includes("Expired")
-                  ? "Transaction expired. Try again."
-                  : swapError.message.slice(0, 120)}
+              {parseErrorMessage(swapError)}
             </p>
             <button
               onClick={resetSwap}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAccount, useChainId } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { parseErrorMessage } from "@/utils/errorMessages";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { useTokenInfo } from "@/hooks/useTokenInfo";
 import { useTokenAllowance, useApprove, useTokenBalance } from "@/hooks/useSwap";
@@ -444,7 +445,7 @@ function AddLiquidityForm({
       )}
       {error && (
         <p className="text-xs text-red-500 mt-2 text-center">
-          {(error as Error).message?.slice(0, 100)}
+          {parseErrorMessage(error)}
         </p>
       )}
     </div>
