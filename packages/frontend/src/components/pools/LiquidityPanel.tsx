@@ -72,6 +72,7 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
                 poolKey={poolKey}
                 token0Symbol={token0Info.symbol || "T0"}
                 token1Symbol={token1Info.symbol || "T1"}
+                isIssuer={!!pool.issuer && pool.issuer.id.toLowerCase() === address?.toLowerCase()}
                 onAction={refetchPositions}
               />
             ))}
@@ -104,6 +105,7 @@ function PositionCard({
   poolKey,
   token0Symbol,
   token1Symbol,
+  isIssuer,
   onAction,
 }: {
   position: SubgraphPosition;
@@ -116,6 +118,7 @@ function PositionCard({
   };
   token0Symbol: string;
   token1Symbol: string;
+  isIssuer: boolean;
   onAction: () => void;
 }) {
   const [removePercent, setRemovePercent] = useState<number | null>(null);
@@ -186,33 +189,44 @@ function PositionCard({
         </span>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {[25, 50, 75, 100].map((pct) => (
+      {isIssuer ? (
+        <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
+          <svg className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-xs text-amber-700">
+            Issuer LP is <span className="font-semibold">escrowed</span> and subject to vesting. Manage your LP from the <span className="font-semibold">Escrow</span> panel above.
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          {[25, 50, 75, 100].map((pct) => (
+            <button
+              key={pct}
+              onClick={() => handleRemove(pct)}
+              disabled={isBusy}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                removePercent === pct && isBusy
+                  ? "border-red-300 bg-red-50 text-red-600"
+                  : "border-gray-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 text-gray-600"
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {isBusy && removePercent === pct ? (
+                <LoadingSpinner size="sm" />
+              ) : (
+                `Remove ${pct}%`
+              )}
+            </button>
+          ))}
           <button
-            key={pct}
-            onClick={() => handleRemove(pct)}
+            onClick={handleCollect}
             disabled={isBusy}
-            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-              removePercent === pct && isBusy
-                ? "border-red-300 bg-red-50 text-red-600"
-                : "border-gray-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 text-gray-600"
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isBusy && removePercent === pct ? (
-              <LoadingSpinner size="sm" />
-            ) : (
-              `Remove ${pct}%`
-            )}
+            {isCollecting || isCollectConfirming ? <LoadingSpinner size="sm" /> : "Collect Fees"}
           </button>
-        ))}
-        <button
-          onClick={handleCollect}
-          disabled={isBusy}
-          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isCollecting || isCollectConfirming ? <LoadingSpinner size="sm" /> : "Collect Fees"}
-        </button>
-      </div>
+        </div>
+      )}
 
       {(removeSuccess || collectSuccess) && (
         <p className="text-xs text-emerald-600 mt-2">
