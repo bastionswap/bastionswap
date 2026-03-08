@@ -71,7 +71,7 @@ Anvil (port 8545)
       ├─ Uniswap V4 PoolManager (from mainnet)
       ├─ BastionHook (deployed via CREATE2)
       ├─ EscrowVault, InsurancePool, TriggerOracle, ReputationEngine
-      ├─ BastionRouter
+      ├─ BastionSwapRouter, BastionPositionRouter
       └─ TestToken (BTT) with faucet
 ```
 
