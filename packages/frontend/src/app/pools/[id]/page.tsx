@@ -42,6 +42,14 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+function formatReserve(n: number): string {
+  if (n === 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
+  if (n >= 1) return n.toFixed(4);
+  return n.toFixed(6);
+}
+
 function TriggerBanner({
   poolId,
   pool,
@@ -398,11 +406,11 @@ export default function PoolDetailPage() {
                   <div className="text-right">
                     <p className="text-[11px] text-gray-400 uppercase tracking-wider mb-1">Reserves</p>
                     <p className="text-sm font-semibold text-gray-900 tabular-nums">
-                      {(parseFloat(pool.reserve0 || "0") / Math.pow(10, token0Info.decimals ?? 18)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      {formatReserve(parseFloat(pool.reserve0 || "0") / Math.pow(10, token0Info.decimals ?? 18))}
                       <span className="text-xs text-gray-400 font-normal ml-1">{token0Info.symbol || "T0"}</span>
                     </p>
                     <p className="text-sm font-semibold text-gray-900 tabular-nums">
-                      {(parseFloat(pool.reserve1 || "0") / Math.pow(10, token1Info.decimals ?? 18)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      {formatReserve(parseFloat(pool.reserve1 || "0") / Math.pow(10, token1Info.decimals ?? 18))}
                       <span className="text-xs text-gray-400 font-normal ml-1">{token1Info.symbol || "T1"}</span>
                     </p>
                   </div>
@@ -411,7 +419,7 @@ export default function PoolDetailPage() {
                   <div className="text-right">
                     <p className="text-[11px] text-gray-400 uppercase tracking-wider mb-1">Escrowed LP</p>
                     <p className="text-sm font-semibold text-gray-900 tabular-nums">
-                      {parseFloat(pool.escrow.totalLiquidity).toFixed(2)}
+                      {formatReserve(parseFloat(pool.escrow.totalLiquidity))}
                       <span className="text-xs text-gray-400 font-normal ml-1">LP</span>
                     </p>
                     <p className="text-xs text-emerald-600 font-medium">
