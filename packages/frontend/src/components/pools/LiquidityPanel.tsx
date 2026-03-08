@@ -197,7 +197,7 @@ function PositionCard({
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {isBusy && removePercent === pct ? (
-              <LoadingSpinner size="xs" />
+              <LoadingSpinner size="sm" />
             ) : (
               `Remove ${pct}%`
             )}
@@ -208,7 +208,7 @@ function PositionCard({
           disabled={isBusy}
           className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isCollecting || isCollectConfirming ? <LoadingSpinner size="xs" /> : "Collect Fees"}
+          {isCollecting || isCollectConfirming ? <LoadingSpinner size="sm" /> : "Collect Fees"}
         </button>
       </div>
 
