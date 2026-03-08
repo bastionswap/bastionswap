@@ -7,6 +7,8 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { parseErrorMessage } from "@/utils/errorMessages";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { useTokenInfo } from "@/hooks/useTokenInfo";
+import { usePoolSqrtPrice } from "@/hooks/usePoolSqrtPrice";
+import { computePairedAmount } from "@/utils/price";
 import { useTokenAllowance, useApprove, useTokenBalance } from "@/hooks/useSwap";
 import {
   useUserPositions,
@@ -244,6 +246,7 @@ function AddLiquidityForm({
   const [amount0, setAmount0] = useState("");
   const [amount1, setAmount1] = useState("");
   const [rangeMode, setRangeMode] = useState<"full" | "custom">("full");
+  const { sqrtPriceX96 } = usePoolSqrtPrice(pool.id);
 
   const isNative0 = poolKey.currency0 === "0x0000000000000000000000000000000000000000";
   const isNative1 = poolKey.currency1 === "0x0000000000000000000000000000000000000000";
@@ -285,6 +288,31 @@ function AddLiquidityForm({
 
   const decimals0 = token0Info.decimals ?? 18;
   const decimals1 = token1Info.decimals ?? 18;
+
+  // Auto-calculate paired amount given an input value string
+  const calcPaired = (value: string, isToken0: boolean): string => {
+    if (!sqrtPriceX96 || !value || parseFloat(value) === 0) return "";
+    try {
+      const parsed = parseUnits(value, isToken0 ? decimals0 : decimals1);
+      const paired = computePairedAmount(sqrtPriceX96, parsed, isToken0, decimals0, decimals1);
+      if (paired === 0n) return "";
+      const formatted = formatUnits(paired, isToken0 ? decimals1 : decimals0);
+      // Trim trailing zeros for clean display
+      return parseFloat(formatted).toString();
+    } catch {
+      return "";
+    }
+  };
+
+  const handleAmount0Change = (value: string) => {
+    setAmount0(value);
+    setAmount1(calcPaired(value, true));
+  };
+
+  const handleAmount1Change = (value: string) => {
+    setAmount1(value);
+    setAmount0(calcPaired(value, false));
+  };
 
   const parsed0 = amount0 ? parseUnits(amount0, decimals0) : 0n;
   const parsed1 = amount1 ? parseUnits(amount1, decimals1) : 0n;
@@ -347,7 +375,7 @@ function AddLiquidityForm({
             <label className="text-xs text-gray-500">{token0Info.symbol || "Token 0"}</label>
             {balance0 !== undefined && (
               <button
-                onClick={() => setAmount0(formatUnits(balance0, decimals0))}
+                onClick={() => handleAmount0Change(formatUnits(balance0, decimals0))}
                 className="text-xs text-gray-400 hover:text-gray-600"
               >
                 Balance: {parseFloat(formatUnits(balance0, decimals0)).toFixed(4)}
@@ -359,7 +387,7 @@ function AddLiquidityForm({
             inputMode="decimal"
             placeholder="0.0"
             value={amount0}
-            onChange={(e) => setAmount0(e.target.value)}
+            onChange={(e) => handleAmount0Change(e.target.value)}
             className={`w-full rounded-lg border px-3 py-2 text-sm tabular-nums ${
               insufficientBalance0 ? "border-red-300 bg-red-50" : "border-gray-200"
             }`}
@@ -370,7 +398,7 @@ function AddLiquidityForm({
             <label className="text-xs text-gray-500">{token1Info.symbol || "Token 1"}</label>
             {balance1 !== undefined && (
               <button
-                onClick={() => setAmount1(formatUnits(balance1, decimals1))}
+                onClick={() => handleAmount1Change(formatUnits(balance1, decimals1))}
                 className="text-xs text-gray-400 hover:text-gray-600"
               >
                 Balance: {parseFloat(formatUnits(balance1, decimals1)).toFixed(4)}
@@ -382,13 +410,20 @@ function AddLiquidityForm({
             inputMode="decimal"
             placeholder="0.0"
             value={amount1}
-            onChange={(e) => setAmount1(e.target.value)}
+            onChange={(e) => handleAmount1Change(e.target.value)}
             className={`w-full rounded-lg border px-3 py-2 text-sm tabular-nums ${
               insufficientBalance1 ? "border-red-300 bg-red-50" : "border-gray-200"
             }`}
           />
         </div>
       </div>
+
+      {/* Estimated summary */}
+      {parsed0 > 0n && parsed1 > 0n && (
+        <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4">
+          Estimated: {parseFloat(amount0).toFixed(6)} {token0Info.symbol || "T0"} + {parseFloat(amount1).toFixed(6)} {token1Info.symbol || "T1"}
+        </div>
+      )}
 
       {/* Action buttons */}
       {needsApproval0 && (
