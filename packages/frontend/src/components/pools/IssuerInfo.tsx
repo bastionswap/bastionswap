@@ -111,8 +111,8 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
 
   if (!decoded) return null;
 
-  const [, poolsCreated, escrowsCompleted, triggerCount, uniqueTokens] = decoded as [
-    bigint, number, number, number, number
+  const [, poolsCreated, escrowsCompleted, triggerCount] = decoded as [
+    bigint, number, number, number
   ];
 
   return (
@@ -122,7 +122,6 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
         { label: "Pools Created", value: poolsCreated },
         { label: "Escrows Completed", value: escrowsCompleted },
         { label: "Triggers", value: triggerCount, negative: true },
-        { label: "Token Diversity", value: uniqueTokens },
       ].map(({ label, value, negative }) => (
         <div key={label} className="flex items-center justify-between text-[11px]">
           <span className="text-gray-400">{label}</span>

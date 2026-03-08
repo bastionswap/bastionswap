@@ -128,11 +128,6 @@
         "name": "triggerCount",
         "type": "uint16",
         "internalType": "uint16"
-      },
-      {
-        "name": "uniqueTokens",
-        "type": "uint16",
-        "internalType": "uint16"
       }
     ],
     "stateMutability": "pure"

@@ -44,32 +44,9 @@ contract ReputationEngineTest is Test {
     function _recordPoolCreated(address _issuer, address token, uint256 amount, IEscrowVault.IssuerCommitment memory c)
         internal
     {
-        _recordPoolCreatedWithEscrow(_issuer, token, amount, c, 0, 0);
-    }
-
-    function _recordPoolCreatedWithEscrow(
-        address _issuer,
-        address token,
-        uint256 amount,
-        IEscrowVault.IssuerCommitment memory c,
-        uint256 escrowId,
-        uint256 vestingScore
-    ) internal {
-        // Mock the getEscrowInfo call on escrowVault (lockDuration=7d, vestingDuration=83d)
-        vm.mockCall(
-            escrowVault,
-            abi.encodeWithSelector(IEscrowVault.getEscrowInfo.selector, escrowId),
-            abi.encode(uint40(block.timestamp), uint40(7 days), uint40(83 days), _defaultCommitment())
-        );
-        // Mock the getVestingStrictnessScore call on escrowVault
-        vm.mockCall(
-            escrowVault,
-            abi.encodeWithSelector(IEscrowVault.getVestingStrictnessScore.selector, escrowId),
-            abi.encode(vestingScore)
-        );
         vm.prank(hook);
         engine.recordEvent(
-            _issuer, IReputationEngine.EventType.POOL_CREATED, abi.encode(token, amount, c, escrowId)
+            _issuer, IReputationEngine.EventType.POOL_CREATED, abi.encode(token, amount, c, uint256(0))
         );
     }
 
@@ -108,44 +85,52 @@ contract ReputationEngineTest is Test {
         assertEq(score, 100, "New issuer should have baseline score of 100");
     }
 
-    // ─── 2. Pool Creation ─────────────────────────────────────────────
+    // ─── 2. Pool Creation — No Score Increase ─────────────────────────
 
-    function test_poolCreated_increasesScore() public {
+    function test_poolCreated_noScoreIncrease() public {
         uint256 before = engine.getScore(issuer);
 
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
 
         uint256 after_ = engine.getScore(issuer);
-        assertGt(after_, before, "Score should increase after pool creation");
+        // Pool creation only sets firstEventAt → wallet age is ~0 at same timestamp
+        assertEq(after_, 0, "Pool creation alone should give 0 score (no positive components)");
     }
 
-    function test_poolCreated_tracksTokenDiversity() public {
-        address tokenA = makeAddr("tokenA");
-        address tokenB = makeAddr("tokenB");
+    function test_spamPoolCreation_noScoreIncrease() public {
+        // Create 50 spam pools — score should not increase
+        for (uint256 i = 0; i < 50; i++) {
+            _recordPoolCreated(
+                issuer,
+                makeAddr(string(abi.encode("spam", i))),
+                1 ether,
+                _defaultCommitment()
+            );
+        }
 
-        _recordPoolCreated(issuer, tokenA, 50 ether, _defaultCommitment());
-        uint256 scoreAfterOne = engine.getScore(issuer);
-
-        _recordPoolCreated(issuer, tokenB, 50 ether, _defaultCommitment());
-        uint256 scoreAfterTwo = engine.getScore(issuer);
-
-        assertGt(scoreAfterTwo, scoreAfterOne, "Second unique token should increase diversity score");
+        uint256 score = engine.getScore(issuer);
+        assertEq(score, 0, "50 spam pools should not increase score");
     }
 
-    function test_poolCreated_sameTokenNoDiversityIncrease() public {
-        address tokenA = makeAddr("tokenA");
+    function test_spamPoolCreation_dilutesVestingScore() public {
+        // Create 1 pool and complete it → vesting ratio 1/1 = 300
+        _recordPoolCreated(issuer, makeAddr("legit"), 100 ether, _strictCommitment());
+        _recordEscrowCompleted(issuer, 100 ether, 365);
+        vm.warp(block.timestamp + 365 days);
+        uint256 scoreWith1Pool = engine.getScore(issuer);
 
-        _recordPoolCreated(issuer, tokenA, 50 ether, _defaultCommitment());
-        _recordPoolCreated(issuer, tokenA, 50 ether, _defaultCommitment());
+        // Now create 9 spam pools → vesting ratio drops to 1/10 = 30
+        for (uint256 i = 0; i < 9; i++) {
+            _recordPoolCreated(issuer, makeAddr(string(abi.encode("spam", i))), 1 ether, _defaultCommitment());
+        }
+        uint256 scoreWith10Pools = engine.getScore(issuer);
 
-        // No revert means duplicate token handled correctly; diversity stays the same
-        assertTrue(true);
+        assertLt(scoreWith10Pools, scoreWith1Pool, "Spam pools should dilute vesting score");
     }
 
     // ─── 3. Escrow Completion ─────────────────────────────────────────
 
     function test_escrowCompleted_increasesVestingScore() public {
-        // Create a pool first so poolsCreated > 0
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
         uint256 scoreBefore = engine.getScore(issuer);
 
@@ -156,28 +141,41 @@ contract ReputationEngineTest is Test {
     }
 
     function test_escrowCompleted_allEscrowsCompleted_maxVesting() public {
-        // Create 2 pools and complete both
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
         _recordPoolCreated(issuer, makeAddr("tokenB"), 100 ether, _defaultCommitment());
 
         _recordEscrowCompleted(issuer, 100 ether, 180);
         _recordEscrowCompleted(issuer, 100 ether, 180);
 
-        // With 2/2 completed, vesting score should be 300
         uint256 score = engine.getScore(issuer);
-        assertGt(score, 300, "Full completion should contribute near-max vesting score");
+        // 2/2 completed → vesting = 500, plus escrow history contribution
+        assertGt(score, 500, "Full completion should contribute max vesting score");
+    }
+
+    function test_escrowCompleted_afterSpam_stillEarnsScore() public {
+        // Spammer creates 100 pools
+        for (uint256 i = 0; i < 100; i++) {
+            _recordPoolCreated(issuer, makeAddr(string(abi.encode("s", i))), 1 ether, _defaultCommitment());
+        }
+        uint256 scoreBeforeComplete = engine.getScore(issuer);
+
+        // Complete 1 escrow — should still earn SOME score (vesting 1/100 * 300 = 3)
+        _recordEscrowCompleted(issuer, 100 ether, 365);
+        uint256 scoreAfterComplete = engine.getScore(issuer);
+
+        assertGt(scoreAfterComplete, scoreBeforeComplete, "Escrow completion should increase score even after spam");
+        assertLt(scoreAfterComplete, 50, "Score should be low due to terrible vesting ratio");
     }
 
     // ─── 4. Trigger Deduction ─────────────────────────────────────────
 
     function test_triggerFired_decreasesScore() public {
-        // Build up some score first
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
         _recordEscrowCompleted(issuer, 100 ether, 365);
+        _recordCommitmentHonored(issuer, _strictCommitment());
         uint256 scoreBefore = engine.getScore(issuer);
 
-        // Fire a severe trigger (RUG_PULL = 1)
-        _recordTriggerFired(issuer, 1);
+        _recordTriggerFired(issuer, 1); // RUG_PULL
         uint256 scoreAfter = engine.getScore(issuer);
 
         assertLt(scoreAfter, scoreBefore, "Trigger should decrease score");
@@ -185,11 +183,11 @@ contract ReputationEngineTest is Test {
 
     function test_triggerFired_severePenalty100() public {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
+        _recordCommitmentHonored(issuer, _strictCommitment());
         vm.warp(block.timestamp + 365 days);
         uint256 scoreBefore = engine.getScore(issuer);
 
-        // RUG_PULL = 1 → severe penalty (-100)
-        _recordTriggerFired(issuer, 1);
+        _recordTriggerFired(issuer, 1); // RUG_PULL → -100
         uint256 scoreAfter = engine.getScore(issuer);
 
         assertEq(scoreBefore - scoreAfter, 100, "Severe trigger should deduct 100 points");
@@ -197,28 +195,23 @@ contract ReputationEngineTest is Test {
 
     function test_triggerFired_nonSeverePenalty50() public {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
+        _recordCommitmentHonored(issuer, _strictCommitment());
         vm.warp(block.timestamp + 365 days);
         uint256 scoreBefore = engine.getScore(issuer);
 
-        // HONEYPOT = 3 → non-severe penalty (-50)
-        _recordTriggerFired(issuer, 3);
+        _recordTriggerFired(issuer, 3); // HONEYPOT → -50
         uint256 scoreAfter = engine.getScore(issuer);
 
         assertEq(scoreBefore - scoreAfter, 50, "Non-severe trigger should deduct 50 points");
     }
 
     function test_triggerFired_multipleTriggers_cappedAt500() public {
-        // Build high score
-        _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
-        _recordPoolCreated(issuer, makeAddr("tokenB"), 100 ether, _strictCommitment());
-        _recordPoolCreated(issuer, makeAddr("tokenC"), 100 ether, _strictCommitment());
-        _recordPoolCreated(issuer, makeAddr("tokenD"), 100 ether, _strictCommitment());
-        _recordPoolCreated(issuer, makeAddr("tokenE"), 100 ether, _strictCommitment());
-        _recordEscrowCompleted(issuer, 100 ether, 365);
-        _recordEscrowCompleted(issuer, 100 ether, 365);
-        _recordEscrowCompleted(issuer, 100 ether, 365);
-        _recordEscrowCompleted(issuer, 100 ether, 365);
-        _recordEscrowCompleted(issuer, 100 ether, 365);
+        // Build high score via escrow completions and commitments
+        for (uint256 i = 1; i <= 5; i++) {
+            _recordPoolCreated(issuer, makeAddr(string(abi.encode("t", i))), 100 ether, _strictCommitment());
+            _recordEscrowCompleted(issuer, 100 ether, 365);
+            _recordCommitmentHonored(issuer, _strictCommitment());
+        }
         vm.warp(block.timestamp + 365 days);
 
         uint256 scoreBeforeTriggers = engine.getScore(issuer);
@@ -233,10 +226,8 @@ contract ReputationEngineTest is Test {
     }
 
     function test_triggerFired_scoreFloorsAtZero() public {
-        // Minimal score issuer
         _recordPoolCreated(issuer, makeAddr("tokenA"), 1 ether, _defaultCommitment());
 
-        // Fire multiple triggers
         _recordTriggerFired(issuer, 1);
         _recordTriggerFired(issuer, 1);
         _recordTriggerFired(issuer, 1);
@@ -281,50 +272,32 @@ contract ReputationEngineTest is Test {
         assertEq(scoreAtYear, scoreAtTwoYears, "Age score should cap at 1 year");
     }
 
-    // ─── 7. Token Diversity ───────────────────────────────────────────
-
-    function test_diversity_maxAt5Tokens() public {
-        for (uint256 i = 1; i <= 5; i++) {
-            _recordPoolCreated(issuer, makeAddr(string(abi.encode("token", i))), 50 ether, _defaultCommitment());
-        }
-        uint256 scoreAt5 = engine.getScore(issuer);
-        assertGt(scoreAt5, 0, "5-token issuer should have positive score");
-
-        // 6th token: diversity is capped at 200 (5*40), so no additional diversity points
-        _recordPoolCreated(issuer, makeAddr(string(abi.encode("token", uint256(6)))), 50 ether, _defaultCommitment());
-        engine.getScore(issuer); // just verify no revert
-    }
-
-    // ─── 8. Composite ─────────────────────────────────────────────────
+    // ─── 7. Composite ─────────────────────────────────────────────────
 
     function test_composite_realisticIssuer() public {
-        // Create 3 pools with different tokens and strict commitments
+        // Create 3 pools and complete 2 escrows
         _recordPoolCreated(issuer, makeAddr("tokenA"), 200 ether, _strictCommitment());
         _recordPoolCreated(issuer, makeAddr("tokenB"), 150 ether, _strictCommitment());
         _recordPoolCreated(issuer, makeAddr("tokenC"), 100 ether, _strictCommitment());
 
-        // Complete 2 of 3 escrows
         _recordEscrowCompleted(issuer, 200 ether, 365);
         _recordEscrowCompleted(issuer, 150 ether, 365);
 
-        // Honor commitments twice
+        // Honor commitments
         _recordCommitmentHonored(issuer, _strictCommitment());
         _recordCommitmentHonored(issuer, _strictCommitment());
 
-        // Age the wallet
         vm.warp(block.timestamp + 200 days);
 
         // One minor trigger
-        _recordTriggerFired(issuer, 3); // HONEYPOT, non-severe → -50
+        _recordTriggerFired(issuer, 3); // HONEYPOT → -50
 
         uint256 score = engine.getScore(issuer);
-
-        // Should be a moderate-to-high score
         assertGt(score, 200, "Composite score should be meaningful");
         assertLt(score, 1000, "Composite score should not be max with partial completion + trigger");
     }
 
-    // ─── 9. Access Control ────────────────────────────────────────────
+    // ─── 8. Access Control ────────────────────────────────────────────
 
     function test_recordEvent_revertsUnauthorized() public {
         vm.prank(unauthorized);
@@ -334,7 +307,6 @@ contract ReputationEngineTest is Test {
 
     function test_recordEvent_allowsHook() public {
         _recordPoolCreated(issuer, makeAddr("token"), 100 ether, _defaultCommitment());
-        // No revert means success
     }
 
     function test_recordEvent_allowsEscrowVault() public {
@@ -345,68 +317,57 @@ contract ReputationEngineTest is Test {
     }
 
     function test_recordEvent_allowsTriggerOracle() public {
-        // Need a firstEventAt first
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
 
         vm.prank(triggerOracle);
         engine.recordEvent(issuer, IReputationEngine.EventType.TRIGGER_FIRED, abi.encode(uint8(3)));
     }
 
-    // ─── 10. Cross-chain Encode/Decode ────────────────────────────────
+    // ─── 9. Cross-chain Encode/Decode ────────────────────────────────
 
     function test_crossChain_encodeDecodeRoundtrip() public {
-        // Build up a profile
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
         _recordPoolCreated(issuer, makeAddr("tokenB"), 100 ether, _defaultCommitment());
         _recordEscrowCompleted(issuer, 100 ether, 180);
         _recordTriggerFired(issuer, 3);
 
         bytes memory encoded = engine.encodeScoreData(issuer);
-        (uint256 score, uint16 poolsCreated, uint16 escrowsCompleted, uint16 triggerCount, uint16 uniqueTokens) =
+        (uint256 score, uint16 poolsCreated, uint16 escrowsCompleted, uint16 triggerCount) =
             engine.decodeScoreData(encoded);
 
         assertEq(score, engine.getScore(issuer), "Decoded score should match getScore");
         assertEq(poolsCreated, 2, "Should have 2 pools");
         assertEq(escrowsCompleted, 1, "Should have 1 escrow completed");
         assertEq(triggerCount, 1, "Should have 1 trigger");
-        assertEq(uniqueTokens, 2, "Should have 2 unique tokens");
     }
 
-    // ─── 11. Edge Cases ───────────────────────────────────────────────
+    // ─── 10. Edge Cases ───────────────────────────────────────────────
 
     function test_edge_scoreClampedAtZero() public {
-        // Record a pool then fire max triggers
         _recordPoolCreated(issuer, makeAddr("tokenA"), 1 ether, _defaultCommitment());
-        _recordTriggerFired(issuer, 1); // -100
-        _recordTriggerFired(issuer, 1); // -100
-        _recordTriggerFired(issuer, 1); // -100
-        _recordTriggerFired(issuer, 2); // -100
-        _recordTriggerFired(issuer, 2); // -100
+        _recordTriggerFired(issuer, 1);
+        _recordTriggerFired(issuer, 1);
+        _recordTriggerFired(issuer, 1);
+        _recordTriggerFired(issuer, 2);
+        _recordTriggerFired(issuer, 2);
 
         uint256 score = engine.getScore(issuer);
         assertEq(score, 0, "Score should be clamped at 0");
     }
 
     function test_edge_scoreClampedAt1000() public {
-        // Maximally strict commitment: 0% withdraw, 0% sell → commitment score = 200
         IEscrowVault.IssuerCommitment memory maxStrict = IEscrowVault.IssuerCommitment({
             dailyWithdrawLimit: 0,
             maxSellPercent: 0
         });
 
-        // Build maximum possible score
+        // Build maximum score via completions + commitments (no diversity/pool-creation bonus)
         for (uint256 i = 1; i <= 5; i++) {
-            _recordPoolCreated(
-                issuer,
-                makeAddr(string(abi.encode("t", i))),
-                500_000e18, // large amount for escrow history
-                maxStrict
-            );
-        }
-        for (uint256 i = 0; i < 5; i++) {
+            _recordPoolCreated(issuer, makeAddr(string(abi.encode("t", i))), 500_000e18, maxStrict);
             _recordEscrowCompleted(issuer, 500_000e18, 365);
+            _recordCommitmentHonored(issuer, maxStrict);
         }
-        vm.warp(block.timestamp + 730 days); // 2 years
+        vm.warp(block.timestamp + 730 days);
 
         uint256 score = engine.getScore(issuer);
         assertEq(score, 1000, "Score should be clamped at 1000");
@@ -421,10 +382,10 @@ contract ReputationEngineTest is Test {
 
     function test_edge_commitmentViolated_actsLikeTrigger() public {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
+        _recordCommitmentHonored(issuer, _strictCommitment());
         vm.warp(block.timestamp + 365 days);
         uint256 scoreBefore = engine.getScore(issuer);
 
-        // COMMITMENT_VIOLATED with severe type
         _recordCommitmentViolated(issuer, 1); // RUG_PULL type
         uint256 scoreAfter = engine.getScore(issuer);
 
@@ -436,9 +397,9 @@ contract ReputationEngineTest is Test {
         address issuerB = makeAddr("issuerB");
 
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
+        _recordCommitmentHonored(issuer, _strictCommitment());
         _recordTriggerFired(issuerB, 1);
 
-        // First issuer should not be affected by second issuer's trigger
         uint256 scoreA = engine.getScore(issuer);
         uint256 scoreB = engine.getScore(issuerB);
 

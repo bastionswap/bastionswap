@@ -14,7 +14,7 @@ interface IReputationEngine {
     /// @custom:value TRIGGER_FIRED A trigger event was detected for the issuer's pool (negative)
     /// @custom:value COMMITMENT_HONORED Issuer stayed within commitment parameters for a period (positive)
     /// @custom:value COMMITMENT_VIOLATED Issuer violated on-chain commitment parameters (negative)
-    /// @custom:value POOL_CREATED Issuer created a new pool with escrow (neutral/positive)
+    /// @custom:value POOL_CREATED Issuer created a new pool (tracked for vesting ratio only, no score increase)
     enum EventType {
         ESCROW_COMPLETED,
         TRIGGER_FIRED,
@@ -57,9 +57,8 @@ interface IReputationEngine {
     /// @return poolsCreated Number of pools created
     /// @return escrowsCompleted Number of escrows completed
     /// @return triggerCount Total trigger count
-    /// @return uniqueTokens Number of unique tokens
     function decodeScoreData(bytes calldata data)
         external
         pure
-        returns (uint256 score, uint16 poolsCreated, uint16 escrowsCompleted, uint16 triggerCount, uint16 uniqueTokens);
+        returns (uint256 score, uint16 poolsCreated, uint16 escrowsCompleted, uint16 triggerCount);
 }

@@ -31,7 +31,6 @@ contract ReputationEngine is IReputationEngine {
         uint16 escrowsCompleted;
         uint16 triggerCount;
         uint16 severeTriggerCount;
-        uint16 uniqueTokens;
         uint16 commitmentCount;
         uint256 totalLockedWeighted;
         uint256 commitmentScore;
@@ -46,7 +45,6 @@ contract ReputationEngine is IReputationEngine {
     // ─── Storage ─────────────────────────────────────────────────────
 
     mapping(address => IssuerProfile) internal _profiles;
-    mapping(address => mapping(address => bool)) internal _knownTokens;
 
     // ─── Errors ──────────────────────────────────────────────────────
 
@@ -105,7 +103,7 @@ contract ReputationEngine is IReputationEngine {
         }
 
         uint256 positive = _calcVestingScore(profile) + _calcEscrowHistoryScore(profile)
-            + _calcCommitmentScore(profile) + _calcWalletAgeScore(profile) + _calcDiversityScore(profile);
+            + _calcCommitmentScore(profile) + _calcWalletAgeScore(profile);
 
         uint256 penalty = _calcTriggerPenalty(profile);
 
@@ -126,8 +124,7 @@ contract ReputationEngine is IReputationEngine {
             getScore(issuer),
             profile.poolsCreated,
             profile.escrowsCompleted,
-            profile.triggerCount,
-            profile.uniqueTokens
+            profile.triggerCount
         );
     }
 
@@ -135,39 +132,18 @@ contract ReputationEngine is IReputationEngine {
     function decodeScoreData(bytes calldata data)
         external
         pure
-        returns (uint256 score, uint16 poolsCreated, uint16 escrowsCompleted, uint16 triggerCount, uint16 uniqueTokens)
+        returns (uint256 score, uint16 poolsCreated, uint16 escrowsCompleted, uint16 triggerCount)
     {
-        (score, poolsCreated, escrowsCompleted, triggerCount, uniqueTokens) =
-            abi.decode(data, (uint256, uint16, uint16, uint16, uint16));
+        (score, poolsCreated, escrowsCompleted, triggerCount) =
+            abi.decode(data, (uint256, uint16, uint16, uint16));
     }
 
     // ─── Event Handlers ──────────────────────────────────────────────
 
-    function _handlePoolCreated(address issuer, IssuerProfile storage profile, bytes calldata data) internal {
-        (address token, uint256 amount, IEscrowVault.IssuerCommitment memory commitment, uint256 escrowId) =
-            abi.decode(data, (address, uint256, IEscrowVault.IssuerCommitment, uint256));
-
+    /// @dev Pool creation only increments the pool counter (used as vesting ratio denominator).
+    ///      No score increase — prevents reputation manipulation via spam pool creation.
+    function _handlePoolCreated(address, IssuerProfile storage profile, bytes calldata) internal {
         profile.poolsCreated++;
-
-        // Track token diversity
-        if (!_knownTokens[issuer][token]) {
-            _knownTokens[issuer][token] = true;
-            profile.uniqueTokens++;
-        }
-
-        // Add escrow history weighted value (amount * totalDuration / (1 day * 1e18))
-        (,uint40 lockDur, uint40 vestDur,) = IEscrowVault(ESCROW_VAULT).getEscrowInfo(escrowId);
-        uint256 totalDuration = uint256(lockDur) + uint256(vestDur);
-        profile.totalLockedWeighted += (amount * totalDuration) / (1 days * 1e18);
-
-        // Add commitment strictness score (base from commitment params)
-        profile.commitmentScore += _calcSingleCommitmentStrictness(commitment);
-
-        // Add proportional vesting schedule strictness bonus (0..200)
-        uint256 vestingBonus = IEscrowVault(ESCROW_VAULT).getVestingStrictnessScore(escrowId);
-        profile.commitmentScore += vestingBonus;
-
-        profile.commitmentCount++;
     }
 
     function _handleEscrowCompleted(IssuerProfile storage profile, bytes calldata data) internal {
@@ -207,11 +183,11 @@ contract ReputationEngine is IReputationEngine {
 
     // ─── Score Computation Helpers ───────────────────────────────────
 
-    /// @dev Vesting completion score: (completedEscrows / totalEscrows) * 300
+    /// @dev Vesting completion score: (completedEscrows / totalEscrows) * 500
     function _calcVestingScore(IssuerProfile storage profile) internal view returns (uint256) {
         uint256 total = profile.poolsCreated;
         if (total == 0) return 0;
-        return (uint256(profile.escrowsCompleted) * 300) / total;
+        return (uint256(profile.escrowsCompleted) * 500) / total;
     }
 
     /// @dev Escrow history score: min(totalLockedWeighted / ESCROW_HISTORY_SCALE, 200)
@@ -240,12 +216,6 @@ contract ReputationEngine is IReputationEngine {
         uint256 otherPenalty = uint256(profile.triggerCount - profile.severeTriggerCount) * 50;
         uint256 total = severePenalty + otherPenalty;
         return total > 500 ? 500 : total;
-    }
-
-    /// @dev Token diversity score: min(uniqueTokenCount * 40, 200)
-    function _calcDiversityScore(IssuerProfile storage profile) internal view returns (uint256) {
-        uint256 score = uint256(profile.uniqueTokens) * 40;
-        return score > 200 ? 200 : score;
     }
 
     /// @dev Calculates strictness of a single commitment (0..200 range).
