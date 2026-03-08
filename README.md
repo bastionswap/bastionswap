@@ -69,8 +69,15 @@ graph TB
         CL[Token Holder]
     end
 
-    IS -->|addLiquidity + hookData| PM
-    TR -->|swap| PM
+    subgraph "Routers"
+        SR[BastionSwapRouter]
+        PR[BastionPositionRouter]
+    end
+
+    IS -->|createPool / addLiquidity| PR
+    TR -->|swap| SR
+    SR -->|unlock + swap| PM
+    PR -->|unlock + modifyLiquidity| PM
     PM -->|hook callbacks| BH
 
     BH -->|createEscrow| EV
@@ -90,8 +97,11 @@ graph TB
     SG -->|indexes events| IP
     SG -->|indexes events| TO
     SG -->|indexes events| RE
+    SG -->|indexes events| SR
+    SG -->|indexes events| PR
     FE -->|queries| SG
-    FE -->|contract calls| PM
+    FE -->|contract calls| SR
+    FE -->|contract calls| PR
 
     style BH fill:#4f46e5,color:#fff
     style EV fill:#0891b2,color:#fff
@@ -99,6 +109,8 @@ graph TB
     style TO fill:#dc2626,color:#fff
     style RE fill:#7c3aed,color:#fff
     style PM fill:#f59e0b,color:#fff
+    style SR fill:#ea580c,color:#fff
+    style PR fill:#ea580c,color:#fff
     style FE fill:#171717,color:#fff
     style SG fill:#6747ed,color:#fff
 ```
@@ -107,7 +119,9 @@ graph TB
 
 | Contract | Role |
 |----------|------|
-| **BastionHook** | V4 Hook entry point. Intercepts `beforeAddLiquidity`, `beforeRemoveLiquidity`, and `afterSwap` to orchestrate escrow locking, insurance fee collection, and rug-pull monitoring. |
+| **BastionHook** | V4 Hook entry point. Intercepts `beforeAddLiquidity`, `beforeRemoveLiquidity`, `beforeSwap`, and `afterSwap` to orchestrate escrow locking, insurance fee collection, and rug-pull monitoring. |
+| **BastionSwapRouter** | Swap-only router handling exact-input, exact-output, and multi-hop swaps via PoolManager unlock callbacks. Emits `SwapExecuted` with actual user address. |
+| **BastionPositionRouter** | LP management router for pool creation, liquidity add/remove, and fee collection. Emits `LiquidityChanged` for subgraph indexing. |
 | **EscrowVault** | Manages time-locked vesting of issuer LP funds with daily withdrawal limits and issuer commitments. Redistributes remaining funds to InsurancePool on trigger. |
 | **InsurancePool** | Collects swap fees on buy-side trades and distributes pro-rata compensation to holders when a trigger fires. 30-day claim window. |
 | **TriggerOracle** | Detects 6 types of malicious behavior on-chain with a 1-hour grace period before execution. |
@@ -145,7 +159,7 @@ pnpm install
 ```bash
 cd packages/contracts
 forge build
-forge test -vvv                          # 285 tests, all passing
+forge test -vvv                          # 339 tests, all passing
 FOUNDRY_PROFILE=deploy forge build --sizes  # All contracts < 24KB
 ```
 
@@ -184,6 +198,7 @@ bastionswap/
 │   ├── contracts/              # Foundry smart contracts
 │   │   ├── src/
 │   │   │   ├── hooks/BastionHook.sol
+│   │   │   ├── router/         # BastionSwapRouter, BastionPositionRouter
 │   │   │   ├── core/           # EscrowVault, InsurancePool, TriggerOracle, ReputationEngine
 │   │   │   └── interfaces/     # Contract interfaces
 │   │   ├── test/
@@ -196,10 +211,10 @@ bastionswap/
 │   ├── subgraph/               # The Graph protocol indexer
 │   │   ├── schema.graphql      # Entity definitions
 │   │   ├── subgraph.yaml       # Data source config
-│   │   └── src/mappings/       # Event handlers (5 data sources)
+│   │   └── src/mappings/       # Event handlers (8 data sources)
 │   │
 │   └── frontend/               # Next.js 14 web application
-│       ├── src/app/            # Pages: home, swap, create, pools, pool detail
+│       ├── src/app/            # Pages: home, swap, create, pools, pool detail, history
 │       ├── src/hooks/          # wagmi + subgraph custom hooks
 │       ├── src/components/     # UI components (escrow, insurance, issuer, triggers)
 │       └── src/config/         # Contracts, ABIs, wagmi, subgraph config
@@ -242,6 +257,7 @@ bastionswap/
 ## Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** — Protocol design, contract interactions, trigger mechanisms, deployment strategy
+- **[Local Development](docs/LOCAL_DEV.md)** — Local environment setup with Anvil fork
 - **[Security](docs/SECURITY.md)** — Threat model, 12 known attack vectors, mitigations, audit checklist
 
 ## License
