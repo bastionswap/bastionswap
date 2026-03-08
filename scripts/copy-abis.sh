@@ -6,7 +6,7 @@ FRONTEND_ABIS="packages/frontend/src/config/abis"
 
 mkdir -p "$FRONTEND_ABIS"
 
-for CONTRACT in BastionHook EscrowVault InsurancePool TriggerOracle ReputationEngine BastionRouter; do
+for CONTRACT in BastionHook EscrowVault InsurancePool TriggerOracle ReputationEngine BastionSwapRouter BastionPositionRouter; do
   jq '.abi' "$CONTRACTS_OUT/$CONTRACT.sol/$CONTRACT.json" > "$FRONTEND_ABIS/$CONTRACT.json"
   echo "Copied ABI: $CONTRACT"
 done

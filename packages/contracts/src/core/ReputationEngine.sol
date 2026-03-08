@@ -102,7 +102,7 @@ contract ReputationEngine is IReputationEngine {
             return BASELINE_SCORE;
         }
 
-        uint256 positive = _calcVestingScore(profile) + _calcEscrowHistoryScore(profile)
+        uint256 positive = BASELINE_SCORE + _calcVestingScore(profile) + _calcEscrowHistoryScore(profile)
             + _calcCommitmentScore(profile) + _calcWalletAgeScore(profile);
 
         uint256 penalty = _calcTriggerPenalty(profile);

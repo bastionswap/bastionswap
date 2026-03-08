@@ -93,12 +93,15 @@ contract ReputationEngineTest is Test {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
 
         uint256 after_ = engine.getScore(issuer);
-        // Pool creation only sets firstEventAt → wallet age is ~0 at same timestamp
-        assertEq(after_, 0, "Pool creation alone should give 0 score (no positive components)");
+        // Pool creation only sets firstEventAt → baseline 100, no additional score
+        assertEq(after_, 100, "Pool creation should not increase score beyond baseline");
+        assertEq(after_, before, "Score should stay at baseline after pool creation");
     }
 
     function test_spamPoolCreation_noScoreIncrease() public {
-        // Create 50 spam pools — score should not increase
+        uint256 before = engine.getScore(issuer);
+
+        // Create 50 spam pools — score should stay at baseline
         for (uint256 i = 0; i < 50; i++) {
             _recordPoolCreated(
                 issuer,
@@ -109,7 +112,7 @@ contract ReputationEngineTest is Test {
         }
 
         uint256 score = engine.getScore(issuer);
-        assertEq(score, 0, "50 spam pools should not increase score");
+        assertEq(score, before, "50 spam pools should not increase score beyond baseline");
     }
 
     function test_spamPoolCreation_dilutesVestingScore() public {
@@ -164,7 +167,8 @@ contract ReputationEngineTest is Test {
         uint256 scoreAfterComplete = engine.getScore(issuer);
 
         assertGt(scoreAfterComplete, scoreBeforeComplete, "Escrow completion should increase score even after spam");
-        assertLt(scoreAfterComplete, 50, "Score should be low due to terrible vesting ratio");
+        // baseline(100) + vesting(1/100*500=5) + escrowHistory(small) = ~105-115
+        assertLt(scoreAfterComplete, 150, "Score should be low due to terrible vesting ratio");
     }
 
     // ─── 4. Trigger Deduction ─────────────────────────────────────────

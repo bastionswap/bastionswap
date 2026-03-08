@@ -16,7 +16,8 @@ ESCROW_VAULT=$(jq -r '[.transactions[] | select(.contractName=="EscrowVault" and
 INSURANCE_POOL=$(jq -r '[.transactions[] | select(.contractName=="InsurancePool" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
 TRIGGER_ORACLE=$(jq -r '[.transactions[] | select(.contractName=="TriggerOracle" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
 REPUTATION_ENGINE=$(jq -r '[.transactions[] | select(.contractName=="ReputationEngine" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
-BASTION_ROUTER=$(jq -r '[.transactions[] | select(.contractName=="BastionRouter" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
+BASTION_SWAP_ROUTER=$(jq -r '[.transactions[] | select(.contractName=="BastionSwapRouter" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
+BASTION_POSITION_ROUTER=$(jq -r '[.transactions[] | select(.contractName=="BastionPositionRouter" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
 TEST_TOKEN=$(jq -r '[.transactions[] | select(.contractName=="TestToken" and .transactionType=="CREATE")] | .[0].contractAddress' "$BROADCAST_DIR/run-latest.json")
 ALPHA_TOKEN=$(jq -r '[.transactions[] | select(.contractName=="TestToken" and .transactionType=="CREATE")] | .[1].contractAddress' "$BROADCAST_DIR/run-latest.json")
 
@@ -53,7 +54,8 @@ export const LOCAL_CONTRACTS = {
     InsurancePool: "${INSURANCE_POOL}",
     TriggerOracle: "${TRIGGER_ORACLE}",
     ReputationEngine: "${REPUTATION_ENGINE}",
-    BastionRouter: "${BASTION_ROUTER}",
+    BastionSwapRouter: "${BASTION_SWAP_ROUTER}",
+    BastionPositionRouter: "${BASTION_POSITION_ROUTER}",
     TestToken: "${TEST_TOKEN}",
     AlphaToken: "${ALPHA_TOKEN}",
   },
@@ -79,6 +81,7 @@ echo "  EscrowVault:      $ESCROW_VAULT"
 echo "  InsurancePool:    $INSURANCE_POOL"
 echo "  TriggerOracle:    $TRIGGER_ORACLE"
 echo "  ReputationEngine: $REPUTATION_ENGINE"
-echo "  BastionRouter:    $BASTION_ROUTER"
+echo "  BastionSwapRouter:     $BASTION_SWAP_ROUTER"
+echo "  BastionPositionRouter: $BASTION_POSITION_ROUTER"
 echo "  TestToken (BTT):  $TEST_TOKEN"
 echo "  AlphaToken:       $ALPHA_TOKEN"
