@@ -37,17 +37,16 @@ export function RecentTrades({
   const token0Info = useTokenInfo(token0 as `0x${string}`);
   const token1Info = useTokenInfo(token1 as `0x${string}`);
 
-  // Buy = user receives token1 (amount1 < 0 means token1 goes to user)
-  // If issuedToken == token1, negative amount1 = Buy
-  // If issuedToken == token0, negative amount0 = Buy
+  // V4 delta convention: positive = caller receives, negative = caller pays
+  // Buy = user receives issued token (positive amount for issued token)
   const isToken1Issued =
     issuedToken?.toLowerCase() === token1.toLowerCase();
 
   function getTradeType(swap: SubgraphSwap): "Buy" | "Sell" {
     if (isToken1Issued) {
-      return BigInt(swap.amount1) < 0n ? "Buy" : "Sell";
+      return BigInt(swap.amount1) > 0n ? "Buy" : "Sell";
     }
-    return BigInt(swap.amount0) < 0n ? "Buy" : "Sell";
+    return BigInt(swap.amount0) > 0n ? "Buy" : "Sell";
   }
 
   return (
