@@ -125,6 +125,7 @@ function PositionCard({
     isWriting: isRemoving,
     isConfirming: isRemoveConfirming,
     isSuccess: removeSuccess,
+    error: removeError,
     reset: resetRemove,
   } = useRemoveLiquidity();
 
@@ -133,6 +134,7 @@ function PositionCard({
     isWriting: isCollecting,
     isConfirming: isCollectConfirming,
     isSuccess: collectSuccess,
+    error: collectError,
     reset: resetCollect,
   } = useCollectFees();
 
@@ -215,6 +217,12 @@ function PositionCard({
       {(removeSuccess || collectSuccess) && (
         <p className="text-xs text-emerald-600 mt-2">
           {removeSuccess ? "Liquidity removed!" : "Fees collected!"}
+        </p>
+      )}
+
+      {(removeError || collectError) && (
+        <p className="text-xs text-red-500 mt-2">
+          {parseErrorMessage((removeError || collectError) as Error)}
         </p>
       )}
     </div>
