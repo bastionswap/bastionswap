@@ -91,6 +91,7 @@ function SwapRow({ swap }: { swap: UserSwap }) {
 
 function LiquidityRow({ event }: { event: UserLiquidityEvent }) {
   const isAdd = event.type === "ADD";
+  const isCollect = event.type === "COLLECT";
   const t0 = useTokenInfo(event.pool.token0 as `0x${string}`);
   const t1 = useTokenInfo(event.pool.token1 as `0x${string}`);
   return (
@@ -104,10 +105,10 @@ function LiquidityRow({ event }: { event: UserLiquidityEvent }) {
       <td className="px-4 py-3">
         <span
           className={`text-xs font-medium ${
-            isAdd ? "text-emerald-600" : "text-red-500"
+            isAdd ? "text-emerald-600" : isCollect ? "text-blue-500" : "text-red-500"
           }`}
         >
-          {isAdd ? "Add" : "Remove"}
+          {isAdd ? "Add" : isCollect ? "Collect Fees" : "Remove"}
         </span>
       </td>
       <td className="text-right text-gray-700 px-4 py-3 text-xs tabular-nums">

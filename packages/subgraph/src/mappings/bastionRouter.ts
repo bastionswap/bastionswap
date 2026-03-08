@@ -45,7 +45,11 @@ export function handleLiquidityChanged(event: LiquidityChanged): void {
   let liqEvent = new LiquidityEvent(eventId);
   liqEvent.pool = poolId;
   liqEvent.sender = event.params.user;
-  liqEvent.type = event.params.liquidityDelta.gt(ZERO_BI) ? "ADD" : "REMOVE";
+  liqEvent.type = event.params.liquidityDelta.gt(ZERO_BI)
+    ? "ADD"
+    : event.params.liquidityDelta.lt(ZERO_BI)
+      ? "REMOVE"
+      : "COLLECT";
   liqEvent.amount0 = event.params.amount0;
   liqEvent.amount1 = event.params.amount1;
   liqEvent.liquidity = event.params.liquidityDelta;

@@ -133,7 +133,7 @@ type LiquidityEvent @entity {
   id: ID! # txHash-logIndex
   pool: Pool!
   sender: Bytes!
-  type: String! # "ADD" | "REMOVE"
+  type: String! # "ADD" | "REMOVE" | "COLLECT"
   amount0: BigInt! # raw
   amount1: BigInt! # raw
   liquidity: BigInt!

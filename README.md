@@ -234,7 +234,7 @@ bastionswap/
 | Smart Contracts | Solidity 0.8.26, Foundry, Uniswap V4 |
 | Indexing | The Graph (Subgraph Studio) |
 | Frontend | Next.js 14, React 18, TypeScript |
-| Wallet | wagmi v2, ConnectKit, viem |
+| Wallet | wagmi v2, RainbowKit, viem |
 | Styling | Tailwind CSS (custom dark theme) |
 | Data Fetching | graphql-request, @tanstack/react-query |
 | Target Chain | Base (EVM Cancun) |
