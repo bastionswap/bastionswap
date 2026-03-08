@@ -93,6 +93,7 @@ contract BastionHook is BaseTestHooks {
     error NoAllowedBaseToken();
     error BaseTokenAlreadySet(address token);
     error BaseTokenNotSet(address token);
+    error EscrowTriggered();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -249,6 +250,17 @@ contract BastionHook is BaseTestHooks {
             : 0;
 
         if (removeAmount == 0) {
+            // Fee collection (liquidityDelta == 0)
+            // Block issuer fee collection after trigger
+            if (sender == _issuerLPOwner[poolId] && hookData.length > 0) {
+                address user = abi.decode(hookData, (address));
+                if (user == issuer) {
+                    uint256 escrowId = _escrowIds[poolId];
+                    if (escrowVault.isTriggered(escrowId)) {
+                        revert EscrowTriggered();
+                    }
+                }
+            }
             return IHooks.beforeRemoveLiquidity.selector;
         }
 
@@ -398,6 +410,9 @@ contract BastionHook is BaseTestHooks {
 
         // Set transient flag to bypass vesting checks in beforeRemoveLiquidity
         _tstore(_FORCE_REMOVAL_SLOT, 1);
+
+        // Collect unclaimed issuer fees from salt-0 position before LP removal
+        IBastionRouter(bastionRouter).forceCollectFees(key, address(this));
 
         // Call router to force-remove liquidity, tokens/ETH sent to this contract
         IBastionRouter(bastionRouter).forceRemoveLiquidity(key, uint128(liquidity), address(this));

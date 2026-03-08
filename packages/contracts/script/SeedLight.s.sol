@@ -7,11 +7,11 @@ import {TestToken} from "../src/test/TestToken.sol";
 import {IEscrowVault} from "../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../src/interfaces/ITriggerOracle.sol";
 
-/// @title SeedLight — Deploy 2 test tokens, create 1 pool, report addresses
+/// @title SeedLight — Deploy 2 test tokens, create 2 pools, report addresses
 contract SeedLight is Script {
     address constant POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
-    address constant HOOK = 0xDD1B637114B55C54117437D9bA8CddA646330aC8;
-    address constant ROUTER = 0x6e2B3Ba459CbB83662a83c375225F5FDd39f0F63;
+    address constant HOOK = 0x31215Df7FC43e8fe65D8d307dfa23C420A384Ac8;
+    address constant ROUTER = 0x47D59B67b2E39E74443Dbdb84B0dEf9E00F19537;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
 
@@ -42,12 +42,24 @@ contract SeedLight is Script {
             hookData
         );
 
+        // Create ETH/ALPHA pool with 0.0001 ETH + 500 ALPHA
+        alpha.approve(ROUTER, type(uint256).max);
+        bytes memory hookData2 = _buildHookData(deployer, address(alpha));
+        BastionPositionRouter(payable(ROUTER)).createPool{value: 0.0002 ether}(
+            address(alpha),
+            address(0), // ETH as base token
+            3000,
+            500e18,     // 500 ALPHA
+            SQRT_PRICE_1_1,
+            hookData2
+        );
+
         vm.stopBroadcast();
 
         console2.log("");
         console2.log("=== Seeding Complete ===");
         console2.log("BTT (pool created):", address(btt));
-        console2.log("ALPHA (no pool yet):", address(alpha));
+        console2.log("ALPHA (pool created):", address(alpha));
         console2.log("Call btt.faucet() / alpha.faucet() for 1000 tokens");
     }
 

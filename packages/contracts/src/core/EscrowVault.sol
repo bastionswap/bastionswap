@@ -401,6 +401,11 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         return score;
     }
 
+    /// @inheritdoc IEscrowVault
+    function isTriggered(uint256 escrowId) external view returns (bool) {
+        return _escrows[escrowId].isTriggered;
+    }
+
     /// @notice Returns a proportional strictness score (0..200) for reputation scoring.
     /// @param escrowId Identifier of the escrow position
     /// @return score 0 = default or looser, up to 200 = maximum strictness

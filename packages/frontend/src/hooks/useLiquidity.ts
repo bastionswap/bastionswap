@@ -434,3 +434,50 @@ export function useCollectFees() {
     reset,
   };
 }
+
+export function useCollectIssuerFees() {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+
+  const {
+    writeContract,
+    data: hash,
+    isPending: isWriting,
+    error,
+    reset,
+  } = useWriteContract();
+
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
+    useWaitForTransactionReceipt({ hash });
+
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
+
+  const collectIssuerFees = (
+    poolKey: {
+      currency0: `0x${string}`;
+      currency1: `0x${string}`;
+      fee: number;
+      tickSpacing: number;
+      hooks: `0x${string}`;
+    }
+  ) => {
+    if (!contracts) return;
+
+    writeContract({
+      address: contracts.BastionPositionRouter as `0x${string}`,
+      abi: BastionPositionRouterABI,
+      functionName: "collectIssuerFees",
+      args: [poolKey],
+    });
+  };
+
+  return {
+    collectIssuerFees,
+    hash,
+    isWriting,
+    isConfirming,
+    isSuccess,
+    error,
+    reset,
+  };
+}

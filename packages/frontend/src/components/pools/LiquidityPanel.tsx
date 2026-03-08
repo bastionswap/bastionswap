@@ -15,6 +15,7 @@ import {
   useAddLiquidity,
   useRemoveLiquidity,
   useCollectFees,
+  useCollectIssuerFees,
   type SubgraphPosition,
 } from "@/hooks/useLiquidity";
 import type { SubgraphPool } from "@/hooks/usePools";
@@ -141,11 +142,21 @@ function PositionCard({
     reset: resetCollect,
   } = useCollectFees();
 
+  const {
+    collectIssuerFees,
+    isWriting: isIssuerCollecting,
+    isConfirming: isIssuerCollectConfirming,
+    isSuccess: issuerCollectSuccess,
+    error: issuerCollectError,
+    reset: resetIssuerCollect,
+  } = useCollectIssuerFees();
+
   // Reset on success
-  if (removeSuccess || collectSuccess) {
+  if (removeSuccess || collectSuccess || issuerCollectSuccess) {
     setTimeout(() => {
       resetRemove();
       resetCollect();
+      resetIssuerCollect();
       setRemovePercent(null);
       onAction();
     }, 2000);
@@ -171,7 +182,11 @@ function PositionCard({
     collectFees(poolKey, position.tickLower, position.tickUpper);
   };
 
-  const isBusy = isRemoving || isRemoveConfirming || isCollecting || isCollectConfirming;
+  const handleIssuerCollect = () => {
+    collectIssuerFees(poolKey);
+  };
+
+  const isBusy = isRemoving || isRemoveConfirming || isCollecting || isCollectConfirming || isIssuerCollecting || isIssuerCollectConfirming;
 
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-4">
@@ -190,13 +205,22 @@ function PositionCard({
       </div>
 
       {isIssuer ? (
-        <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
-          <svg className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p className="text-xs text-amber-700">
-            Issuer LP is <span className="font-semibold">escrowed</span> and subject to vesting. Manage your LP from the <span className="font-semibold">Escrow</span> panel above.
-          </p>
+        <div className="space-y-2">
+          <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
+            <svg className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-xs text-amber-700">
+              Issuer LP is <span className="font-semibold">escrowed</span> and subject to vesting. Manage your LP from the <span className="font-semibold">Escrow</span> panel above.
+            </p>
+          </div>
+          <button
+            onClick={handleIssuerCollect}
+            disabled={isBusy}
+            className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isIssuerCollecting || isIssuerCollectConfirming ? <LoadingSpinner size="sm" /> : "Collect Fees"}
+          </button>
         </div>
       ) : (
         <div className="flex items-center gap-2 flex-wrap">
@@ -228,15 +252,15 @@ function PositionCard({
         </div>
       )}
 
-      {(removeSuccess || collectSuccess) && (
+      {(removeSuccess || collectSuccess || issuerCollectSuccess) && (
         <p className="text-xs text-emerald-600 mt-2">
           {removeSuccess ? "Liquidity removed!" : "Fees collected!"}
         </p>
       )}
 
-      {(removeError || collectError) && (
+      {(removeError || collectError || issuerCollectError) && (
         <p className="text-xs text-red-500 mt-2">
-          {parseErrorMessage((removeError || collectError) as Error)}
+          {parseErrorMessage((removeError || collectError || issuerCollectError) as Error)}
         </p>
       )}
     </div>

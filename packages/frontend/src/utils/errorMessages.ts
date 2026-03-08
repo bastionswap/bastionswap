@@ -19,6 +19,7 @@ const ERROR_MAP: Record<string, string> = {
 
   // ─── BastionHook ──────────────────────────────────────
   ExceedsVestedAmount: "Cannot remove more LP than vested amount.",
+  EscrowTriggered: "This pool has been flagged. Fee collection is blocked.",
   BelowMinBaseAmount: "Base token amount is below the required minimum.",
   NoAllowedBaseToken: "At least one token must be an allowed base token (ETH, WETH, or USDC).",
   InvalidHookData: "Invalid pool creation data.",

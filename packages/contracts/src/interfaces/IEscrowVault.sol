@@ -167,4 +167,9 @@ interface IEscrowVault {
     /// @param escrowId Identifier of the escrow position
     /// @return score 0 = default or looser, up to 200 = maximum strictness
     function getVestingStrictnessScore(uint256 escrowId) external view returns (uint256 score);
+
+    /// @notice Returns whether an escrow has been triggered (rug-pull detected).
+    /// @param escrowId Identifier of the escrow position
+    /// @return True if the escrow has been triggered
+    function isTriggered(uint256 escrowId) external view returns (bool);
 }

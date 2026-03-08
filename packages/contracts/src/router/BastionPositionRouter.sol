@@ -36,6 +36,8 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     uint8 private constant ACTION_CREATE_POOL_PERMIT2 = 5;
     uint8 private constant ACTION_ADD_LIQUIDITY_V2_PERMIT2 = 6;
     uint8 private constant ACTION_REMOVE_ISSUER_LP = 7;
+    uint8 private constant ACTION_COLLECT_ISSUER_FEES = 8;
+    uint8 private constant ACTION_FORCE_COLLECT_FEES = 9;
 
     /// @dev BastionHook address for access control on forceRemoveLiquidity
     address public bastionHook;
@@ -93,6 +95,16 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     function forceRemoveLiquidity(PoolKey calldata key, uint128 liquidity, address recipient) external override {
         if (msg.sender != bastionHook) revert OnlyHook();
         poolManager.unlock(abi.encode(ACTION_FORCE_REMOVE_ISSUER_LP, recipient, key, liquidity));
+    }
+
+    /// @notice Force-collects unclaimed fees from issuer's salt-0 position.
+    /// @dev Called by BastionHook during force removal. Only callable by the hook.
+    function forceCollectFees(PoolKey calldata key, address recipient) external override {
+        if (msg.sender != bastionHook) revert OnlyHook();
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        poolManager.unlock(abi.encode(ACTION_FORCE_COLLECT_FEES, recipient, key, tickLower, tickUpper));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -289,6 +301,19 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         _refundETH();
     }
 
+    /// @notice Collect accumulated fees for the issuer's salt-0 position.
+    /// @dev Issuer LP uses salt=0, so needs a separate fee collection path.
+    ///      Passes hookData with sender so BastionHook can verify issuer & check trigger.
+    function collectIssuerFees(PoolKey calldata key) external {
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        poolManager.unlock(abi.encode(
+            ACTION_COLLECT_ISSUER_FEES, msg.sender, key, tickLower, tickUpper
+        ));
+        _refundETH();
+    }
+
     /// @notice View a user's position liquidity.
     function getPositionLiquidity(
         PoolKey calldata key,
@@ -327,6 +352,10 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
             return _handleAddLPV2Permit2(data);
         } else if (action == ACTION_REMOVE_ISSUER_LP) {
             return _handleRemoveIssuerLP(data);
+        } else if (action == ACTION_COLLECT_ISSUER_FEES) {
+            return _handleCollectIssuerFees(data);
+        } else if (action == ACTION_FORCE_COLLECT_FEES) {
+            return _handleForceCollectFees(data);
         }
 
         revert("Unknown action");
@@ -620,6 +649,52 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         _settle(key.currency1, sender, delta.amount1());
 
         emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, 0, delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleCollectIssuerFees(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, int24 tickLower, int24 tickUpper) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24));
+
+        // Issuer LP uses salt=0, pass hookData so hook can verify issuer & check trigger
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: 0,
+                salt: 0
+            }),
+            abi.encode(sender)
+        );
+
+        _settle(key.currency0, sender, delta.amount0());
+        _settle(key.currency1, sender, delta.amount1());
+
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, 0, delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    /// @dev Force-collect issuer fees during trigger. Sends to recipient (BastionHook).
+    function _handleForceCollectFees(bytes calldata data) internal returns (bytes memory) {
+        (, address recipient, PoolKey memory key, int24 tickLower, int24 tickUpper) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24));
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: 0,
+                salt: 0
+            }),
+            ""
+        );
+
+        _settleToRecipient(key.currency0, recipient, delta.amount0());
+        _settleToRecipient(key.currency1, recipient, delta.amount1());
 
         return abi.encode(delta);
     }

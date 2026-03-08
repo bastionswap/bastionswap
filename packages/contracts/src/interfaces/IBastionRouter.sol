@@ -12,4 +12,10 @@ interface IBastionRouter {
     /// @param liquidity Amount of liquidity to remove
     /// @param recipient Address to receive the removed tokens/ETH
     function forceRemoveLiquidity(PoolKey calldata key, uint128 liquidity, address recipient) external;
+
+    /// @notice Force-collects unclaimed fees from issuer's salt-0 position and sends to recipient.
+    /// @dev Called by BastionHook during force removal. Only callable by the hook.
+    /// @param key Pool key
+    /// @param recipient Address to receive the collected fees
+    function forceCollectFees(PoolKey calldata key, address recipient) external;
 }
