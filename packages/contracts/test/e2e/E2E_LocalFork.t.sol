@@ -717,8 +717,7 @@ contract E2E_LocalFork is Test {
         uint256 score = reputationEngine.getScore(issuerA);
         assertGe(score, 100, "score at least baseline");
 
-        // 11c: Treasury claim after grace period (90d + 30d = 120d from creation)
-        vm.warp(poolACreatedAt + 120 days + 1);
+        // 11c: Treasury claim after full vesting
         vm.prank(deployer);
         insurancePool.setTreasury(deployer); // governance sets treasury
 

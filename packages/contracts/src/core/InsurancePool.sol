@@ -19,7 +19,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     uint40 internal constant CLAIM_PERIOD = 30 days;
     uint40 internal constant FALLBACK_CLAIM_PERIOD = 7 days;
     uint40 internal constant EMERGENCY_DELAY = 2 days;
-    uint40 internal constant TREASURY_GRACE_PERIOD = 30 days;
+
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -88,7 +88,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error EmergencyRequestAlreadyExecuted();
     error InsufficientTokenBalance();
     error EscrowNotFullyVested();
-    error GracePeriodNotPassed();
+
     error TreasuryNotSet();
 
     // ─── Modifiers ────────────────────────────────────────────────────
@@ -351,10 +351,6 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
         // Escrow must be fully vested
         if (!ESCROW_VAULT.isFullyVested(poolId)) revert EscrowNotFullyVested();
-
-        // Grace period must have passed since vesting end
-        uint256 vestingEndTime = ESCROW_VAULT.getVestingEndTime(poolId);
-        if (block.timestamp < vestingEndTime + TREASURY_GRACE_PERIOD) revert GracePeriodNotPassed();
 
         uint256 ethAmount = pool.balance;
         pool.balance = 0;

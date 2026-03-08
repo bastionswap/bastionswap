@@ -952,9 +952,6 @@ contract InsurancePoolTest is Test {
         uint256 vestingEnd = block.timestamp;
         mockEscrow.setVestingEndTime(vestingEnd);
 
-        // Warp past grace period
-        vm.warp(vestingEnd + 30 days + 1);
-
         vm.prank(governance);
         treasuryPool.claimTreasuryFunds(defaultPoolId);
 
@@ -974,9 +971,6 @@ contract InsurancePoolTest is Test {
         treasuryPool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(0));
 
         mockEscrow.setFullyVested(true);
-        uint256 vestingEnd = block.timestamp;
-        mockEscrow.setVestingEndTime(vestingEnd);
-        vm.warp(vestingEnd + 30 days + 1);
 
         vm.prank(governance);
         vm.expectRevert(InsurancePool.AlreadyTriggered.selector);
@@ -995,27 +989,10 @@ contract InsurancePoolTest is Test {
         treasuryPool.claimTreasuryFunds(defaultPoolId);
     }
 
-    function test_claimTreasuryFunds_revertsGracePeriodNotPassed() public {
-        (InsurancePool treasuryPool, MockEscrowVault mockEscrow,) = _createTreasuryPool();
-
-        vm.prank(hook);
-        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
-
-        mockEscrow.setFullyVested(true);
-        mockEscrow.setVestingEndTime(block.timestamp); // grace period not yet passed
-
-        vm.prank(governance);
-        vm.expectRevert(InsurancePool.GracePeriodNotPassed.selector);
-        treasuryPool.claimTreasuryFunds(defaultPoolId);
-    }
-
     function test_claimTreasuryFunds_revertsZeroBalance() public {
         (InsurancePool treasuryPool, MockEscrowVault mockEscrow,) = _createTreasuryPool();
 
         mockEscrow.setFullyVested(true);
-        uint256 vestingEnd = block.timestamp;
-        mockEscrow.setVestingEndTime(vestingEnd);
-        vm.warp(vestingEnd + 30 days + 1);
 
         vm.prank(governance);
         vm.expectRevert(InsurancePool.ZeroAmount.selector);
