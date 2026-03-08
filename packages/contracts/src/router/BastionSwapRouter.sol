@@ -4,9 +4,11 @@ pragma solidity =0.8.26;
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -16,7 +18,9 @@ import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol"
 /// @notice Swap-only router for Uniswap V4 pools with BastionHook.
 contract BastionSwapRouter is IUnlockCallback {
     using CurrencyLibrary for Currency;
+    using StateLibrary for IPoolManager;
     using TransientStateLibrary for IPoolManager;
+    using PoolIdLibrary for PoolKey;
 
     IPoolManager public immutable poolManager;
     ISignatureTransfer public immutable permit2;
@@ -57,6 +61,12 @@ contract BastionSwapRouter is IUnlockCallback {
     error ExcessiveInput(uint256 amountIn, uint256 maxAmountIn);
     error TooManyHops();
     error ZeroHops();
+
+    event SwapExecuted(
+        PoolId indexed poolId, address indexed sender,
+        int128 amount0, int128 amount1,
+        uint160 sqrtPriceX96, int24 tick
+    );
 
     constructor(IPoolManager _poolManager, ISignatureTransfer _permit2) {
         poolManager = _poolManager;
@@ -302,6 +312,8 @@ contract BastionSwapRouter is IUnlockCallback {
         _settle(key.currency0, sender, delta.amount0());
         _settle(key.currency1, sender, delta.amount1());
 
+        _emitSwap(key, sender, delta);
+
         return abi.encode(delta);
     }
 
@@ -331,6 +343,8 @@ contract BastionSwapRouter is IUnlockCallback {
             poolManager.take(key.currency1, sender, uint256(uint128(amount1)));
         }
 
+        _emitSwap(key, sender, delta);
+
         return abi.encode(delta);
     }
 
@@ -354,6 +368,7 @@ contract BastionSwapRouter is IUnlockCallback {
             });
 
             BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
+            _emitSwap(steps[i].poolKey, sender, delta);
 
             currentAmount = steps[i].zeroForOne
                 ? uint256(int256(delta.amount1()))
@@ -386,6 +401,7 @@ contract BastionSwapRouter is IUnlockCallback {
             });
 
             BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
+            _emitSwap(steps[i].poolKey, sender, delta);
 
             currentAmount = steps[i].zeroForOne
                 ? uint256(int256(delta.amount1()))
@@ -510,6 +526,12 @@ contract BastionSwapRouter is IUnlockCallback {
             );
             poolManager.settle();
         }
+    }
+
+    /// @dev Emit SwapExecuted with actual user address and post-swap pool state.
+    function _emitSwap(PoolKey memory key, address sender, BalanceDelta delta) internal {
+        (uint160 sqrtPriceX96, int24 tick,,) = poolManager.getSlot0(key.toId());
+        emit SwapExecuted(key.toId(), sender, delta.amount0(), delta.amount1(), sqrtPriceX96, tick);
     }
 
     /// @dev Refund any excess ETH left in the contract.

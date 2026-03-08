@@ -340,35 +340,13 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         (, address sender, CreatePoolParams memory params) =
             abi.decode(data, (uint8, address, CreatePoolParams));
 
-        poolManager.initialize(params.key, params.sqrtPriceX96);
-
-        int24 tickSpacing = params.key.tickSpacing;
-        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
-        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
-
-        uint160 sqrtPriceAX96 = TickMath.getSqrtPriceAtTick(tickLower);
-        uint160 sqrtPriceBX96 = TickMath.getSqrtPriceAtTick(tickUpper);
-        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
-            params.sqrtPriceX96,
-            sqrtPriceAX96,
-            sqrtPriceBX96,
-            params.amount0Max,
-            params.amount1Max
-        );
-
-        (BalanceDelta delta,) = poolManager.modifyLiquidity(
-            params.key,
-            ModifyLiquidityParams({
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                liquidityDelta: int256(uint256(liquidity)),
-                salt: 0
-            }),
-            params.hookData
-        );
+        (BalanceDelta delta, uint128 liquidity, int24 tickLower, int24 tickUpper) = _initAndAddLiquidity(params);
 
         _settle(params.key.currency0, sender, delta.amount0());
         _settle(params.key.currency1, sender, delta.amount1());
+
+        emit LiquidityChanged(params.key.toId(), sender, tickLower, tickUpper,
+            int256(uint256(liquidity)), delta.amount0(), delta.amount1());
 
         return abi.encode(delta);
     }
@@ -377,7 +355,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         (, address sender, CreatePoolParams memory params, bytes memory permitData) =
             abi.decode(data, (uint8, address, CreatePoolParams, bytes));
 
-        BalanceDelta delta = _initAndAddLiquidity(params);
+        (BalanceDelta delta, uint128 liquidity, int24 tickLower, int24 tickUpper) = _initAndAddLiquidity(params);
 
         if (params.key.currency0.isAddressZero()) {
             _settleCreatePoolNativePermit2(params.key, sender, delta, permitData);
@@ -385,18 +363,24 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
             _settleCreatePoolBatchPermit2(params.key, sender, delta, permitData);
         }
 
+        emit LiquidityChanged(params.key.toId(), sender, tickLower, tickUpper,
+            int256(uint256(liquidity)), delta.amount0(), delta.amount1());
+
         return abi.encode(delta);
     }
 
     /// @dev Initialize pool and add full-range liquidity. Shared by both createPool handlers.
-    function _initAndAddLiquidity(CreatePoolParams memory params) internal returns (BalanceDelta delta) {
+    function _initAndAddLiquidity(CreatePoolParams memory params)
+        internal
+        returns (BalanceDelta delta, uint128 liquidity, int24 tickLower, int24 tickUpper)
+    {
         poolManager.initialize(params.key, params.sqrtPriceX96);
 
         int24 tickSpacing = params.key.tickSpacing;
-        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
-        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
 
-        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+        liquidity = LiquidityAmounts.getLiquidityForAmounts(
             params.sqrtPriceX96,
             TickMath.getSqrtPriceAtTick(tickLower),
             TickMath.getSqrtPriceAtTick(tickUpper),

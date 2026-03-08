@@ -417,7 +417,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         assertEq(uint256(vested), uint256(s.totalLiquidity), "100% vested at 90d");
     }
 
-    function _scenario2_noTrigger() internal {
+    function _scenario2_noTrigger() internal view {
         assertFalse(triggerOracle.checkTrigger(_poolId).triggered, "no trigger");
 
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);

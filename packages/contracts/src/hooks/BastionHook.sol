@@ -342,8 +342,8 @@ contract BastionHook is BaseTestHooks {
     function afterSwap(
         address,
         PoolKey calldata key,
-        SwapParams calldata params,
-        BalanceDelta delta,
+        SwapParams calldata,
+        BalanceDelta,
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, int128) {
         PoolId poolId = key.toId();

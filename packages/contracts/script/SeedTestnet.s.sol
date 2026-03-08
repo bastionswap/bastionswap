@@ -20,8 +20,8 @@ import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol"
 contract SeedTestnet is Script {
     // Base Sepolia addresses (v4 deployment — split routers)
     address constant POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
-    address constant HOOK = 0x3E1fb370C3C38Ed972566E2eaF6fbBe6E9b44AC8;
-    address constant ROUTER = 0x6c195167000Be5ADbA07A4D43e68ba1D3a7C269b;
+    address constant HOOK = 0xDD1B637114B55C54117437D9bA8CddA646330aC8;
+    address constant ROUTER = 0x6e2B3Ba459CbB83662a83c375225F5FDd39f0F63;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;

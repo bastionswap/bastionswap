@@ -4,7 +4,7 @@ import {
   Swap as SwapEvent,
   ModifyLiquidity,
 } from "../../generated/PoolManager/PoolManager";
-import { Pool, Swap } from "../../generated/schema";
+import { Pool } from "../../generated/schema";
 import {
   ZERO_BD,
   ZERO_BI,
@@ -77,19 +77,8 @@ export function handleSwap(event: SwapEvent): void {
   pool.reserve1 = reserves[1];
   pool.save();
 
-  // Create Swap entity
-  let swapId = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
-  let swap = new Swap(swapId);
-  swap.pool = poolId;
-  swap.sender = event.params.sender;
-  swap.amount0 = event.params.amount0;
-  swap.amount1 = event.params.amount1;
-  swap.sqrtPriceX96 = event.params.sqrtPriceX96;
-  swap.tick = event.params.tick;
-  swap.timestamp = event.block.timestamp;
-  swap.blockNumber = event.block.number;
-  swap.transaction = event.transaction.hash;
-  swap.save();
+  // Note: Swap entities are created by BastionSwapRouter's SwapExecuted handler
+  // (which has the actual user address, not the router address)
 
   // Update OHLCV data
   let price = sqrtPriceX96ToPrice(event.params.sqrtPriceX96);
