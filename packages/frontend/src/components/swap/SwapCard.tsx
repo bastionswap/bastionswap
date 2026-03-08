@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useAccount, useChainId } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
-import { ConnectKitButton } from "connectkit";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { TokenIcon } from "@/components/ui/TokenIcon";
@@ -38,6 +38,7 @@ const INSURANCE_FEE_BPS = 100;
 export function SwapCard() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
+  const { openConnectModal } = useConnectModal();
   const contracts = getContracts(chainId);
   const [tokenIn, setTokenIn] = useState<Token | null>(null);
   const [tokenOut, setTokenOut] = useState<Token | null>(null);
@@ -563,13 +564,9 @@ export function SwapCard() {
         {/* Action Buttons */}
         <div className="mt-4">
           {!isConnected ? (
-            <ConnectKitButton.Custom>
-              {({ show }) => (
-                <button onClick={show} className="btn-primary w-full py-4 text-base">
-                  Connect Wallet
-                </button>
-              )}
-            </ConnectKitButton.Custom>
+            <button onClick={openConnectModal} className="btn-primary w-full py-4 text-base">
+              Connect Wallet
+            </button>
           ) : !tokenIn || !tokenOut ? (
             <button disabled className="w-full rounded-xl bg-gray-100 py-4 text-base font-semibold text-gray-400 cursor-not-allowed">
               Select Tokens

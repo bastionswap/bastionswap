@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { baseSepolia } from "wagmi/chains";
-import { ConnectKitButton } from "connectkit";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 const NAV_ITEMS = [
   { href: "/swap", label: "Swap", icon: "M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" },
@@ -65,7 +65,7 @@ export function Header() {
               <span className="h-1.5 w-1.5 animate-pulse-slow rounded-full bg-amber-500" />
               Base Sepolia
             </span>
-            <ConnectKitButton />
+            <ConnectButton showBalance={false} chainStatus="icon" />
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
               className="md:hidden rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-600"

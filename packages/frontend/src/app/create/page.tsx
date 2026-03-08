@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useAccount, useChainId, useReadContract } from "wagmi";
-import { ConnectKitButton } from "connectkit";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { formatUnits } from "viem";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -227,7 +227,7 @@ export default function CreatePoolPage() {
         <p className="text-gray-500 mb-8 max-w-sm mx-auto">
           Launch a protected pool with escrow, insurance, and rug-pull triggers. Connect your wallet to get started.
         </p>
-        <ConnectKitButton />
+        <ConnectButton />
       </div>
     );
   }
