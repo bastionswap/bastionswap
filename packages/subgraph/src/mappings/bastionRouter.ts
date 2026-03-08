@@ -1,5 +1,5 @@
 import { BigInt } from "@graphprotocol/graph-ts";
-import { LiquidityChanged } from "../../generated/BastionRouter/BastionRouter";
+import { LiquidityChanged } from "../../generated/BastionPositionRouter/BastionPositionRouter";
 import { LiquidityEvent, Position } from "../../generated/schema";
 import { ZERO_BI } from "./helpers";
 
