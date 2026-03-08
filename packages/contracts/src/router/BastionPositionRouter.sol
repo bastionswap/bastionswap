@@ -35,6 +35,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     uint8 private constant ACTION_FORCE_REMOVE_ISSUER_LP = 4;
     uint8 private constant ACTION_CREATE_POOL_PERMIT2 = 5;
     uint8 private constant ACTION_ADD_LIQUIDITY_V2_PERMIT2 = 6;
+    uint8 private constant ACTION_REMOVE_ISSUER_LP = 7;
 
     /// @dev BastionHook address for access control on forceRemoveLiquidity
     address public bastionHook;
@@ -250,6 +251,31 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         _refundETH();
     }
 
+    /// @notice Remove issuer LP (salt=0 position from createPool).
+    ///         Vesting is enforced by the hook's beforeRemoveLiquidity.
+    function removeIssuerLiquidity(
+        PoolKey calldata key,
+        uint128 liquidityToRemove,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        uint256 deadline
+    ) external {
+        if (block.timestamp > deadline) revert Expired();
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        BalanceDelta delta = abi.decode(
+            poolManager.unlock(abi.encode(
+                ACTION_REMOVE_ISSUER_LP, msg.sender, key, tickLower, tickUpper, liquidityToRemove
+            )),
+            (BalanceDelta)
+        );
+        uint256 out0 = delta.amount0() > 0 ? uint256(int256(delta.amount0())) : 0;
+        uint256 out1 = delta.amount1() > 0 ? uint256(int256(delta.amount1())) : 0;
+        if (out0 < amount0Min || out1 < amount1Min) revert SlippageExceeded();
+        _refundETH();
+    }
+
     /// @notice Collect accumulated fees for a per-user position.
     function collectFees(
         PoolKey calldata key,
@@ -299,6 +325,8 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
             return _handleCreatePoolPermit2(data);
         } else if (action == ACTION_ADD_LIQUIDITY_V2_PERMIT2) {
             return _handleAddLPV2Permit2(data);
+        } else if (action == ACTION_REMOVE_ISSUER_LP) {
+            return _handleRemoveIssuerLP(data);
         }
 
         revert("Unknown action");
@@ -491,7 +519,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
                 liquidityDelta: int256(uint256(liquidity)),
                 salt: salt
             }),
-            ""
+            abi.encode(sender)
         );
 
         _settle(key.currency0, sender, delta.amount0());
@@ -525,7 +553,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
                 liquidityDelta: int256(uint256(liquidity)),
                 salt: salt
             }),
-            ""
+            abi.encode(sender)
         );
 
         if (key.currency0.isAddressZero()) {
@@ -553,7 +581,30 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
                 liquidityDelta: -int256(uint256(liquidityToRemove)),
                 salt: salt
             }),
-            ""
+            abi.encode(sender)
+        );
+
+        _settle(key.currency0, sender, delta.amount0());
+        _settle(key.currency1, sender, delta.amount1());
+
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, -int256(uint256(liquidityToRemove)), delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleRemoveIssuerLP(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, int24 tickLower, int24 tickUpper, uint128 liquidityToRemove) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24, uint128));
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: -int256(uint256(liquidityToRemove)),
+                salt: 0
+            }),
+            abi.encode(sender)
         );
 
         _settle(key.currency0, sender, delta.amount0());

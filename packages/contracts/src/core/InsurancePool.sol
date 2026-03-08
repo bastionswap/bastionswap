@@ -173,8 +173,11 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (pool.isTriggered) revert AlreadyTriggered();
         if (totalEligibleSupply == 0) revert ZeroEligibleSupply();
 
-        // Include escrow ETH in total payout
-        totalPayout = pool.balance + pool.escrowEthBalance;
+        // Include escrow ETH in total payout — merge into balance so
+        // claimCompensation's `pool.balance -= amount` doesn't underflow.
+        pool.balance += pool.escrowEthBalance;
+        pool.escrowEthBalance = 0;
+        totalPayout = pool.balance;
 
         pool.isTriggered = true;
         pool.triggerTimestamp = uint40(block.timestamp);
