@@ -2,6 +2,14 @@ import { http } from "wagmi";
 import { baseSepolia } from "wagmi/chains";
 import { defineChain } from "viem";
 import { getDefaultConfig } from "@rainbow-me/rainbowkit";
+import {
+  phantomWallet,
+  metaMaskWallet,
+  coinbaseWallet,
+  walletConnectWallet,
+  rainbowWallet,
+  braveWallet,
+} from "@rainbow-me/rainbowkit/wallets";
 
 const anvilBaseFork = defineChain({
   id: 31337,
@@ -20,4 +28,17 @@ export const config = getDefaultConfig({
     [baseSepolia.id]: http(),
     [anvilBaseFork.id]: http(),
   },
+  wallets: [
+    {
+      groupName: "Popular",
+      wallets: [
+        metaMaskWallet,
+        phantomWallet,
+        coinbaseWallet,
+        rainbowWallet,
+        braveWallet,
+        walletConnectWallet,
+      ],
+    },
+  ],
 });
