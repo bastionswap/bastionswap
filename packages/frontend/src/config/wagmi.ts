@@ -22,5 +22,6 @@ export const config = createConfig(
     walletConnectProjectId: process.env.NEXT_PUBLIC_WC_PROJECT_ID || "",
     appName: "BastionSwap",
     appDescription: "Protected token swaps on Uniswap V4",
+    appUrl: "https://bastionswap-frontend.vercel.app",
   })
 );

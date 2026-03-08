@@ -19,7 +19,12 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        <ConnectKitProvider theme="midnight">{children}</ConnectKitProvider>
+        <ConnectKitProvider
+          theme="midnight"
+          options={{ walletConnectCTA: "both" }}
+        >
+          {children}
+        </ConnectKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
