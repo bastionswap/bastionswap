@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useReceiptWithTimeout } from "./useReceiptTimeout";
 import {
   useWriteContract,
   useWaitForTransactionReceipt,
@@ -135,8 +136,9 @@ export function useCreateBastionPool() {
     error: approveTokenError,
     reset: resetApproveToken,
   } = useWriteContract();
-  const { isSuccess: isApproveTokenConfirmed } =
+  const { isLoading: isApproveTokenLoading, isSuccess: isApproveTokenSuccess } =
     useWaitForTransactionReceipt({ hash: approveTokenHash });
+  const { isSuccess: isApproveTokenConfirmed } = useReceiptWithTimeout(approveTokenHash, isApproveTokenLoading, isApproveTokenSuccess);
 
   // Approve base token → Permit2
   const {
@@ -145,8 +147,9 @@ export function useCreateBastionPool() {
     error: approveBaseError,
     reset: resetApproveBase,
   } = useWriteContract();
-  const { isSuccess: isApproveBaseConfirmed } =
+  const { isLoading: isApproveBaseLoading, isSuccess: isApproveBaseSuccess } =
     useWaitForTransactionReceipt({ hash: approveBaseHash });
+  const { isSuccess: isApproveBaseConfirmed } = useReceiptWithTimeout(approveBaseHash, isApproveBaseLoading, isApproveBaseSuccess);
 
   // Sign Permit2 typed data
   const {
@@ -163,8 +166,9 @@ export function useCreateBastionPool() {
     error: createPoolError,
     reset: resetCreatePool,
   } = useWriteContract();
-  const { isSuccess: isCreatePoolConfirmed } =
+  const { isLoading: isCreatePoolLoading, isSuccess: isCreatePoolReceipt } =
     useWaitForTransactionReceipt({ hash: createPoolHash });
+  const { isSuccess: isCreatePoolConfirmed } = useReceiptWithTimeout(createPoolHash, isCreatePoolLoading, isCreatePoolReceipt);
 
   // Stored permit data for use after signing
   const [permitState, setPermitState] = useState<{

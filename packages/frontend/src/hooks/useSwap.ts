@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useReceiptWithTimeout } from "./useReceiptTimeout";
 import {
   useWriteContract,
   useWaitForTransactionReceipt,
@@ -147,8 +148,9 @@ export function useApprove() {
     reset,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } =
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
     useWaitForTransactionReceipt({ hash });
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
   const approve = (token: `0x${string}`, _spender: `0x${string}`, _amount: bigint) => {
     // Always approve to Permit2 with max approval (one-time, reusable)
@@ -198,8 +200,9 @@ export function useExecuteSwap() {
     reset: resetWrite,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } =
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
     useWaitForTransactionReceipt({ hash });
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
   const [pendingSwap, setPendingSwap] = useState<SwapConfig | null>(null);
   const [permitNonce, setPermitNonce] = useState<bigint>(0n);
@@ -347,8 +350,9 @@ export function useFaucet(faucetAddress: `0x${string}` | undefined, account: `0x
     reset,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } =
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
     useWaitForTransactionReceipt({ hash });
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
   const claim = () => {
     if (!faucetAddress) return;
@@ -404,8 +408,9 @@ export function useExecuteMultiHopSwap() {
     reset: resetWrite,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } =
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
     useWaitForTransactionReceipt({ hash });
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
   const [pendingSwap, setPendingSwap] = useState<MultiHopSwapConfig | null>(null);
   const [permitNonce, setPermitNonce] = useState<bigint>(0n);

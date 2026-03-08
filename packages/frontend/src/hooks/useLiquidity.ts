@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useReceiptWithTimeout } from "./useReceiptTimeout";
 import {
   useWriteContract,
   useWaitForTransactionReceipt,
@@ -131,8 +132,10 @@ export function useAddLiquidity() {
     reset: resetWrite,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } =
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
     useWaitForTransactionReceipt({ hash });
+
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
   const [pendingAdd, setPendingAdd] = useState<AddLiquidityConfig | null>(null);
   const [permitNonce, setPermitNonce] = useState<bigint>(0n);
@@ -346,8 +349,10 @@ export function useRemoveLiquidity() {
     reset,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } =
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
     useWaitForTransactionReceipt({ hash });
+
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
   const removeLiquidity = (config: RemoveLiquidityConfig) => {
     if (!contracts) return;
@@ -393,8 +398,10 @@ export function useCollectFees() {
     reset,
   } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } =
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
     useWaitForTransactionReceipt({ hash });
+
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
   const collectFees = (
     poolKey: {
