@@ -21,6 +21,8 @@ interface EscrowStatusProps {
   tokenLabel?: string;
   tokenSymbol?: string;
   vestingEndTime?: number;
+  /** Compact mode for sidebar display — hides VestingChart, uses smaller stats grid */
+  compact?: boolean;
 }
 
 const DEFAULT_TOTAL_DAYS = 90;
@@ -259,7 +261,7 @@ function VestingTimeline({
   );
 }
 
-export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
+export function EscrowStatus({ escrow, vestingEndTime, compact }: EscrowStatusProps) {
   const total = parseFloat(escrow.totalLiquidity);
   const removed = parseFloat(escrow.removedLiquidity);
   const remaining = parseFloat(escrow.remainingLiquidity);
@@ -341,9 +343,9 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
       {/* Progress bar + stats */}
       <div className="px-6 pb-4">
         {/* Big number */}
-        <div className="flex items-end justify-between mb-4">
+        <div className={`flex items-end justify-between mb-4 ${compact ? "flex-wrap gap-3" : ""}`}>
           <div>
-            <p className="text-3xl font-bold text-gray-900 tabular-nums">{progress.toFixed(1)}%</p>
+            <p className={`font-bold text-gray-900 tabular-nums ${compact ? "text-2xl" : "text-3xl"}`}>{progress.toFixed(1)}%</p>
             <p className="text-xs text-gray-400 mt-0.5">vested so far</p>
           </div>
           {!escrow.isTriggered && !allVested && isLocked && (
@@ -371,7 +373,7 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
         </div>
 
         {/* Stats grid */}
-        <div className="grid grid-cols-3 gap-3 mb-1">
+        <div className={`grid gap-3 mb-1 ${compact ? "grid-cols-2" : "grid-cols-3"}`}>
           {[
             {
               label: "Total LP Locked",
@@ -426,8 +428,8 @@ export function EscrowStatus({ escrow, vestingEndTime }: EscrowStatusProps) {
         </div>
       )}
 
-      {/* Vesting Chart */}
-      {!escrow.isTriggered && totalDuration > 0 && (
+      {/* Vesting Chart — hidden in compact/sidebar mode */}
+      {!compact && !escrow.isTriggered && totalDuration > 0 && (
         <div className="border-t border-subtle px-6 py-4">
           <VestingChart
             lockDays={lockDays}

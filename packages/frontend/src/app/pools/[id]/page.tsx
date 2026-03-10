@@ -134,7 +134,7 @@ function TriggerBanner({
 
   if (alreadyClaimed) {
     return (
-      <div className="mb-6 flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 px-5 py-4">
+      <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 px-5 py-4">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100">
           <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -151,7 +151,7 @@ function TriggerBanner({
   if (isTriggered) {
     const isFallback = !useMerkleProof;
     return (
-      <div className={`mb-6 rounded-2xl border px-5 py-4 ${isFallback ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"}`}>
+      <div className={`rounded-2xl border px-5 py-4 ${isFallback ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"}`}>
         <div className="flex items-start gap-4">
           <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isFallback ? "bg-amber-100" : "bg-red-100"}`}>
             <svg className={`h-6 w-6 ${isFallback ? "text-amber-600" : "text-red-600"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -211,7 +211,7 @@ function TriggerBanner({
 
   if (hasPending && hasMerkleRoot && !canExecute) {
     return (
-      <div className="mb-6 flex items-start gap-4 rounded-2xl bg-amber-50 border border-amber-200 px-5 py-4">
+      <div className="flex items-start gap-4 rounded-2xl bg-amber-50 border border-amber-200 px-5 py-4">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100">
           <svg className="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -227,7 +227,7 @@ function TriggerBanner({
 
   if (hasPending && !canExecute) {
     return (
-      <div className="mb-6 flex items-start gap-4 rounded-2xl bg-amber-50 border border-amber-200 px-5 py-4">
+      <div className="flex items-start gap-4 rounded-2xl bg-amber-50 border border-amber-200 px-5 py-4">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100">
           <svg className="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
@@ -467,142 +467,152 @@ export default function PoolDetailPage() {
         </div>
       </div>
 
-      {/* Price Chart & Recent Trades — shown for all pools */}
-      <div className="mb-6">
-        <PriceChart poolId={pool.id} />
-      </div>
-      <div className="mb-6">
-        <RecentTrades
-          poolId={pool.id}
-          token0={pool.token0}
-          token1={pool.token1}
-          issuedToken={pool.issuedToken ?? undefined}
-        />
-      </div>
-
       {pool.isBastion ? (
-        <>
-          {/* Trigger banner */}
-          <TriggerBanner
-            poolId={pool.id}
-            pool={pool}
-            address={address}
-            alreadyClaimed={!!alreadyClaimed}
-            claimedAmount={claimedAmount}
-            estimatedCompensation={estimatedCompensation as bigint | undefined}
-            holderBalance={holderBalance}
-            onClaim={handleClaim}
-          />
-
-          {/* Claim status */}
-          {(isClaiming || isClaimConfirming) && (
-            <div className="mb-6 flex items-center justify-center gap-2 rounded-2xl bg-gray-50 px-4 py-4">
-              <LoadingSpinner size="sm" />
-              <span className="text-sm text-gray-500">
-                {isClaiming ? "Confirm in wallet..." : "Processing claim..."}
-              </span>
-            </div>
-          )}
-          {claimSuccess && !alreadyClaimed && (
-            <div className="mb-6 flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-4">
-              <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm text-emerald-700 font-medium">
-                Compensation claimed successfully!
-              </span>
-            </div>
-          )}
-
-          {/* Escrow — full width for the timeline */}
-          {pool.escrow && (
-            <div className="mb-6">
-              <EscrowStatus
-                escrow={pool.escrow}
-                vestingEndTime={vestingEndTime ? Number(vestingEndTime) : undefined}
-              />
-            </div>
-          )}
-
-          {/* Insurance + Issuer side by side */}
-          <div className="grid gap-6 lg:grid-cols-2 mb-6">
-            {pool.insurancePool && (
-              <InsuranceStatus
-                poolId={pool.id}
-                insurance={pool.insurancePool}
-                issuedToken={pool.issuedToken}
-                tokenSymbol={issuedTokenLabel}
-                onClaim={
-                  pool.insurancePool.isTriggered && !alreadyClaimed && address
-                    ? handleClaim
-                    : undefined
-                }
-              />
-            )}
-            {pool.issuer && (
-              <IssuerInfo
-                issuer={pool.issuer}
-                commitment={pool.escrow?.commitment}
-                lockDuration={pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : undefined}
-                vestingDuration={pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : undefined}
-                vestingStrictness={(() => {
-                  const lock = pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : 0;
-                  const vesting = pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : 0;
-                  const total = lock + vesting;
-                  if (total === 0) return null;
-                  const defaultTotal = 90 * 86400;
-                  if (total < defaultTotal) return "looser" as const;
-                  if (total === defaultTotal) return "default" as const;
-                  return "stricter" as const;
-                })()}
-                poolCommitment={poolCommitment as {
-                  lockDuration: number | bigint;
-                  vestingDuration: number | bigint;
-                  maxSingleLpRemovalBps: number | bigint;
-                  maxCumulativeLpRemovalBps: number | bigint;
-                  maxDailySellBps: number | bigint;
-                  weeklyDumpWindowSeconds: number | bigint;
-                  weeklyDumpThresholdBps: number | bigint;
-                  createdAt: number | bigint;
-                  isSet: boolean;
-                } | undefined}
-                isStricterThanDefault={isStricterThanDefault as boolean | undefined}
-                triggerConfig={triggerConfig as {
-                  lpRemovalThreshold: number | bigint;
-                  dumpThresholdPercent: number | bigint;
-                  dumpWindowSeconds: number | bigint;
-                  taxDeviationThreshold: number | bigint;
-                  slowRugWindowSeconds: number | bigint;
-                  slowRugCumulativeThreshold: number | bigint;
-                  weeklyDumpWindowSeconds: number | bigint;
-                  weeklyDumpThresholdPercent: number | bigint;
-                } | undefined}
-              />
-            )}
+        <div className="lg:grid lg:grid-cols-5 lg:gap-6">
+          {/* ── Left column: Chart + Trades ── */}
+          <div className="lg:col-span-3 space-y-6">
+            <PriceChart poolId={pool.id} />
+            <RecentTrades
+              poolId={pool.id}
+              token0={pool.token0}
+              token1={pool.token1}
+              issuedToken={pool.issuedToken ?? undefined}
+            />
           </div>
 
-          {/* Trigger history */}
-          {pool.triggerEvents && pool.triggerEvents.length > 0 && (
-            <TriggerHistory events={pool.triggerEvents} />
-          )}
+          {/* ── Right sidebar: Protection info ── */}
+          <div className="lg:col-span-2 mt-6 lg:mt-0">
+            <div className="space-y-4 lg:sticky lg:top-6">
+              {/* Trigger banner */}
+              <TriggerBanner
+                poolId={pool.id}
+                pool={pool}
+                address={address}
+                alreadyClaimed={!!alreadyClaimed}
+                claimedAmount={claimedAmount}
+                estimatedCompensation={estimatedCompensation as bigint | undefined}
+                holderBalance={holderBalance}
+                onClaim={handleClaim}
+              />
 
-          {/* General LP management */}
-          <div className="mt-6">
+              {/* Claim status */}
+              {(isClaiming || isClaimConfirming) && (
+                <div className="flex items-center justify-center gap-2 rounded-2xl bg-gray-50 px-4 py-4">
+                  <LoadingSpinner size="sm" />
+                  <span className="text-sm text-gray-500">
+                    {isClaiming ? "Confirm in wallet..." : "Processing claim..."}
+                  </span>
+                </div>
+              )}
+              {claimSuccess && !alreadyClaimed && (
+                <div className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-4">
+                  <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-sm text-emerald-700 font-medium">
+                    Compensation claimed successfully!
+                  </span>
+                </div>
+              )}
+
+              {/* Escrow */}
+              {pool.escrow && (
+                <EscrowStatus
+                  escrow={pool.escrow}
+                  vestingEndTime={vestingEndTime ? Number(vestingEndTime) : undefined}
+                  compact
+                />
+              )}
+
+              {/* Insurance */}
+              {pool.insurancePool && (
+                <InsuranceStatus
+                  poolId={pool.id}
+                  insurance={pool.insurancePool}
+                  issuedToken={pool.issuedToken}
+                  tokenSymbol={issuedTokenLabel}
+                  onClaim={
+                    pool.insurancePool.isTriggered && !alreadyClaimed && address
+                      ? handleClaim
+                      : undefined
+                  }
+                />
+              )}
+
+              {/* Issuer info */}
+              {pool.issuer && (
+                <IssuerInfo
+                  issuer={pool.issuer}
+                  commitment={pool.escrow?.commitment}
+                  lockDuration={pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : undefined}
+                  vestingDuration={pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : undefined}
+                  vestingStrictness={(() => {
+                    const lock = pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : 0;
+                    const vesting = pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : 0;
+                    const total = lock + vesting;
+                    if (total === 0) return null;
+                    const defaultTotal = 90 * 86400;
+                    if (total < defaultTotal) return "looser" as const;
+                    if (total === defaultTotal) return "default" as const;
+                    return "stricter" as const;
+                  })()}
+                  poolCommitment={poolCommitment as {
+                    lockDuration: number | bigint;
+                    vestingDuration: number | bigint;
+                    maxSingleLpRemovalBps: number | bigint;
+                    maxCumulativeLpRemovalBps: number | bigint;
+                    maxDailySellBps: number | bigint;
+                    weeklyDumpWindowSeconds: number | bigint;
+                    weeklyDumpThresholdBps: number | bigint;
+                    createdAt: number | bigint;
+                    isSet: boolean;
+                  } | undefined}
+                  isStricterThanDefault={isStricterThanDefault as boolean | undefined}
+                  triggerConfig={triggerConfig as {
+                    lpRemovalThreshold: number | bigint;
+                    dumpThresholdPercent: number | bigint;
+                    dumpWindowSeconds: number | bigint;
+                    taxDeviationThreshold: number | bigint;
+                    slowRugWindowSeconds: number | bigint;
+                    slowRugCumulativeThreshold: number | bigint;
+                    weeklyDumpWindowSeconds: number | bigint;
+                    weeklyDumpThresholdPercent: number | bigint;
+                  } | undefined}
+                />
+              )}
+
+              {/* Trigger history */}
+              {pool.triggerEvents && pool.triggerEvents.length > 0 && (
+                <TriggerHistory events={pool.triggerEvents} />
+              )}
+
+              {/* Liquidity management */}
+              <LiquidityPanel pool={pool} />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Non-Bastion: chart + trades full width, then liquidity */}
+          <div className="space-y-6">
+            <PriceChart poolId={pool.id} />
+            <RecentTrades
+              poolId={pool.id}
+              token0={pool.token0}
+              token1={pool.token1}
+              issuedToken={pool.issuedToken ?? undefined}
+            />
+            <Card className="py-8 text-center">
+              <p className="text-sm font-medium text-gray-500 mb-1">
+                This pool is not protected by BastionSwap
+              </p>
+              <p className="text-xs text-gray-400">
+                Standard Uniswap V4 pool — no escrow, insurance, or trigger protection.
+              </p>
+            </Card>
             <LiquidityPanel pool={pool} />
           </div>
         </>
-      ) : (
-        <div className="space-y-6">
-          <Card className="py-8 text-center">
-            <p className="text-sm font-medium text-gray-500 mb-1">
-              This pool is not protected by BastionSwap
-            </p>
-            <p className="text-xs text-gray-400">
-              Standard Uniswap V4 pool — no escrow, insurance, or trigger protection.
-            </p>
-          </Card>
-          <LiquidityPanel pool={pool} />
-        </div>
       )}
     </div>
   );
