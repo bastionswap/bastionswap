@@ -10,8 +10,8 @@ import {ITriggerOracle} from "../src/interfaces/ITriggerOracle.sol";
 /// @title SeedLight — Deploy 2 test tokens, create 2 pools, report addresses
 contract SeedLight is Script {
     address constant POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
-    address constant HOOK = 0x31215Df7FC43e8fe65D8d307dfa23C420A384Ac8;
-    address constant ROUTER = 0x47D59B67b2E39E74443Dbdb84B0dEf9E00F19537;
+    address constant HOOK = 0x2fd8A3d76815f6a287544261C7A69f181cDC0aC8;
+    address constant ROUTER = 0x9649345E136d2a8804B5D598ee859d18d4A2aBae;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
 

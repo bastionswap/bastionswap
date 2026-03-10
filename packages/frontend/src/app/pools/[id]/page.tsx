@@ -260,6 +260,8 @@ export default function PoolDetailPage() {
 
   const { data: vestingEndTime } = useVestingEndTime(pool?.isBastion ? poolId as `0x${string}` : undefined);
 
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
   const hookAddress = contracts?.BastionHook as `0x${string}` | undefined;
   const { data: poolCommitment } = useReadContract({
     address: hookAddress,
@@ -285,8 +287,6 @@ export default function PoolDetailPage() {
     holderBalance
   );
 
-  const chainId = useChainId();
-  const contracts = getContracts(chainId);
   const { writeContract, data: claimHash, isPending: isClaiming } =
     useWriteContract();
   const { isLoading: isClaimConfirming, isSuccess: claimSuccess } =

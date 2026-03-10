@@ -20,11 +20,13 @@ import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol"
 contract SeedTestnet is Script {
     // Base Sepolia addresses (v4 deployment — split routers)
     address constant POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
-    address constant HOOK = 0x31215Df7FC43e8fe65D8d307dfa23C420A384Ac8;
-    address constant ROUTER = 0x47D59B67b2E39E74443Dbdb84B0dEf9E00F19537;
+    address constant HOOK = 0x2fd8A3d76815f6a287544261C7A69f181cDC0aC8;
+    address constant ROUTER = 0x9649345E136d2a8804B5D598ee859d18d4A2aBae;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    // Price: 1 ETH = 1,000,000,000 tokens (sqrt(1e9) * 2^96)
+    uint160 constant SQRT_PRICE_1B = 2505414483750479227146068685750272;
 
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -35,6 +37,10 @@ contract SeedTestnet is Script {
         console2.log("Balance:", deployer.balance);
 
         vm.startBroadcast(deployerKey);
+
+        // 0. Lower min base amount for ETH to 0.0001 ETH
+        BastionHook(payable(HOOK)).updateMinBaseAmount(address(0), 0.00009 ether);
+        console2.log("Min base amount for ETH lowered to 0.00009 ETH");
 
         // 1. Deploy test tokens
         TestToken btt = new TestToken("Bastion Test Token", "BTT", 18, 1_000_000e18);
@@ -48,32 +54,33 @@ contract SeedTestnet is Script {
 
         // 3. Create ETH/BTT pool via BastionRouter
         bytes memory bttHookData = _buildHookData(deployer, address(btt));
-        BastionPositionRouter(payable(ROUTER)).createPool{value: 0.002 ether}(
+        BastionPositionRouter(payable(ROUTER)).createPool{value: 0.0002 ether}(
             address(btt),
             address(0),    // ETH as base token
             3000,
             100_000e18,    // 100k BTT
-            SQRT_PRICE_1_1,
+            SQRT_PRICE_1B,
             bttHookData
         );
         console2.log("Pool created: ETH/BTT");
 
         // 4. Create ETH/ALPHA pool via BastionRouter
         bytes memory alphaHookData = _buildHookData(deployer, address(alpha));
-        BastionPositionRouter(payable(ROUTER)).createPool{value: 0.002 ether}(
+        BastionPositionRouter(payable(ROUTER)).createPool{value: 0.0002 ether}(
             address(alpha),
             address(0),    // ETH as base token
             3000,
             100_000e18,    // 100k ALPHA
-            SQRT_PRICE_1_1,
+            SQRT_PRICE_1B,
             alphaHookData
         );
         console2.log("Pool created: ETH/ALPHA");
 
-        // 5. Fund hook with ETH for insurance payouts
-        (bool ok,) = HOOK.call{value: 0.001 ether}("");
-        require(ok, "ETH to hook failed");
-        console2.log("Hook funded with 0.001 ETH");
+        // 5. Fund hook with ETH for insurance payouts (skip if insufficient balance)
+        if (deployer.balance > 0.001 ether) {
+            (bool ok,) = HOOK.call{value: 0.001 ether}("");
+            if (ok) console2.log("Hook funded with 0.001 ETH");
+        }
 
         vm.stopBroadcast();
 

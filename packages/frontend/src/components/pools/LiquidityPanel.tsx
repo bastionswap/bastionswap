@@ -344,7 +344,10 @@ function AddLiquidityForm({
       if (paired === 0n) return "";
       const formatted = formatUnits(paired, isToken0 ? decimals1 : decimals0);
       // Trim trailing zeros for clean display
-      return parseFloat(formatted).toString();
+      const num = parseFloat(formatted);
+      if (num === 0) return "";
+      // Avoid scientific notation (e.g. "1e-9") which parseUnits can't handle
+      return num.toFixed(isToken0 ? decimals1 : decimals0).replace(/\.?0+$/, "");
     } catch {
       return "";
     }
@@ -360,8 +363,10 @@ function AddLiquidityForm({
     setAmount0(calcPaired(value, false));
   };
 
-  const parsed0 = amount0 ? parseUnits(amount0, decimals0) : 0n;
-  const parsed1 = amount1 ? parseUnits(amount1, decimals1) : 0n;
+  let parsed0 = 0n;
+  let parsed1 = 0n;
+  try { if (amount0) parsed0 = parseUnits(amount0, decimals0); } catch {}
+  try { if (amount1) parsed1 = parseUnits(amount1, decimals1); } catch {}
 
   const needsApproval0 = !isNative0 && parsed0 > 0n && (allowance0 === undefined || allowance0 < parsed0);
   const needsApproval1 = !isNative1 && parsed1 > 0n && (allowance1 === undefined || allowance1 < parsed1);

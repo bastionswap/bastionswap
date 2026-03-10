@@ -26,13 +26,13 @@ All contracts are deployed on Base Sepolia (v4 — split routers for EIP-170 com
 
 | Contract | Address |
 |----------|---------|
-| BastionHook | [`0x31215Df7FC43e8fe65D8d307dfa23C420A384Ac8`](https://sepolia.basescan.org/address/0x31215Df7FC43e8fe65D8d307dfa23C420A384Ac8) |
-| BastionSwapRouter | [`0x836BDc9FD273E7D04440A3c020b803C9f93a7A28`](https://sepolia.basescan.org/address/0x836BDc9FD273E7D04440A3c020b803C9f93a7A28) |
-| BastionPositionRouter | [`0x47D59B67b2E39E74443Dbdb84B0dEf9E00F19537`](https://sepolia.basescan.org/address/0x47D59B67b2E39E74443Dbdb84B0dEf9E00F19537) |
-| EscrowVault | [`0x49b84547934F79401763eCB2B45Ad50283b936DC`](https://sepolia.basescan.org/address/0x49b84547934F79401763eCB2B45Ad50283b936DC) |
-| InsurancePool | [`0x4946726489ca14943D37A73201c74CdB42b544b7`](https://sepolia.basescan.org/address/0x4946726489ca14943D37A73201c74CdB42b544b7) |
-| TriggerOracle | [`0xaD9bf0659DdbcF9380183dE0FB6f2b38Edc25c33`](https://sepolia.basescan.org/address/0xaD9bf0659DdbcF9380183dE0FB6f2b38Edc25c33) |
-| ReputationEngine | [`0xce4F36907E7602D32A239d4D8c068a8b38A3cfA3`](https://sepolia.basescan.org/address/0xce4F36907E7602D32A239d4D8c068a8b38A3cfA3) |
+| BastionHook | [`0x2fd8A3d76815f6a287544261C7A69f181cDC0aC8`](https://sepolia.basescan.org/address/0x2fd8A3d76815f6a287544261C7A69f181cDC0aC8) |
+| BastionSwapRouter | [`0xb214598a54634B31C47921291FDB47ae3e4CE909`](https://sepolia.basescan.org/address/0xb214598a54634B31C47921291FDB47ae3e4CE909) |
+| BastionPositionRouter | [`0x9649345E136d2a8804B5D598ee859d18d4A2aBae`](https://sepolia.basescan.org/address/0x9649345E136d2a8804B5D598ee859d18d4A2aBae) |
+| EscrowVault | [`0xCe28BcC799fA9632F8FdD3A88546Ce9B860dC83a`](https://sepolia.basescan.org/address/0xCe28BcC799fA9632F8FdD3A88546Ce9B860dC83a) |
+| InsurancePool | [`0xb0706bD693d09aFcC3cF686212B86D8D8c993E31`](https://sepolia.basescan.org/address/0xb0706bD693d09aFcC3cF686212B86D8D8c993E31) |
+| TriggerOracle | [`0xF5C2034126076643B3e43E176d938CEA06ae170d`](https://sepolia.basescan.org/address/0xF5C2034126076643B3e43E176d938CEA06ae170d) |
+| ReputationEngine | [`0x11ADd0784cE80E135815484906E17Bef46f49a97`](https://sepolia.basescan.org/address/0x11ADd0784cE80E135815484906E17Bef46f49a97) |
 
 **External Dependencies:**
 
