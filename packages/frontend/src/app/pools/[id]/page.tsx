@@ -18,6 +18,7 @@ import { InsuranceStatus } from "@/components/pools/InsuranceStatus";
 import { IssuerInfo } from "@/components/pools/IssuerInfo";
 import { TriggerHistory } from "@/components/pools/TriggerHistory";
 import { LiquidityPanel } from "@/components/pools/LiquidityPanel";
+import { SwapCard } from "@/components/swap/SwapCard";
 import { PriceChart } from "@/components/pools/PriceChart";
 import { RecentTrades } from "@/components/pools/RecentTrades";
 import { PoolSidebarTabs } from "@/components/pools/PoolSidebarTabs";
@@ -519,7 +520,26 @@ export default function PoolDetailPage() {
                     )}
                   </div>
                 }
-                tradeContent={<LiquidityPanel pool={pool} />}
+                tradeContent={
+                  <>
+                    <SwapCard
+                      initialTokenIn={
+                        pool.issuedToken?.toLowerCase() === pool.token0.toLowerCase()
+                          ? { address: pool.token1, symbol: token1Info.symbol || "T1", name: token1Info.name || "" }
+                          : { address: pool.token0, symbol: token0Info.symbol || "T0", name: token0Info.name || "" }
+                      }
+                      initialTokenOut={
+                        pool.issuedToken?.toLowerCase() === pool.token0.toLowerCase()
+                          ? { address: pool.token0, symbol: token0Info.symbol || "T0", name: token0Info.name || "" }
+                          : { address: pool.token1, symbol: token1Info.symbol || "T1", name: token1Info.name || "" }
+                      }
+                      compact
+                    />
+                    <div className="mt-6">
+                      <LiquidityPanel pool={pool} />
+                    </div>
+                  </>
+                }
                 protectionContent={
                   <>
                     {pool.escrow && (

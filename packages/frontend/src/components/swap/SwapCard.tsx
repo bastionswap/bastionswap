@@ -26,22 +26,28 @@ import { usePoolReserves, useAllPools } from "@/hooks/usePools";
 import { getContracts } from "@/config/contracts";
 import { explorerUrl } from "@/lib/formatters";
 
-interface Token {
+export interface Token {
   address: string;
   symbol: string;
   name: string;
 }
 
+interface SwapCardProps {
+  initialTokenIn?: Token;
+  initialTokenOut?: Token;
+  compact?: boolean;
+}
+
 // Insurance fee rate from the protocol (1%)
 const INSURANCE_FEE_BPS = 100;
 
-export function SwapCard() {
+export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardProps = {}) {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { openConnectModal } = useConnectModal();
   const contracts = getContracts(chainId);
-  const [tokenIn, setTokenIn] = useState<Token | null>(null);
-  const [tokenOut, setTokenOut] = useState<Token | null>(null);
+  const [tokenIn, setTokenIn] = useState<Token | null>(initialTokenIn ?? null);
+  const [tokenOut, setTokenOut] = useState<Token | null>(initialTokenOut ?? null);
   const [amountIn, setAmountIn] = useState("");
   const [slippage, setSlippage] = useState("1.0");
   const [showTokenSelect, setShowTokenSelect] = useState<"in" | "out" | null>(null);
@@ -308,11 +314,13 @@ export function SwapCard() {
     ? parseFloat(formatUnits(quotedOut, 18))
     : 0;
 
+  const wrapperClassName = compact ? "" : "mx-auto w-full max-w-[480px]";
+
   return (
     <>
-      <Card className="mx-auto w-full max-w-[480px]">
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Swap</h2>
+      <Card className={wrapperClassName}>
+        <div className={`flex items-center ${compact ? "mb-3 justify-end" : "mb-5 justify-between"}`}>
+          {!compact && <h2 className="text-lg font-semibold text-gray-900">Swap</h2>}
           <button
             onClick={() => setShowSlippage(!showSlippage)}
             className="rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
