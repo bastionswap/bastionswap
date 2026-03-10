@@ -12,7 +12,10 @@ export const metadata: Metadata = {
   description:
     "Swap tokens on Uniswap V4 with built-in escrow, insurance, and rug-pull protection.",
   icons: {
-    icon: "/logo.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/logo.png", type: "image/png", sizes: "1024x1024" },
+    ],
     apple: "/logo.png",
   },
   openGraph: {
