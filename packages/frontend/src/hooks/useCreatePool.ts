@@ -53,6 +53,8 @@ export interface CreatePoolInput {
     taxDeviationThreshold: number;
     slowRugWindowSeconds: number;
     slowRugCumulativeThreshold: number;
+    weeklyDumpWindowSeconds: number;
+    weeklyDumpThresholdPercent: number;
   };
 }
 
@@ -63,6 +65,8 @@ export const DEFAULT_TRIGGER_CONFIG = {
   taxDeviationThreshold: 500,
   slowRugWindowSeconds: 86400,
   slowRugCumulativeThreshold: 8000,
+  weeklyDumpWindowSeconds: 604800,
+  weeklyDumpThresholdPercent: 5000,
 };
 
 function computeSqrtPriceX96(amount0: bigint, amount1: bigint): bigint {
@@ -375,7 +379,7 @@ export function useCreateBastionPool() {
         "uint40",
         "uint40",
         "(uint16,uint16)",
-        "(uint16,uint16,uint40,uint16,uint40,uint16)",
+        "(uint16,uint16,uint40,uint16,uint40,uint16,uint40,uint16)",
       ]),
       [
         address,
@@ -393,6 +397,8 @@ export function useCreateBastionPool() {
           params.triggerConfig.taxDeviationThreshold,
           params.triggerConfig.slowRugWindowSeconds,
           params.triggerConfig.slowRugCumulativeThreshold,
+          params.triggerConfig.weeklyDumpWindowSeconds,
+          params.triggerConfig.weeklyDumpThresholdPercent,
         ] as const,
       ],
     );
