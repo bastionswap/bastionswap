@@ -7,13 +7,22 @@ import { getContracts } from "@/config/contracts";
 import { ReputationEngineABI } from "@/config/abis";
 
 interface PoolCommitmentData {
-  lockDuration: number;
-  vestingDuration: number;
-  maxSingleLpRemovalBps: number;
-  maxCumulativeLpRemovalBps: number;
-  maxDailySellBps: number;
-  createdAt: number;
+  lockDuration: number | bigint;
+  vestingDuration: number | bigint;
+  maxSingleLpRemovalBps: number | bigint;
+  maxCumulativeLpRemovalBps: number | bigint;
+  maxDailySellBps: number | bigint;
+  createdAt: number | bigint;
   isSet: boolean;
+}
+
+interface TriggerConfigData {
+  lpRemovalThreshold: number | bigint;
+  dumpThresholdPercent: number | bigint;
+  dumpWindowSeconds: number | bigint;
+  taxDeviationThreshold: number | bigint;
+  slowRugWindowSeconds: number | bigint;
+  slowRugCumulativeThreshold: number | bigint;
 }
 
 interface IssuerInfoProps {
@@ -33,6 +42,7 @@ interface IssuerInfoProps {
   vestingStrictness?: "stricter" | "default" | "looser" | null;
   poolCommitment?: PoolCommitmentData;
   isStricterThanDefault?: boolean;
+  triggerConfig?: TriggerConfigData;
 }
 
 const DEFAULTS = {
@@ -146,7 +156,7 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   );
 }
 
-export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness, poolCommitment, isStricterThanDefault }: IssuerInfoProps) {
+export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness, poolCommitment, isStricterThanDefault, triggerConfig }: IssuerInfoProps) {
   const score = parseInt(issuer.reputationScore);
   const created = issuer.totalEscrowsCreated ?? 0;
   const completed = issuer.totalEscrowsCompleted ?? 0;
@@ -201,7 +211,7 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
       </div>
 
       {/* Commitment Parameters */}
-      {commitment ? (
+      {(commitment || poolCommitment?.isSet) ? (
         <div className="border-t border-subtle px-6 py-4">
           <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">Commitments</p>
           <div className="space-y-2.5">
@@ -220,24 +230,32 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
               </div>
             )}
             {[
-              {
-                label: "Daily Withdraw Limit",
-                value: formatBps(parseInt(commitment.dailyWithdrawLimit)),
-                raw: parseInt(commitment.dailyWithdrawLimit),
-                default_: DEFAULTS.dailyWithdrawLimit,
-                lowerBetter: true,
-              },
-              {
-                label: "Max Sell / 24h",
-                value: formatBps(parseInt(commitment.maxSellPercent)),
-                raw: parseInt(commitment.maxSellPercent),
-                default_: DEFAULTS.maxSellPercent,
-                lowerBetter: true,
-              },
+              ...(commitment ? [
+                {
+                  label: "Daily Withdraw Limit",
+                  value: formatBps(parseInt(commitment.dailyWithdrawLimit)),
+                  raw: parseInt(commitment.dailyWithdrawLimit),
+                  default_: DEFAULTS.dailyWithdrawLimit,
+                  lowerBetter: true,
+                },
+                {
+                  label: "Max Sell / 24h",
+                  value: formatBps(parseInt(commitment.maxSellPercent)),
+                  raw: parseInt(commitment.maxSellPercent),
+                  default_: DEFAULTS.maxSellPercent,
+                  lowerBetter: true,
+                },
+              ] : []),
               {
                 label: "Total Duration",
-                value: formatDuration((lockDuration ?? 0) + (vestingDuration ?? 0)),
-                raw: (lockDuration ?? 0) + (vestingDuration ?? 0),
+                value: formatDuration(
+                  poolCommitment?.isSet
+                    ? Number(poolCommitment.lockDuration) + Number(poolCommitment.vestingDuration)
+                    : (lockDuration ?? 0) + (vestingDuration ?? 0)
+                ),
+                raw: poolCommitment?.isSet
+                  ? Number(poolCommitment.lockDuration) + Number(poolCommitment.vestingDuration)
+                  : (lockDuration ?? 0) + (vestingDuration ?? 0),
                 default_: DEFAULTS.totalDuration,
                 lowerBetter: false,
               },
@@ -254,32 +272,53 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                 </div>
               </div>
             ))}
-            {/* Trigger Detection Thresholds from PoolCommitment */}
-            {poolCommitment?.isSet && (
+            {/* Trigger Detection Thresholds from TriggerOracle */}
+            {triggerConfig && (
               <>
                 <div className="my-2 border-t border-gray-100" />
                 <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Trigger Thresholds</p>
                 {[
                   {
                     label: "Max LP Removal / tx",
-                    value: formatBps(poolCommitment.maxSingleLpRemovalBps),
-                    raw: poolCommitment.maxSingleLpRemovalBps,
+                    value: formatBps(Number(triggerConfig.lpRemovalThreshold)),
+                    raw: Number(triggerConfig.lpRemovalThreshold),
                     default_: 5000,
                     lowerBetter: true,
                   },
                   {
-                    label: "Max Cumulative LP / 24h",
-                    value: formatBps(poolCommitment.maxCumulativeLpRemovalBps),
-                    raw: poolCommitment.maxCumulativeLpRemovalBps,
+                    label: "Max Issuer Sell",
+                    value: formatBps(Number(triggerConfig.dumpThresholdPercent)),
+                    raw: Number(triggerConfig.dumpThresholdPercent),
+                    default_: 3000,
+                    lowerBetter: true,
+                  },
+                  {
+                    label: "Sell Window",
+                    value: formatDuration(Number(triggerConfig.dumpWindowSeconds)),
+                    raw: Number(triggerConfig.dumpWindowSeconds),
+                    default_: 86400,
+                    lowerBetter: false,
+                  },
+                  {
+                    label: "Hidden Tax Threshold",
+                    value: formatBps(Number(triggerConfig.taxDeviationThreshold)),
+                    raw: Number(triggerConfig.taxDeviationThreshold),
+                    default_: 500,
+                    lowerBetter: true,
+                  },
+                  {
+                    label: "Slow Rug Cumulative LP",
+                    value: formatBps(Number(triggerConfig.slowRugCumulativeThreshold)),
+                    raw: Number(triggerConfig.slowRugCumulativeThreshold),
                     default_: 8000,
                     lowerBetter: true,
                   },
                   {
-                    label: "Max Daily Sell",
-                    value: formatBps(poolCommitment.maxDailySellBps),
-                    raw: poolCommitment.maxDailySellBps,
-                    default_: 3000,
-                    lowerBetter: true,
+                    label: "Slow Rug Window",
+                    value: formatDuration(Number(triggerConfig.slowRugWindowSeconds)),
+                    raw: Number(triggerConfig.slowRugWindowSeconds),
+                    default_: 86400,
+                    lowerBetter: false,
                   },
                 ].map(({ label, value, raw, default_, lowerBetter }) => (
                   <div key={label} className="flex items-center justify-between text-sm">
@@ -306,12 +345,12 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
               </div>
             )}
             {/* Immutable creation timestamp */}
-            {poolCommitment?.isSet && poolCommitment.createdAt > 0 && (
+            {poolCommitment?.isSet && Number(poolCommitment.createdAt) > 0 && (
               <div className="mt-1 text-[10px] text-gray-400 flex items-center gap-1">
                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Set on {new Date(poolCommitment.createdAt * 1000).toLocaleDateString()} (immutable)
+                Set on {new Date(Number(poolCommitment.createdAt) * 1000).toLocaleDateString()} (immutable)
               </div>
             )}
           </div>

@@ -277,6 +277,14 @@ export default function PoolDetailPage() {
     args: [poolId as `0x${string}`],
     query: { enabled: !!hookAddress && !!pool?.isBastion },
   });
+  const triggerOracleAddress = contracts?.TriggerOracle as `0x${string}` | undefined;
+  const { data: triggerConfig } = useReadContract({
+    address: triggerOracleAddress,
+    abi: TriggerOracleABI,
+    functionName: "getTriggerConfig",
+    args: [poolId as `0x${string}`],
+    query: { enabled: !!triggerOracleAddress && !!pool?.isBastion },
+  });
 
   const { balance: holderBalance } = useTokenBalance(
     pool?.issuedToken as `0x${string}` | undefined,
@@ -548,15 +556,23 @@ export default function PoolDetailPage() {
                   return "stricter" as const;
                 })()}
                 poolCommitment={poolCommitment as {
-                  lockDuration: number;
-                  vestingDuration: number;
-                  maxSingleLpRemovalBps: number;
-                  maxCumulativeLpRemovalBps: number;
-                  maxDailySellBps: number;
-                  createdAt: number;
+                  lockDuration: number | bigint;
+                  vestingDuration: number | bigint;
+                  maxSingleLpRemovalBps: number | bigint;
+                  maxCumulativeLpRemovalBps: number | bigint;
+                  maxDailySellBps: number | bigint;
+                  createdAt: number | bigint;
                   isSet: boolean;
                 } | undefined}
                 isStricterThanDefault={isStricterThanDefault as boolean | undefined}
+                triggerConfig={triggerConfig as {
+                  lpRemovalThreshold: number | bigint;
+                  dumpThresholdPercent: number | bigint;
+                  dumpWindowSeconds: number | bigint;
+                  taxDeviationThreshold: number | bigint;
+                  slowRugWindowSeconds: number | bigint;
+                  slowRugCumulativeThreshold: number | bigint;
+                } | undefined}
               />
             )}
           </div>
