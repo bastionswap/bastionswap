@@ -428,8 +428,8 @@ export function EscrowStatus({ escrow, vestingEndTime, compact }: EscrowStatusPr
         </div>
       )}
 
-      {/* Vesting Chart — hidden in compact/sidebar mode */}
-      {!compact && !escrow.isTriggered && totalDuration > 0 && (
+      {/* Vesting Chart + Summary */}
+      {!escrow.isTriggered && totalDuration > 0 && (
         <div className="border-t border-subtle px-6 py-4">
           <VestingChart
             lockDays={lockDays}
@@ -437,32 +437,50 @@ export function EscrowStatus({ escrow, vestingEndTime, compact }: EscrowStatusPr
             defaultLockDays={7}
             defaultVestingDays={83}
             label="This pool"
-            height={160}
+            height={compact ? 100 : 160}
           />
           {/* Vesting summary */}
-          <div className="mt-5">
-            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">
-              Vesting Schedule
-            </p>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-sm bg-amber-400/60" />
-                  <span className="text-gray-600">Lock period</span>
-                </div>
-                <span className="font-medium text-gray-900 tabular-nums">{lockDays} days</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-sm bg-emerald-400/50" />
-                  <span className="text-gray-600">Linear vesting</span>
-                </div>
-                <span className="font-medium text-gray-900 tabular-nums">{vestingDays} days</span>
-              </div>
-              <div className="flex items-center justify-between text-sm pt-1 border-t border-gray-200">
-                <span className="text-gray-600 font-medium">Total duration</span>
-                <span className="font-semibold text-gray-900 tabular-nums">{lockDays + vestingDays} days</span>
-              </div>
+          <div className={compact ? "mt-3" : "mt-5"}>
+            {!compact && (
+              <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">
+                Vesting Schedule
+              </p>
+            )}
+            <div className={compact ? "flex items-center gap-4 text-xs text-gray-500" : "space-y-2"}>
+              {compact ? (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-2 w-2 rounded-sm bg-amber-400/60" />
+                    <span>Lock {lockDays}d</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-2 w-2 rounded-sm bg-emerald-400/50" />
+                    <span>Vest {vestingDays}d</span>
+                  </div>
+                  <span className="font-medium text-gray-700">= {lockDays + vestingDays}d</span>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2.5 w-2.5 rounded-sm bg-amber-400/60" />
+                      <span className="text-gray-600">Lock period</span>
+                    </div>
+                    <span className="font-medium text-gray-900 tabular-nums">{lockDays} days</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2.5 w-2.5 rounded-sm bg-emerald-400/50" />
+                      <span className="text-gray-600">Linear vesting</span>
+                    </div>
+                    <span className="font-medium text-gray-900 tabular-nums">{vestingDays} days</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm pt-1 border-t border-gray-200">
+                    <span className="text-gray-600 font-medium">Total duration</span>
+                    <span className="font-semibold text-gray-900 tabular-nums">{lockDays + vestingDays} days</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
