@@ -20,6 +20,7 @@ import { TriggerHistory } from "@/components/pools/TriggerHistory";
 import { LiquidityPanel } from "@/components/pools/LiquidityPanel";
 import { PriceChart } from "@/components/pools/PriceChart";
 import { RecentTrades } from "@/components/pools/RecentTrades";
+import { PoolSidebarTabs } from "@/components/pools/PoolSidebarTabs";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { shortenAddress, explorerUrl } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
@@ -480,114 +481,119 @@ export default function PoolDetailPage() {
             />
           </div>
 
-          {/* ── Right sidebar: Protection info ── */}
+          {/* ── Right sidebar: Tabbed layout ── */}
           <div className="lg:col-span-2 mt-6 lg:mt-0">
-            <div className="space-y-4 lg:sticky lg:top-6">
-              {/* Trigger banner */}
-              <TriggerBanner
-                poolId={pool.id}
-                pool={pool}
-                address={address}
-                alreadyClaimed={!!alreadyClaimed}
-                claimedAmount={claimedAmount}
-                estimatedCompensation={estimatedCompensation as bigint | undefined}
-                holderBalance={holderBalance}
-                onClaim={handleClaim}
+            <div className="lg:sticky lg:top-6">
+              <PoolSidebarTabs
+                isTriggered={!!pool.insurancePool?.isTriggered}
+                reputationScore={pool.issuer?.reputationScore != null ? Number(pool.issuer.reputationScore) : null}
+                alertBanner={
+                  <div className="space-y-4 mb-4 empty:hidden">
+                    <TriggerBanner
+                      poolId={pool.id}
+                      pool={pool}
+                      address={address}
+                      alreadyClaimed={!!alreadyClaimed}
+                      claimedAmount={claimedAmount}
+                      estimatedCompensation={estimatedCompensation as bigint | undefined}
+                      holderBalance={holderBalance}
+                      onClaim={handleClaim}
+                    />
+                    {(isClaiming || isClaimConfirming) && (
+                      <div className="flex items-center justify-center gap-2 rounded-2xl bg-gray-50 px-4 py-4">
+                        <LoadingSpinner size="sm" />
+                        <span className="text-sm text-gray-500">
+                          {isClaiming ? "Confirm in wallet..." : "Processing claim..."}
+                        </span>
+                      </div>
+                    )}
+                    {claimSuccess && !alreadyClaimed && (
+                      <div className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-4">
+                        <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-sm text-emerald-700 font-medium">
+                          Compensation claimed successfully!
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                }
+                tradeContent={<LiquidityPanel pool={pool} />}
+                protectionContent={
+                  <>
+                    {pool.escrow && (
+                      <EscrowStatus
+                        escrow={pool.escrow}
+                        vestingEndTime={vestingEndTime ? Number(vestingEndTime) : undefined}
+                        compact
+                      />
+                    )}
+                    {pool.insurancePool && (
+                      <InsuranceStatus
+                        poolId={pool.id}
+                        insurance={pool.insurancePool}
+                        issuedToken={pool.issuedToken}
+                        tokenSymbol={issuedTokenLabel}
+                        onClaim={
+                          pool.insurancePool.isTriggered && !alreadyClaimed && address
+                            ? handleClaim
+                            : undefined
+                        }
+                      />
+                    )}
+                    {pool.triggerEvents && pool.triggerEvents.length > 0 && (
+                      <TriggerHistory events={pool.triggerEvents} />
+                    )}
+                  </>
+                }
+                issuerContent={
+                  pool.issuer ? (
+                    <IssuerInfo
+                      issuer={pool.issuer}
+                      commitment={pool.escrow?.commitment}
+                      lockDuration={pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : undefined}
+                      vestingDuration={pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : undefined}
+                      vestingStrictness={(() => {
+                        const lock = pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : 0;
+                        const vesting = pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : 0;
+                        const total = lock + vesting;
+                        if (total === 0) return null;
+                        const defaultTotal = 90 * 86400;
+                        if (total < defaultTotal) return "looser" as const;
+                        if (total === defaultTotal) return "default" as const;
+                        return "stricter" as const;
+                      })()}
+                      poolCommitment={poolCommitment as {
+                        lockDuration: number | bigint;
+                        vestingDuration: number | bigint;
+                        maxSingleLpRemovalBps: number | bigint;
+                        maxCumulativeLpRemovalBps: number | bigint;
+                        maxDailySellBps: number | bigint;
+                        weeklyDumpWindowSeconds: number | bigint;
+                        weeklyDumpThresholdBps: number | bigint;
+                        createdAt: number | bigint;
+                        isSet: boolean;
+                      } | undefined}
+                      isStricterThanDefault={isStricterThanDefault as boolean | undefined}
+                      triggerConfig={triggerConfig as {
+                        lpRemovalThreshold: number | bigint;
+                        dumpThresholdPercent: number | bigint;
+                        dumpWindowSeconds: number | bigint;
+                        taxDeviationThreshold: number | bigint;
+                        slowRugWindowSeconds: number | bigint;
+                        slowRugCumulativeThreshold: number | bigint;
+                        weeklyDumpWindowSeconds: number | bigint;
+                        weeklyDumpThresholdPercent: number | bigint;
+                      } | undefined}
+                    />
+                  ) : (
+                    <div className="text-center py-8 text-sm text-gray-400">
+                      No issuer information available
+                    </div>
+                  )
+                }
               />
-
-              {/* Claim status */}
-              {(isClaiming || isClaimConfirming) && (
-                <div className="flex items-center justify-center gap-2 rounded-2xl bg-gray-50 px-4 py-4">
-                  <LoadingSpinner size="sm" />
-                  <span className="text-sm text-gray-500">
-                    {isClaiming ? "Confirm in wallet..." : "Processing claim..."}
-                  </span>
-                </div>
-              )}
-              {claimSuccess && !alreadyClaimed && (
-                <div className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-4">
-                  <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span className="text-sm text-emerald-700 font-medium">
-                    Compensation claimed successfully!
-                  </span>
-                </div>
-              )}
-
-              {/* Escrow */}
-              {pool.escrow && (
-                <EscrowStatus
-                  escrow={pool.escrow}
-                  vestingEndTime={vestingEndTime ? Number(vestingEndTime) : undefined}
-                  compact
-                />
-              )}
-
-              {/* Insurance */}
-              {pool.insurancePool && (
-                <InsuranceStatus
-                  poolId={pool.id}
-                  insurance={pool.insurancePool}
-                  issuedToken={pool.issuedToken}
-                  tokenSymbol={issuedTokenLabel}
-                  onClaim={
-                    pool.insurancePool.isTriggered && !alreadyClaimed && address
-                      ? handleClaim
-                      : undefined
-                  }
-                />
-              )}
-
-              {/* Issuer info */}
-              {pool.issuer && (
-                <IssuerInfo
-                  issuer={pool.issuer}
-                  commitment={pool.escrow?.commitment}
-                  lockDuration={pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : undefined}
-                  vestingDuration={pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : undefined}
-                  vestingStrictness={(() => {
-                    const lock = pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : 0;
-                    const vesting = pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : 0;
-                    const total = lock + vesting;
-                    if (total === 0) return null;
-                    const defaultTotal = 90 * 86400;
-                    if (total < defaultTotal) return "looser" as const;
-                    if (total === defaultTotal) return "default" as const;
-                    return "stricter" as const;
-                  })()}
-                  poolCommitment={poolCommitment as {
-                    lockDuration: number | bigint;
-                    vestingDuration: number | bigint;
-                    maxSingleLpRemovalBps: number | bigint;
-                    maxCumulativeLpRemovalBps: number | bigint;
-                    maxDailySellBps: number | bigint;
-                    weeklyDumpWindowSeconds: number | bigint;
-                    weeklyDumpThresholdBps: number | bigint;
-                    createdAt: number | bigint;
-                    isSet: boolean;
-                  } | undefined}
-                  isStricterThanDefault={isStricterThanDefault as boolean | undefined}
-                  triggerConfig={triggerConfig as {
-                    lpRemovalThreshold: number | bigint;
-                    dumpThresholdPercent: number | bigint;
-                    dumpWindowSeconds: number | bigint;
-                    taxDeviationThreshold: number | bigint;
-                    slowRugWindowSeconds: number | bigint;
-                    slowRugCumulativeThreshold: number | bigint;
-                    weeklyDumpWindowSeconds: number | bigint;
-                    weeklyDumpThresholdPercent: number | bigint;
-                  } | undefined}
-                />
-              )}
-
-              {/* Trigger history */}
-              {pool.triggerEvents && pool.triggerEvents.length > 0 && (
-                <TriggerHistory events={pool.triggerEvents} />
-              )}
-
-              {/* Liquidity management */}
-              <LiquidityPanel pool={pool} />
             </div>
           </div>
         </div>

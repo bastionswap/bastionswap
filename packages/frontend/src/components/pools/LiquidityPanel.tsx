@@ -34,6 +34,7 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
   const token1Info = useTokenInfo(pool.token1 as `0x${string}`);
 
   const { data: positions, refetch: refetchPositions } = useUserPositions(pool.id, address);
+  const isIssuer = !!pool.issuer && !!address && pool.issuer.id.toLowerCase() === address.toLowerCase();
 
   const poolKey = {
     currency0: pool.token0 as `0x${string}`,
@@ -50,14 +51,25 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
       </CardHeader>
 
       {/* Info banner */}
-      <div className="mb-5 flex items-start gap-2.5 rounded-xl bg-bastion-50 border border-bastion-100 px-4 py-3">
-        <svg className="h-4 w-4 text-bastion-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <p className="text-xs text-bastion-800/80">
-          Your LP is <span className="font-semibold">not escrowed</span>. You can withdraw anytime. Only the issuer&apos;s LP is subject to vesting.
-        </p>
-      </div>
+      {isIssuer ? (
+        <div className="mb-5 flex items-start gap-2.5 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+          <svg className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-xs text-amber-800/80">
+            Your LP is <span className="font-semibold">escrowed</span> and subject to vesting. Manage withdrawals from the <span className="font-semibold">Protection</span> tab.
+          </p>
+        </div>
+      ) : (
+        <div className="mb-5 flex items-start gap-2.5 rounded-xl bg-bastion-50 border border-bastion-100 px-4 py-3">
+          <svg className="h-4 w-4 text-bastion-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-xs text-bastion-800/80">
+            Your LP is <span className="font-semibold">not escrowed</span>. You can withdraw anytime.
+          </p>
+        </div>
+      )}
 
       {/* Your Positions */}
       {address && positions && positions.length > 0 && (
@@ -73,7 +85,7 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
                 poolKey={poolKey}
                 token0Symbol={token0Info.symbol || "T0"}
                 token1Symbol={token1Info.symbol || "T1"}
-                isIssuer={!!pool.issuer && pool.issuer.id.toLowerCase() === address?.toLowerCase()}
+                isIssuer={isIssuer}
                 onAction={refetchPositions}
               />
             ))}
@@ -206,14 +218,6 @@ function PositionCard({
 
       {isIssuer ? (
         <div className="space-y-2">
-          <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
-            <svg className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p className="text-xs text-amber-700">
-              Issuer LP is <span className="font-semibold">escrowed</span> and subject to vesting. Manage your LP from the <span className="font-semibold">Escrow</span> panel above.
-            </p>
-          </div>
           <button
             onClick={handleIssuerCollect}
             disabled={isBusy}
