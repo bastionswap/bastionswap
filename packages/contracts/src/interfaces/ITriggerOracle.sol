@@ -33,11 +33,13 @@ interface ITriggerOracle {
 
     /// @notice Configuration thresholds for trigger detection per pool.
     /// @param lpRemovalThreshold Basis points of LP that, if removed in one tx, triggers RUG_PULL (default: 5000 = 50%)
-    /// @param dumpThresholdPercent Basis points of supply sold in 24h that triggers ISSUER_DUMP (default: 3000 = 30%)
-    /// @param dumpWindowSeconds Time window in seconds for dump detection (default: 86400 = 24h)
+    /// @param dumpThresholdPercent Basis points of supply sold in dumpWindowSeconds that triggers ISSUER_DUMP (default: 3000 = 30%)
+    /// @param dumpWindowSeconds Time window in seconds for daily dump detection (default: 86400 = 24h)
     /// @param taxDeviationThreshold Basis points deviation from declared tax that triggers HIDDEN_TAX (default: 500 = 5%)
-    /// @param slowRugWindowSeconds Time window for slow rug detection in seconds
-    /// @param slowRugCumulativeThreshold Cumulative LP removal basis points over the slow rug window
+    /// @param slowRugWindowSeconds Time window for cumulative LP removal detection in seconds (default: 86400 = 24h)
+    /// @param slowRugCumulativeThreshold Cumulative LP removal basis points over the slow rug window (default: 8000 = 80%)
+    /// @param weeklyDumpWindowSeconds Time window for weekly issuer sell detection → SLOW_RUG (default: 604800 = 7d)
+    /// @param weeklyDumpThresholdPercent Basis points of supply sold in weeklyDumpWindowSeconds → SLOW_RUG (default: 5000 = 50%)
     struct TriggerConfig {
         uint16 lpRemovalThreshold;
         uint16 dumpThresholdPercent;
@@ -45,6 +47,8 @@ interface ITriggerOracle {
         uint16 taxDeviationThreshold;
         uint40 slowRugWindowSeconds;
         uint16 slowRugCumulativeThreshold;
+        uint40 weeklyDumpWindowSeconds;
+        uint16 weeklyDumpThresholdPercent;
     }
 
     /// @notice Result of a trigger check.

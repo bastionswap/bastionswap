@@ -227,6 +227,8 @@ export default function CreatePoolPage() {
         taxDeviationThreshold: 500,
         slowRugWindowSeconds: 86400,
         slowRugCumulativeThreshold: activeTrigger.slowRug,
+        weeklyDumpWindowSeconds: 604800,
+        weeklyDumpThresholdPercent: 5000,
       },
     });
   };

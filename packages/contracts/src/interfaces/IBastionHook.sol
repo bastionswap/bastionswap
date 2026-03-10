@@ -13,6 +13,8 @@ interface IBastionHook {
         uint16 maxSingleLpRemovalBps;
         uint16 maxCumulativeLpRemovalBps;
         uint16 maxDailySellBps;
+        uint40 weeklyDumpWindowSeconds;
+        uint16 weeklyDumpThresholdBps;
         uint40 createdAt;
         bool isSet;
     }

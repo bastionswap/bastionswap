@@ -75,7 +75,9 @@ contract SeedLight is Script {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
 
         return abi.encode(deployer, token, uint40(7 days), uint40(83 days), commitment, triggerConfig);

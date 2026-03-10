@@ -109,7 +109,9 @@ contract TriggerOracleTest is Test {
             dumpWindowSeconds: 86400, // 24h
             taxDeviationThreshold: 500, // 5%
             slowRugWindowSeconds: 86400, // 24h
-            slowRugCumulativeThreshold: 8000 // 80%
+            slowRugCumulativeThreshold: 8000, // 80%
+            weeklyDumpWindowSeconds: 604800, // 7d
+            weeklyDumpThresholdPercent: 5000 // 50%
         });
     }
 
@@ -648,7 +650,9 @@ contract TriggerOracleTest is Test {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 9999,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 9999
+            slowRugCumulativeThreshold: 9999,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
         vm.prank(hook);
         oracle.setTriggerConfig(defaultPoolId, highThresholdConfig);
@@ -673,7 +677,9 @@ contract TriggerOracleTest is Test {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 9999,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 9999
+            slowRugCumulativeThreshold: 9999,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
         vm.prank(hook);
         oracle.setTriggerConfig(defaultPoolId, highThresholdConfig);

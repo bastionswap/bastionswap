@@ -135,7 +135,8 @@ contract GasBenchmarkTest is Test, Deployers {
             ITriggerOracle.TriggerConfig({
                 lpRemovalThreshold: 5000, dumpThresholdPercent: 3000,
                 dumpWindowSeconds: 86400, taxDeviationThreshold: 500,
-                slowRugWindowSeconds: 86400, slowRugCumulativeThreshold: 8000
+                slowRugWindowSeconds: 86400, slowRugCumulativeThreshold: 8000,
+                weeklyDumpWindowSeconds: 604800, weeklyDumpThresholdPercent: 5000
             })
         );
     }

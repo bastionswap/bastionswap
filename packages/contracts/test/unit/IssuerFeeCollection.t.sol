@@ -150,7 +150,9 @@ contract IssuerFeeCollectionTest is Test, Deployers {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
 
         bytes memory hookData = abi.encode(

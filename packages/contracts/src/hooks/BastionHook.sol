@@ -69,6 +69,8 @@ contract BastionHook is BaseTestHooks {
         uint16 maxSingleLpRemovalBps;      // from TriggerConfig.lpRemovalThreshold
         uint16 maxCumulativeLpRemovalBps;   // from TriggerConfig.slowRugCumulativeThreshold
         uint16 maxDailySellBps;             // from TriggerConfig.dumpThresholdPercent
+        uint40 weeklyDumpWindowSeconds;     // from TriggerConfig.weeklyDumpWindowSeconds
+        uint16 weeklyDumpThresholdBps;      // from TriggerConfig.weeklyDumpThresholdPercent
         uint40 createdAt;
         bool isSet;
     }
@@ -551,18 +553,12 @@ contract BastionHook is BaseTestHooks {
         if (commitmentTotal > defaultTotal) return true;
 
         // Thresholds: stricter if lower than defaults from TriggerOracle
-        (
-            uint16 defLpRemoval,
-            uint16 defDump,
-            ,
-            ,
-            ,
-            uint16 defSlowRug
-        ) = triggerOracle.defaultTriggerConfig();
+        ITriggerOracle.TriggerConfig memory def = triggerOracle.getDefaultTriggerConfig();
 
-        if (c.maxSingleLpRemovalBps < defLpRemoval) return true;
-        if (c.maxCumulativeLpRemovalBps < defSlowRug) return true;
-        if (c.maxDailySellBps < defDump) return true;
+        if (c.maxSingleLpRemovalBps < def.lpRemovalThreshold) return true;
+        if (c.maxCumulativeLpRemovalBps < def.slowRugCumulativeThreshold) return true;
+        if (c.maxDailySellBps < def.dumpThresholdPercent) return true;
+        if (c.weeklyDumpThresholdBps < def.weeklyDumpThresholdPercent) return true;
 
         return false;
     }
@@ -865,19 +861,13 @@ contract BastionHook is BaseTestHooks {
         ITriggerOracle.TriggerConfig memory triggerConfig
     ) internal {
         // Read governance defaults
-        (
-            uint16 defLpRemoval,
-            uint16 defDump,
-            ,
-            ,
-            ,
-            uint16 defSlowRug
-        ) = triggerOracle.defaultTriggerConfig();
+        ITriggerOracle.TriggerConfig memory def = triggerOracle.getDefaultTriggerConfig();
 
         // Validate: issuer thresholds must be ≤ defaults (lower = stricter)
-        if (triggerConfig.lpRemovalThreshold > defLpRemoval) revert CommitmentTooLenient();
-        if (triggerConfig.slowRugCumulativeThreshold > defSlowRug) revert CommitmentTooLenient();
-        if (triggerConfig.dumpThresholdPercent > defDump) revert CommitmentTooLenient();
+        if (triggerConfig.lpRemovalThreshold > def.lpRemovalThreshold) revert CommitmentTooLenient();
+        if (triggerConfig.slowRugCumulativeThreshold > def.slowRugCumulativeThreshold) revert CommitmentTooLenient();
+        if (triggerConfig.dumpThresholdPercent > def.dumpThresholdPercent) revert CommitmentTooLenient();
+        if (triggerConfig.weeklyDumpThresholdPercent > def.weeklyDumpThresholdPercent) revert CommitmentTooLenient();
 
         PoolCommitment memory c = PoolCommitment({
             lockDuration: lockDuration,
@@ -885,6 +875,8 @@ contract BastionHook is BaseTestHooks {
             maxSingleLpRemovalBps: triggerConfig.lpRemovalThreshold,
             maxCumulativeLpRemovalBps: triggerConfig.slowRugCumulativeThreshold,
             maxDailySellBps: triggerConfig.dumpThresholdPercent,
+            weeklyDumpWindowSeconds: triggerConfig.weeklyDumpWindowSeconds,
+            weeklyDumpThresholdBps: triggerConfig.weeklyDumpThresholdPercent,
             createdAt: uint40(block.timestamp),
             isSet: true
         });

@@ -151,7 +151,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
     }
 
@@ -985,7 +987,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
 
         bytes memory hookData = abi.encode(
@@ -1012,7 +1016,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
 
         bytes memory hookData = abi.encode(
@@ -1039,7 +1045,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8001 // > 8000 default
+            slowRugCumulativeThreshold: 8001, // > 8000 default
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
 
         bytes memory hookData = abi.encode(
@@ -1067,7 +1075,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 5000 // < 8000 default
+            slowRugCumulativeThreshold: 5000, // < 8000 default
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
 
         bytes memory hookData = abi.encode(
@@ -1107,7 +1117,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 5000
+            slowRugCumulativeThreshold: 5000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         }));
 
         // Existing commitment unchanged
@@ -1153,5 +1165,191 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         uint256 issuerBalAfter = issuedToken.balanceOf(issuerAddr);
         assertEq(issuerBalAfter, issuerBalBefore);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  3-WINDOW TRIGGER SYSTEM TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_poolCommitment_weeklyDumpFields() public {
+        _initPoolWithIssuer();
+
+        BastionHook.PoolCommitment memory c = hook.getPoolCommitment(poolId);
+        assertEq(c.weeklyDumpWindowSeconds, 604800);
+        assertEq(c.weeklyDumpThresholdBps, 5000);
+    }
+
+    function test_poolCommitment_revertsWeeklyDumpTooHigh() public {
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 5000,
+            dumpThresholdPercent: 3000,
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5001 // > 5000 default
+        });
+
+        bytes memory hookData = abi.encode(
+            issuerAddr, address(issuedToken), DEFAULT_LOCK, DEFAULT_VESTING, _defaultCommitment(), badConfig
+        );
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        vm.expectRevert(); // CommitmentTooLenient
+        modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
+    }
+
+    function test_lpCumulativeRemoval_usesSlowRugWindow() public {
+        _initPoolWithIssuer();
+
+        // Report LP removals via hook that individually are below single-tx threshold
+        // but cumulatively exceed slowRugCumulativeThreshold (80%)
+        (, , , uint256 totalLiq) = hook.getPoolInfo(poolId);
+        uint256 chunk = (totalLiq * 45) / 100; // 45% each = 90% cumulative > 80%
+
+        vm.startPrank(address(hook));
+        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq);
+
+        // Within slowRugWindowSeconds (24h), second removal should trigger
+        vm.warp(block.timestamp + 12 hours); // still within 24h window
+        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq - chunk);
+        vm.stopPrank();
+
+        // Should have a pending trigger (RUG_PULL from cumulative LP)
+        (bool exists, ITriggerOracle.TriggerType triggerType,) = triggerOracle.getPendingTrigger(poolId);
+        assertTrue(exists);
+        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
+    }
+
+    function test_lpCumulativeRemoval_outsideWindow_noTrigger() public {
+        _initPoolWithIssuer();
+
+        (, , , uint256 totalLiq) = hook.getPoolInfo(poolId);
+        // Use 30% chunks — individually below single-tx 50%, cumulative 60% < 80%
+        // but would be 60% > 80% if window wasn't respected
+        uint256 chunk = (totalLiq * 30) / 100;
+
+        vm.startPrank(address(hook));
+        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq);
+
+        // Warp past slowRugWindowSeconds (24h) so first removal expires
+        vm.warp(block.timestamp + 25 hours);
+        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq - chunk);
+        vm.stopPrank();
+
+        // Should NOT trigger because first removal is outside the window
+        // Only second 30% counts, which is below 80% cumulative threshold
+        (bool exists,,) = triggerOracle.getPendingTrigger(poolId);
+        assertFalse(exists);
+    }
+
+    function test_weeklyDumpTrigger_issuerSell() public {
+        _initPoolWithIssuer();
+
+        uint256 totalSupply = issuedToken.totalSupply();
+        // Sell 25% each over multiple days — daily threshold (30%) not hit,
+        // but weekly threshold (50%) exceeded after second sell
+        uint256 sellAmount = (totalSupply * 25) / 100;
+
+        vm.startPrank(address(hook));
+        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
+
+        // Day 3: still within 7d window
+        vm.warp(block.timestamp + 3 days);
+        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
+        vm.stopPrank();
+
+        // 25% + 25% = 50% >= weeklyDumpThresholdPercent (50%) → SLOW_RUG
+        (bool exists, ITriggerOracle.TriggerType triggerType,) = triggerOracle.getPendingTrigger(poolId);
+        assertTrue(exists);
+        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.SLOW_RUG));
+    }
+
+    function test_weeklyDumpTrigger_notTriggeredBelowThreshold() public {
+        _initPoolWithIssuer();
+
+        uint256 totalSupply = issuedToken.totalSupply();
+        // Sell 20% each over multiple days — 40% < 50% weekly threshold
+        uint256 sellAmount = (totalSupply * 20) / 100;
+
+        vm.startPrank(address(hook));
+        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
+        vm.warp(block.timestamp + 3 days);
+        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
+        vm.stopPrank();
+
+        // 20% + 20% = 40% < 50% → no trigger
+        (bool exists,,) = triggerOracle.getPendingTrigger(poolId);
+        assertFalse(exists);
+    }
+
+    function test_dailyDumpTriggersBeforeWeekly() public {
+        _initPoolWithIssuer();
+
+        uint256 totalSupply = issuedToken.totalSupply();
+        // Sell 31% in one shot — exceeds daily 30% threshold → ISSUER_DUMP, not SLOW_RUG
+        uint256 sellAmount = (totalSupply * 31) / 100;
+
+        vm.prank(address(hook));
+        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
+
+        (bool exists, ITriggerOracle.TriggerType triggerType,) = triggerOracle.getPendingTrigger(poolId);
+        assertTrue(exists);
+        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.ISSUER_DUMP));
+    }
+
+    function test_getDefaultTriggerConfig_returnsStruct() public view {
+        ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getDefaultTriggerConfig();
+        assertEq(cfg.lpRemovalThreshold, 5000);
+        assertEq(cfg.dumpThresholdPercent, 3000);
+        assertEq(cfg.dumpWindowSeconds, 86400);
+        assertEq(cfg.taxDeviationThreshold, 500);
+        assertEq(cfg.slowRugWindowSeconds, 86400);
+        assertEq(cfg.slowRugCumulativeThreshold, 8000);
+        assertEq(cfg.weeklyDumpWindowSeconds, 604800);
+        assertEq(cfg.weeklyDumpThresholdPercent, 5000);
+    }
+
+    function test_poolCommitment_stricterWeeklyDump() public {
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        PoolId _poolId = _key.toId();
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ITriggerOracle.TriggerConfig memory strictConfig = ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 5000,
+            dumpThresholdPercent: 3000,
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 3000 // stricter than 5000 default
+        });
+
+        bytes memory hookData = abi.encode(
+            issuerAddr, address(issuedToken), DEFAULT_LOCK, DEFAULT_VESTING, _defaultCommitment(), strictConfig
+        );
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
+
+        assertTrue(hook.isCommitmentStricterThanDefault(_poolId));
+
+        BastionHook.PoolCommitment memory c = hook.getPoolCommitment(_poolId);
+        assertEq(c.weeklyDumpThresholdBps, 3000);
     }
 }

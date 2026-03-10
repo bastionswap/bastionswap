@@ -341,7 +341,8 @@ contract GovernanceParamsTest is Test {
             uint40 dumpWindow,
             uint16 taxDeviation,
             uint40 slowRugWindow,
-            uint16 slowRugThreshold
+            uint16 slowRugThreshold,
+            ,
         ) = oracle.defaultTriggerConfig();
         assertEq(lpRemoval, 5000);
         assertEq(dumpThreshold, 3000);
@@ -358,12 +359,14 @@ contract GovernanceParamsTest is Test {
             dumpWindowSeconds: 43200,
             taxDeviationThreshold: 300,
             slowRugWindowSeconds: 172800,
-            slowRugCumulativeThreshold: 7000
+            slowRugCumulativeThreshold: 7000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
         vm.prank(governance);
         oracle.setDefaultTriggerConfig(config);
 
-        (uint16 lpRemoval,,,,, ) = oracle.defaultTriggerConfig();
+        (uint16 lpRemoval,,,,,,, ) = oracle.defaultTriggerConfig();
         assertEq(lpRemoval, 4000);
     }
 
@@ -374,7 +377,9 @@ contract GovernanceParamsTest is Test {
             dumpWindowSeconds: 43200,
             taxDeviationThreshold: 300,
             slowRugWindowSeconds: 172800,
-            slowRugCumulativeThreshold: 7000
+            slowRugCumulativeThreshold: 7000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
         vm.prank(nonGovernance);
         vm.expectRevert(TriggerOracle.OnlyGovernance.selector);
@@ -394,7 +399,9 @@ contract GovernanceParamsTest is Test {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 9000
+            slowRugCumulativeThreshold: 9000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
         vm.prank(governance);
         oracle.updatePoolTriggerConfig(poolId, config);
@@ -412,7 +419,9 @@ contract GovernanceParamsTest is Test {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 9000
+            slowRugCumulativeThreshold: 9000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
         vm.prank(nonGovernance);
         vm.expectRevert(TriggerOracle.OnlyGovernance.selector);

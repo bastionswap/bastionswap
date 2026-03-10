@@ -12,6 +12,8 @@ interface PoolCommitmentData {
   maxSingleLpRemovalBps: number | bigint;
   maxCumulativeLpRemovalBps: number | bigint;
   maxDailySellBps: number | bigint;
+  weeklyDumpWindowSeconds: number | bigint;
+  weeklyDumpThresholdBps: number | bigint;
   createdAt: number | bigint;
   isSet: boolean;
 }
@@ -23,6 +25,8 @@ interface TriggerConfigData {
   taxDeviationThreshold: number | bigint;
   slowRugWindowSeconds: number | bigint;
   slowRugCumulativeThreshold: number | bigint;
+  weeklyDumpWindowSeconds: number | bigint;
+  weeklyDumpThresholdPercent: number | bigint;
 }
 
 interface IssuerInfoProps {
@@ -307,17 +311,31 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                     lowerBetter: true,
                   },
                   {
-                    label: "Slow Rug Cumulative LP",
+                    label: "Cumulative LP Removal",
                     value: formatBps(Number(triggerConfig.slowRugCumulativeThreshold)),
                     raw: Number(triggerConfig.slowRugCumulativeThreshold),
                     default_: 8000,
                     lowerBetter: true,
                   },
                   {
-                    label: "Slow Rug Window",
+                    label: "LP Removal Window",
                     value: formatDuration(Number(triggerConfig.slowRugWindowSeconds)),
                     raw: Number(triggerConfig.slowRugWindowSeconds),
                     default_: 86400,
+                    lowerBetter: false,
+                  },
+                  {
+                    label: "Weekly Issuer Sell",
+                    value: formatBps(Number(triggerConfig.weeklyDumpThresholdPercent)),
+                    raw: Number(triggerConfig.weeklyDumpThresholdPercent),
+                    default_: 5000,
+                    lowerBetter: true,
+                  },
+                  {
+                    label: "Weekly Sell Window",
+                    value: formatDuration(Number(triggerConfig.weeklyDumpWindowSeconds)),
+                    raw: Number(triggerConfig.weeklyDumpWindowSeconds),
+                    default_: 604800,
                     lowerBetter: false,
                   },
                 ].map(({ label, value, raw, default_, lowerBetter }) => (

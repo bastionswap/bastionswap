@@ -18,12 +18,17 @@
         "internalType": "address"
       },
       {
-        "name": "guardian",
+        "name": "guardian_",
         "type": "address",
         "internalType": "address"
       },
       {
         "name": "reputationEngine",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "governance",
         "type": "address",
         "internalType": "address"
       }
@@ -58,7 +63,7 @@
   },
   {
     "type": "function",
-    "name": "GUARDIAN",
+    "name": "GOVERNANCE",
     "inputs": [],
     "outputs": [
       {
@@ -128,6 +133,54 @@
   },
   {
     "type": "function",
+    "name": "defaultTriggerConfig",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "lpRemovalThreshold",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "dumpThresholdPercent",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "dumpWindowSeconds",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "taxDeviationThreshold",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "slowRugWindowSeconds",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "slowRugCumulativeThreshold",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "weeklyDumpWindowSeconds",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "weeklyDumpThresholdPercent",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "executeTrigger",
     "inputs": [
       {
@@ -138,6 +191,61 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getDefaultTriggerConfig",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct ITriggerOracle.TriggerConfig",
+        "components": [
+          {
+            "name": "lpRemovalThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "taxDeviationThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "slowRugWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "slowRugCumulativeThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyDumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "weeklyDumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -275,8 +383,57 @@
             "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "weeklyDumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "weeklyDumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "gracePeriod",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "guardian",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "guardianSubmissionDeadline",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
       }
     ],
     "stateMutability": "view"
@@ -296,6 +453,19 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxPauseDuration",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
       }
     ],
     "stateMutability": "view"
@@ -445,6 +615,126 @@
   },
   {
     "type": "function",
+    "name": "setDefaultTriggerConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct ITriggerOracle.TriggerConfig",
+        "components": [
+          {
+            "name": "lpRemovalThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "taxDeviationThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "slowRugWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "slowRugCumulativeThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyDumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "weeklyDumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setGracePeriod",
+    "inputs": [
+      {
+        "name": "newPeriod",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setGuardian",
+    "inputs": [
+      {
+        "name": "newGuardian",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setGuardianSubmissionDeadline",
+    "inputs": [
+      {
+        "name": "newDeadline",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setMaxPauseDuration",
+    "inputs": [
+      {
+        "name": "newDuration",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setStableLpMinAge",
+    "inputs": [
+      {
+        "name": "newAge",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setTriggerConfig",
     "inputs": [
       {
@@ -486,12 +776,35 @@
             "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "weeklyDumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "weeklyDumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
           }
         ]
       }
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "stableLpMinAge",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -513,10 +826,138 @@
   },
   {
     "type": "function",
+    "name": "transferGovernance",
+    "inputs": [
+      {
+        "name": "newGovernance",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "unpause",
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updatePoolTriggerConfig",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      },
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct ITriggerOracle.TriggerConfig",
+        "components": [
+          {
+            "name": "lpRemovalThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "taxDeviationThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "slowRugWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "slowRugCumulativeThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyDumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "weeklyDumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "DefaultTriggerConfigUpdated",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "indexed": false,
+        "internalType": "struct ITriggerOracle.TriggerConfig",
+        "components": [
+          {
+            "name": "lpRemovalThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "dumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "taxDeviationThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "slowRugWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "slowRugCumulativeThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyDumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "weeklyDumpThresholdPercent",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
+      }
+    ],
+    "anonymous": false
   },
   {
     "type": "event",
@@ -539,6 +980,64 @@
   },
   {
     "type": "event",
+    "name": "GovernanceTransferred",
+    "inputs": [
+      {
+        "name": "oldGov",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newGov",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GracePeriodUpdated",
+    "inputs": [
+      {
+        "name": "newPeriod",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GuardianSubmissionDeadlineUpdated",
+    "inputs": [
+      {
+        "name": "newDeadline",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GuardianUpdated",
+    "inputs": [
+      {
+        "name": "newGuardian",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "IssuerRegistered",
     "inputs": [
       {
@@ -552,6 +1051,19 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MaxPauseDurationUpdated",
+    "inputs": [
+      {
+        "name": "newDuration",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -584,6 +1096,19 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "StableLpMinAgeUpdated",
+    "inputs": [
+      {
+        "name": "newAge",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -656,6 +1181,16 @@
           },
           {
             "name": "slowRugCumulativeThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyDumpWindowSeconds",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "weeklyDumpThresholdPercent",
             "type": "uint16",
             "internalType": "uint16"
           }
@@ -769,6 +1304,11 @@
   },
   {
     "type": "error",
+    "name": "InvalidDuration",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "IsPaused",
     "inputs": []
   },
@@ -785,6 +1325,11 @@
   {
     "type": "error",
     "name": "NoPendingTrigger",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyGovernance",
     "inputs": []
   },
   {

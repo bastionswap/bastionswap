@@ -186,7 +186,9 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000
+            slowRugCumulativeThreshold: 8000,
+            weeklyDumpWindowSeconds: 604800,
+            weeklyDumpThresholdPercent: 5000
         });
     }
 
@@ -224,8 +226,8 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         // Track for 24h cumulative check
         _pushRecord(_lpRemovals[key], amount);
 
-        // Check 24h cumulative (>80% = slowRugCumulativeThreshold default)
-        uint256 cumulative = _sumWindow(_lpRemovals[key], cfg.dumpWindowSeconds);
+        // Check cumulative LP removal over slowRugWindowSeconds (>80% = slowRugCumulativeThreshold default)
+        uint256 cumulative = _sumWindow(_lpRemovals[key], cfg.slowRugWindowSeconds);
         uint256 cumulativeBps = (cumulative * BPS_BASE) / effectiveLP;
         if (cumulativeBps >= cfg.slowRugCumulativeThreshold) {
             _initPendingTrigger(poolId, key, TriggerType.RUG_PULL, 0);
@@ -265,6 +267,16 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
         if (cumulativeBps >= cfg.dumpThresholdPercent) {
             _initPendingTrigger(poolId, key, TriggerType.ISSUER_DUMP, totalSupply);
+            return;
+        }
+
+        // Check weekly cumulative issuer sell → SLOW_RUG
+        if (cfg.weeklyDumpWindowSeconds > 0 && cfg.weeklyDumpThresholdPercent > 0) {
+            uint256 weeklyCumulative = _sumWindow(_issuerSales[key][issuer], cfg.weeklyDumpWindowSeconds);
+            uint256 weeklyBps = (weeklyCumulative * BPS_BASE) / denominator;
+            if (weeklyBps >= cfg.weeklyDumpThresholdPercent) {
+                _initPendingTrigger(poolId, key, TriggerType.SLOW_RUG, totalSupply);
+            }
         }
     }
 
@@ -492,6 +504,11 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @notice Get the initial total supply snapshot for a pool.
     function getInitialTotalSupply(PoolId poolId) external view returns (uint256) {
         return _initialTotalSupply[_key(poolId)];
+    }
+
+    /// @notice Returns the default trigger config as a struct (avoids tuple destructuring).
+    function getDefaultTriggerConfig() external view returns (TriggerConfig memory) {
+        return defaultTriggerConfig;
     }
 
     // ═══════════════════════════════════════════════════════════════════
