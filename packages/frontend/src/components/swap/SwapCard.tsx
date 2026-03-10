@@ -473,12 +473,12 @@ export function SwapCard() {
 
         {/* Route display */}
         {tokenIn && tokenOut && route && route.type === "multi-hop" && (
-          <div className="mt-3 rounded-xl bg-blue-50 border border-blue-100 px-3 py-2">
+          <div className="mt-3 rounded-xl bg-bastion-50 border border-bastion-100 px-3 py-2">
             <div className="flex items-center gap-2">
-              <svg className="h-4 w-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-4 w-4 text-bastion-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </svg>
-              <span className="text-xs text-blue-700">
+              <span className="text-xs text-bastion-800">
                 Route: {route.pathSymbols.join(" → ")} ({route.numHops} hops)
               </span>
             </div>

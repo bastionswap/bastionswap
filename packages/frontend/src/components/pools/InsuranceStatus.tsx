@@ -53,7 +53,7 @@ function PoolBalanceRing({ balance, claimed, size = 120 }: { balance: number; cl
             strokeDasharray={c} strokeDashoffset={0} strokeLinecap="round" className="transition-all duration-700" />
         )}
         {/* Balance portion */}
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#6366F1" strokeWidth="10"
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#F59E0B" strokeWidth="10"
           strokeDasharray={c} strokeDashoffset={balOffset} strokeLinecap="round" className="transition-all duration-700" />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">

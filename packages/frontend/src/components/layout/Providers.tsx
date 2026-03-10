@@ -17,7 +17,7 @@ const queryClient = new QueryClient({
 });
 
 const bastionTheme = lightTheme({
-  accentColor: "#4f46e5",
+  accentColor: "#D97706",
   accentColorForeground: "white",
   borderRadius: "large",
   fontStack: "system",

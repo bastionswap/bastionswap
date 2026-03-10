@@ -223,7 +223,7 @@ export function VestingChart({
           <path
             d={currentPath}
             fill="none"
-            stroke="#6d28d9"
+            stroke="#B45309"
             strokeWidth={2}
           />
         )}
@@ -235,7 +235,7 @@ export function VestingChart({
           cy={toY(0)}
           r={3.5}
           fill="white"
-          stroke="#6d28d9"
+          stroke="#B45309"
           strokeWidth={2}
         />
         {/* Vesting end point (100%) */}
@@ -244,15 +244,15 @@ export function VestingChart({
           cy={toY(10000)}
           r={3.5}
           fill="white"
-          stroke="#6d28d9"
+          stroke="#B45309"
           strokeWidth={2}
         />
 
         {/* Gradient definition */}
         <defs>
           <linearGradient id="vestingGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6d28d9" />
-            <stop offset="100%" stopColor="#6d28d9" stopOpacity={0} />
+            <stop offset="0%" stopColor="#B45309" />
+            <stop offset="100%" stopColor="#B45309" stopOpacity={0} />
           </linearGradient>
         </defs>
       </svg>
@@ -261,7 +261,7 @@ export function VestingChart({
       {(showLegend || showLock) && (
         <div className="flex items-center justify-center gap-5 mt-1 flex-wrap">
           <div className="flex items-center gap-1.5">
-            <div className="h-0.5 w-5 bg-violet-700 rounded" />
+            <div className="h-0.5 w-5 bg-bastion-700 rounded" />
             <span className="text-[11px] text-gray-600">{label}</span>
           </div>
           {showLegend && (
