@@ -366,15 +366,23 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
           <div className="mb-3 flex items-center justify-between">
             <span className="text-sm font-medium text-gray-500">You pay</span>
             {tokenIn && isConnected && (
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 flex items-center gap-1">
                 Balance: {formatBalance(tokenInBalance)}
                 {tokenInBalance !== undefined && tokenInBalance > 0n && (
-                  <button
-                    onClick={() => setAmountIn(formatUnits(tokenInBalance, 18))}
-                    className="ml-1 text-bastion-600 hover:text-bastion-700 font-medium"
-                  >
-                    MAX
-                  </button>
+                  <>
+                    {[25, 50, 75, 100].map((pct) => (
+                      <button
+                        key={pct}
+                        onClick={() => pct === 100
+                          ? setAmountIn(formatUnits(tokenInBalance, 18))
+                          : setAmountIn(formatUnits(tokenInBalance * BigInt(pct) / 100n, 18))
+                        }
+                        className="rounded border border-gray-200 px-1.5 py-0.5 text-gray-500 hover:border-bastion-400 hover:text-bastion-600 font-medium transition-colors"
+                      >
+                        {pct === 100 ? "MAX" : `${pct}%`}
+                      </button>
+                    ))}
+                  </>
                 )}
               </span>
             )}
