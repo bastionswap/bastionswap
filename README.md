@@ -26,7 +26,7 @@ All contracts are deployed on Base Sepolia (v4 — split routers for EIP-170 com
 
 | Contract | Address |
 |----------|---------|
-| BastionHook | [`0x61590C0544B562571AAd49e255496a0a0350AC8`](https://sepolia.basescan.org/address/0x61590C0544B562571AAd49e255496a0a0350AC8) |
+| BastionHook | [`0x61590C0544B562571AAad49e255496a0a0350AC8`](https://sepolia.basescan.org/address/0x61590C0544B562571AAad49e255496a0a0350AC8) |
 | BastionSwapRouter | [`0xF21Ae872b7C544b83b25b1D639190Dd98C7a8062`](https://sepolia.basescan.org/address/0xF21Ae872b7C544b83b25b1D639190Dd98C7a8062) |
 | BastionPositionRouter | [`0x7Bcf5618c55AadDD2451b93102285267622Bb67A`](https://sepolia.basescan.org/address/0x7Bcf5618c55AadDD2451b93102285267622Bb67A) |
 | EscrowVault | [`0xBE3D91851aAf9F6A2ca8B47567180305996E16Dd`](https://sepolia.basescan.org/address/0xBE3D91851aAf9F6A2ca8B47567180305996E16Dd) |
