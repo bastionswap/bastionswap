@@ -473,7 +473,17 @@ export default function PoolDetailPage() {
         <div className="lg:grid lg:grid-cols-5 lg:gap-6">
           {/* ── Left column: Chart + Trades ── */}
           <div className="lg:col-span-3 space-y-6">
-            <PriceChart poolId={pool.id} />
+            <PriceChart
+              poolId={pool.id}
+              issuedToken={pool.issuedToken ?? undefined}
+              token0={pool.token0}
+              baseSymbol={
+                pool.issuedToken?.toLowerCase() === pool.token0.toLowerCase()
+                  ? token1Info.symbol || undefined
+                  : token0Info.symbol || undefined
+              }
+              issuedSymbol={issuedTokenInfo.symbol || undefined}
+            />
             <RecentTrades
               poolId={pool.id}
               token0={pool.token0}
@@ -621,7 +631,17 @@ export default function PoolDetailPage() {
         <>
           {/* Non-Bastion: chart + trades full width, then liquidity */}
           <div className="space-y-6">
-            <PriceChart poolId={pool.id} />
+            <PriceChart
+              poolId={pool.id}
+              issuedToken={pool.issuedToken ?? undefined}
+              token0={pool.token0}
+              baseSymbol={
+                pool.issuedToken?.toLowerCase() === pool.token0.toLowerCase()
+                  ? token1Info.symbol || undefined
+                  : token0Info.symbol || undefined
+              }
+              issuedSymbol={issuedTokenInfo.symbol || undefined}
+            />
             <RecentTrades
               poolId={pool.id}
               token0={pool.token0}

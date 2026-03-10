@@ -37,18 +37,37 @@ function formatPrice(val: number): string {
 
 interface PriceChartProps {
   poolId: string;
+  /** Which token address is the issued (non-base) token */
+  issuedToken?: string;
+  /** Pool token0 address */
+  token0?: string;
+  /** Symbol of the base token (e.g. "WETH") */
+  baseSymbol?: string;
+  /** Symbol of the issued token (e.g. "MEME") */
+  issuedSymbol?: string;
 }
 
-export function PriceChart({ poolId }: PriceChartProps) {
+export function PriceChart({ poolId, issuedToken, token0, baseSymbol, issuedSymbol }: PriceChartProps) {
   const [range, setRange] = useState<TimeRange>("24H");
   const { data: chartResult, isLoading } = usePoolChartData(poolId, range);
 
-  const data = chartResult?.data ?? [];
-  const currentPrice = chartResult?.currentPrice ?? 0;
-  const priceChange = chartResult?.priceChange24h ?? 0;
+  // Subgraph price = token1/token0. If issuedToken is token1, invert to show base per issued.
+  const needsInvert = !!(issuedToken && token0 && issuedToken.toLowerCase() !== token0.toLowerCase());
+
+  const rawData = chartResult?.data ?? [];
+  const data = needsInvert
+    ? rawData.map((p) => ({ ...p, price: p.price > 0 ? 1 / p.price : 0 }))
+    : rawData;
+  const currentPrice = data.length > 0 ? data[data.length - 1].price : 0;
+  const firstPrice = data.length > 0 ? data[0].price : 0;
+  const priceChange = firstPrice > 0 ? ((currentPrice - firstPrice) / firstPrice) * 100 : 0;
   const isUp = priceChange >= 0;
   const gradientColor = isUp ? "#10b981" : "#ef4444";
   const changeColor = isUp ? "text-emerald-600" : "text-red-500";
+
+  const priceLabel = issuedSymbol && baseSymbol
+    ? `1 ${issuedSymbol} = ${formatPrice(currentPrice)} ${baseSymbol}`
+    : `Price (token1/token0)`;
 
   return (
     <Card>
@@ -65,7 +84,7 @@ export function PriceChart({ poolId }: PriceChartProps) {
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-400 mt-0.5">Price (token1/token0)</p>
+          <p className="text-xs text-gray-400 mt-0.5">{priceLabel}</p>
         </div>
         <div className="flex gap-1">
           {TIME_RANGES.map((r) => (
