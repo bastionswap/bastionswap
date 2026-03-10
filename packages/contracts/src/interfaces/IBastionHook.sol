@@ -10,4 +10,9 @@ interface IBastionHook {
     /// @dev Called by EscrowVault during triggerForceRemoval.
     /// @param poolId Uniswap V4 pool identifier
     function forceRemoveIssuerLP(PoolId poolId) external;
+
+    /// @notice Returns the issuer address for a pool.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @return issuer The issuer address
+    function getPoolIssuer(PoolId poolId) external view returns (address issuer);
 }

@@ -21,6 +21,20 @@ contract MockERC20Token is ERC20 {
     function mint(address to, uint256 amount) external { _mint(to, amount); }
 }
 
+contract MockBastionHookSimple {
+    mapping(bytes32 => address) internal _issuers;
+
+    function setIssuer(PoolId poolId, address issuerAddr) external {
+        _issuers[PoolId.unwrap(poolId)] = issuerAddr;
+    }
+
+    function getPoolIssuer(PoolId poolId) external view returns (address) {
+        return _issuers[PoolId.unwrap(poolId)];
+    }
+
+    receive() external payable {}
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PROTOCOL HANDLER — exercises EscrowVault + InsurancePool together
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -207,13 +221,15 @@ contract ProtocolInvariantTest is Test {
     InsurancePool public pool;
     ProtocolHandler public handler;
 
+    MockBastionHookSimple public mockHook;
     address public hook;
     address public oracle;
     address public insuranceAddr;
     address public governance;
 
     function setUp() public {
-        hook = makeAddr("hook");
+        mockHook = new MockBastionHookSimple();
+        hook = address(mockHook);
         oracle = makeAddr("oracle");
         governance = makeAddr("governance");
 
@@ -401,13 +417,15 @@ contract EconomicInvariantTest is Test {
     InsurancePool public pool;
     EconomicHandler public handler;
 
+    MockBastionHookSimple public mockHook;
     address public hook;
     address public oracle;
     address public governance;
     uint128 constant LIQUIDITY = 200e18;
 
     function setUp() public {
-        hook = makeAddr("hook");
+        mockHook = new MockBastionHookSimple();
+        hook = address(mockHook);
         oracle = makeAddr("oracle");
         governance = makeAddr("governance");
 
@@ -462,12 +480,14 @@ contract CrossContractFuzzTest is Test {
     InsurancePool public pool;
     MockERC20Token public token;
 
+    MockBastionHookSimple public mockHook;
     address public hook;
     address public oracle;
     address public governance;
 
     function setUp() public {
-        hook = makeAddr("hook");
+        mockHook = new MockBastionHookSimple();
+        hook = address(mockHook);
         oracle = makeAddr("oracle");
         governance = makeAddr("governance");
 

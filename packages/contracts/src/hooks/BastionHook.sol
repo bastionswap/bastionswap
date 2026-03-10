@@ -462,6 +462,11 @@ contract BastionHook is BaseTestHooks {
     //  VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════
 
+    /// @notice Returns the issuer address for a pool.
+    function getPoolIssuer(PoolId poolId) external view returns (address) {
+        return _issuers[poolId];
+    }
+
     /// @notice Check if an address is the issuer for a pool.
     function isIssuer(PoolId poolId, address account) external view returns (bool) {
         return _issuers[poolId] == account;

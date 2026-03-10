@@ -3,6 +3,7 @@ pragma solidity =0.8.26;
 
 import {IInsurancePool} from "../interfaces/IInsurancePool.sol";
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
+import {IBastionHook} from "../interfaces/IBastionHook.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
@@ -19,6 +20,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     uint40 internal constant CLAIM_PERIOD = 30 days;
     uint40 internal constant FALLBACK_CLAIM_PERIOD = 7 days;
     uint40 internal constant EMERGENCY_DELAY = 2 days;
+    uint256 public constant ISSUER_REWARD_BPS = 1000; // 10%
+    uint256 public constant BPS_DENOMINATOR = 10000;
 
 
     // ─── Immutables ───────────────────────────────────────────────────
@@ -90,6 +93,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error EscrowNotFullyVested();
 
     error TreasuryNotSet();
+    error IssuerCannotClaim();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -201,6 +205,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     {
         PoolData storage pool = _getPool(poolId);
         if (!pool.isTriggered) revert NotTriggered();
+        if (msg.sender == IBastionHook(BASTION_HOOK).getPoolIssuer(poolId)) revert IssuerCannotClaim();
         if (pool.claimed[msg.sender]) revert AlreadyClaimed();
         if (holderBalance == 0) revert ZeroAmount();
 
@@ -352,22 +357,48 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         // Escrow must be fully vested
         if (!ESCROW_VAULT.isFullyVested(poolId)) revert EscrowNotFullyVested();
 
+        address issuer = IBastionHook(BASTION_HOOK).getPoolIssuer(poolId);
+        uint256 totalIssuerReward;
+        uint256 totalTreasuryAmount;
+
+        // ETH balance split
         uint256 ethAmount = pool.balance;
         pool.balance = 0;
 
         if (ethAmount > 0) {
-            (bool success,) = treasury.call{value: ethAmount}("");
-            if (!success) revert TransferFailed();
+            uint256 issuerEth = ethAmount * ISSUER_REWARD_BPS / BPS_DENOMINATOR;
+            uint256 treasuryEth = ethAmount - issuerEth;
+            totalIssuerReward += issuerEth;
+            totalTreasuryAmount += treasuryEth;
+
+            if (issuerEth > 0) {
+                (bool s1,) = issuer.call{value: issuerEth}("");
+                if (!s1) revert TransferFailed();
+            }
+            if (treasuryEth > 0) {
+                (bool s2,) = treasury.call{value: treasuryEth}("");
+                if (!s2) revert TransferFailed();
+            }
         }
 
-        // Transfer ERC-20 base token fees to treasury
+        // ERC-20 base token fees split
         uint256 baseTokenAmount = pool.baseTokenFeeBalance;
         if (baseTokenAmount > 0 && pool.baseTokenFeeToken != address(0)) {
             pool.baseTokenFeeBalance = 0;
-            IERC20Minimal(pool.baseTokenFeeToken).transfer(treasury, baseTokenAmount);
+            uint256 issuerToken = baseTokenAmount * ISSUER_REWARD_BPS / BPS_DENOMINATOR;
+            uint256 treasuryToken = baseTokenAmount - issuerToken;
+            totalIssuerReward += issuerToken;
+            totalTreasuryAmount += treasuryToken;
+
+            if (issuerToken > 0) {
+                IERC20Minimal(pool.baseTokenFeeToken).transfer(issuer, issuerToken);
+            }
+            if (treasuryToken > 0) {
+                IERC20Minimal(pool.baseTokenFeeToken).transfer(treasury, treasuryToken);
+            }
         }
 
-        emit IInsurancePool.TreasuryFundsClaimed(poolId, treasury, ethAmount + baseTokenAmount);
+        emit IInsurancePool.TreasuryFundsClaimed(poolId, totalTreasuryAmount, totalIssuerReward);
     }
 
     // ─── Internal Functions ───────────────────────────────────────────

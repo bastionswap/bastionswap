@@ -9,6 +9,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 contract InsurancePoolTest is Test {
     InsurancePool public pool;
 
+    MockBastionHook public mockHook;
     address public hook;
     address public oracle;
     address public governance;
@@ -16,6 +17,7 @@ contract InsurancePoolTest is Test {
     address public holder1;
     address public holder2;
     address public holder3;
+    address public issuer;
 
     PoolId public defaultPoolId;
 
@@ -23,15 +25,20 @@ contract InsurancePoolTest is Test {
     uint256 constant TOTAL_SUPPLY = 1_000_000 ether;
 
     function setUp() public {
-        hook = makeAddr("hook");
+        mockHook = new MockBastionHook();
+        hook = address(mockHook);
         oracle = makeAddr("oracle");
         governance = makeAddr("governance");
         holder1 = makeAddr("holder1");
         holder2 = makeAddr("holder2");
         holder3 = makeAddr("holder3");
+        issuer = makeAddr("issuer");
 
         pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
+
+        // Set default issuer for pools
+        mockHook.setIssuer(defaultPoolId, issuer);
 
         // Fund the hook for deposits
         vm.deal(hook, 100 ether);
@@ -937,6 +944,8 @@ contract InsurancePoolTest is Test {
         address treasuryAddr = makeAddr("treasury");
 
         InsurancePool treasuryPool = new InsurancePool(hook, oracle, governance, address(mockEscrow), treasuryAddr);
+        // Set issuer for treasury pool tests
+        mockHook.setIssuer(defaultPoolId, issuer);
         return (treasuryPool, mockEscrow, treasuryAddr);
     }
 
@@ -955,7 +964,11 @@ contract InsurancePoolTest is Test {
         vm.prank(governance);
         treasuryPool.claimTreasuryFunds(defaultPoolId);
 
-        assertEq(treasuryAddr.balance, DEPOSIT_AMOUNT);
+        // 10% to issuer, 90% to treasury
+        uint256 expectedIssuerReward = DEPOSIT_AMOUNT * 1000 / 10000; // 1 ether
+        uint256 expectedTreasury = DEPOSIT_AMOUNT - expectedIssuerReward; // 9 ether
+        assertEq(treasuryAddr.balance, expectedTreasury);
+        assertEq(issuer.balance, expectedIssuerReward);
         IInsurancePool.PoolStatus memory status = treasuryPool.getPoolStatus(defaultPoolId);
         assertEq(status.balance, 0);
     }
@@ -1030,6 +1043,183 @@ contract InsurancePoolTest is Test {
         vm.expectRevert(InsurancePool.OnlyGovernance.selector);
         treasuryPool.setTreasury(makeAddr("newTreasury"));
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ISSUER EXCLUSION TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_IssuerCannotClaimCompensation_MerkleMode() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        // Issuer holds 400k, holderA 360k, holderB 240k
+        uint256 issuerBalance = 400_000 ether;
+        uint256 holderABalance = 360_000 ether;
+
+        (bytes32 root, bytes32[] memory issuerProof,) =
+            _buildTree2(issuer, issuerBalance, holder1, holderABalance);
+
+        // Use total supply excluding issuer for fair distribution
+        uint256 eligibleSupply = holderABalance; // only non-issuer holders
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, eligibleSupply, root, address(0));
+
+        // Issuer tries to claim → revert
+        vm.prank(issuer);
+        vm.expectRevert(InsurancePool.IssuerCannotClaim.selector);
+        pool.claimCompensation(defaultPoolId, issuerBalance, issuerProof);
+    }
+
+    function test_IssuerCannotClaimCompensation_FallbackMode() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        MockToken mockToken = new MockToken();
+        mockToken.mint(issuer, 400_000 ether);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+
+        bytes32[] memory emptyProof = new bytes32[](0);
+        vm.prank(issuer);
+        vm.expectRevert(InsurancePool.IssuerCannotClaim.selector);
+        pool.claimCompensation(defaultPoolId, 400_000 ether, emptyProof);
+    }
+
+    function test_CompensationDistribution_ExcludesIssuer() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        // Issuer 40%, holder1 36%, holder2 24%
+        // Issuer excluded → holder1 gets 60%, holder2 gets 40%
+        uint256 holderABalance = 360_000 ether;
+        uint256 holderBBalance = 240_000 ether;
+        uint256 eligibleSupply = holderABalance + holderBBalance; // 600k (issuer excluded)
+
+        (bytes32 root, bytes32[] memory proofA, bytes32[] memory proofB) =
+            _buildTree2(holder1, holderABalance, holder2, holderBBalance);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, eligibleSupply, root, address(0));
+
+        vm.prank(holder1);
+        uint256 claimA = pool.claimCompensation(defaultPoolId, holderABalance, proofA);
+
+        vm.prank(holder2);
+        uint256 claimB = pool.claimCompensation(defaultPoolId, holderBBalance, proofB);
+
+        // 60% of 10 ETH = 6 ETH, 40% of 10 ETH = 4 ETH
+        assertEq(claimA, 6 ether);
+        assertEq(claimB, 4 ether);
+
+        // Issuer cannot claim
+        vm.prank(issuer);
+        bytes32[] memory emptyProof = new bytes32[](0);
+        vm.expectRevert(InsurancePool.IssuerCannotClaim.selector);
+        pool.claimCompensation(defaultPoolId, 400_000 ether, emptyProof);
+
+        // Pool fully drained
+        assertEq(address(pool).balance, 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ISSUER REWARD (TREASURY SPLIT) TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_ClaimTreasuryFunds_SplitsCorrectly() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow, address treasuryAddr) = _createTreasuryPool();
+
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        mockEscrow.setFullyVested(true);
+
+        vm.prank(governance);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+
+        // 10% to issuer (1 ETH), 90% to treasury (9 ETH)
+        assertEq(issuer.balance, 1 ether);
+        assertEq(treasuryAddr.balance, 9 ether);
+    }
+
+    function test_ClaimTreasuryFunds_USDC_SplitsCorrectly() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow, address treasuryAddr) = _createTreasuryPool();
+
+        // Deposit ERC-20 base token fees
+        MockToken usdc = new MockToken();
+        uint256 usdcAmount = 1000e18;
+        usdc.mint(address(treasuryPool), usdcAmount);
+
+        vm.prank(hook);
+        treasuryPool.depositFeeToken(defaultPoolId, address(usdc), usdcAmount);
+
+        mockEscrow.setFullyVested(true);
+
+        vm.prank(governance);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+
+        // 10% to issuer (100 USDC), 90% to treasury (900 USDC)
+        assertEq(usdc.balanceOf(issuer), 100e18);
+        assertEq(usdc.balanceOf(treasuryAddr), 900e18);
+    }
+
+    function test_ClaimTreasuryFunds_TriggeredPool_Reverts() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow,) = _createTreasuryPool();
+
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        // Trigger the pool
+        vm.prank(oracle);
+        treasuryPool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(0));
+
+        mockEscrow.setFullyVested(true);
+
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.AlreadyTriggered.selector);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    function test_ClaimTreasuryFunds_VestingNotComplete_Reverts() public {
+        (InsurancePool treasuryPool,,) = _createTreasuryPool();
+
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        // escrow not vested (default false)
+        vm.prank(governance);
+        vm.expectRevert(InsurancePool.EscrowNotFullyVested.selector);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    function test_ClaimTreasuryFunds_EmitsEvent() public {
+        (InsurancePool treasuryPool, MockEscrowVault mockEscrow,) = _createTreasuryPool();
+
+        vm.prank(hook);
+        treasuryPool.depositFee{value: DEPOSIT_AMOUNT}(defaultPoolId);
+
+        mockEscrow.setFullyVested(true);
+
+        uint256 expectedTreasury = DEPOSIT_AMOUNT * 9000 / 10000; // 9 ether
+        uint256 expectedIssuerReward = DEPOSIT_AMOUNT * 1000 / 10000; // 1 ether
+
+        vm.expectEmit(true, false, false, true);
+        emit IInsurancePool.TreasuryFundsClaimed(defaultPoolId, expectedTreasury, expectedIssuerReward);
+
+        vm.prank(governance);
+        treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+}
+
+contract MockBastionHook {
+    mapping(bytes32 => address) internal _issuers;
+
+    function setIssuer(PoolId poolId, address issuerAddr) external {
+        _issuers[PoolId.unwrap(poolId)] = issuerAddr;
+    }
+
+    function getPoolIssuer(PoolId poolId) external view returns (address) {
+        return _issuers[PoolId.unwrap(poolId)];
+    }
+
+    receive() external payable {}
 }
 
 contract MockEscrowVault {
@@ -1053,5 +1243,11 @@ contract MockToken {
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
         totalSupply += amount;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
     }
 }

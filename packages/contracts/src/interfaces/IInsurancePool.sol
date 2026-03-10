@@ -167,7 +167,7 @@ interface IInsurancePool {
     // ─── Treasury ────────────────────────────────────────────────────
 
     /// @notice Emitted when unclaimed insurance funds are sent to the protocol treasury.
-    event TreasuryFundsClaimed(PoolId indexed poolId, address indexed treasury, uint256 amount);
+    event TreasuryFundsClaimed(PoolId indexed poolId, uint256 treasuryAmount, uint256 issuerReward);
 
     /// @notice Emitted when the treasury address is updated.
     event TreasurySet(address oldTreasury, address newTreasury);
