@@ -165,6 +165,61 @@ export function useApprove() {
   return { approve, hash, isPending, isConfirming, isSuccess, error, reset };
 }
 
+// ─── Auto-Approve + Swap (unified flow) ──────────────────────────────────
+
+export type AutoApprovePhase = "idle" | "approving" | "waitingApproval" | "swapping";
+
+export function useSwapWithAutoApprove() {
+  const [phase, setPhase] = useState<AutoApprovePhase>("idle");
+  const [approveError, setApproveError] = useState<Error | null>(null);
+
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
+
+  const execute = async ({
+    needsApproval,
+    tokenAddress,
+    swapFn,
+    refetchAllowance,
+  }: {
+    needsApproval: boolean;
+    tokenAddress: `0x${string}`;
+    swapFn: () => void;
+    refetchAllowance: () => void;
+  }) => {
+    setApproveError(null);
+
+    try {
+      if (needsApproval) {
+        setPhase("approving");
+        const hash = await writeContractAsync({
+          address: tokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [PERMIT2_ADDRESS, MAX_UINT256],
+        });
+
+        setPhase("waitingApproval");
+        await publicClient!.waitForTransactionReceipt({ hash });
+        refetchAllowance();
+      }
+
+      setPhase("swapping");
+      swapFn();
+    } catch (err) {
+      setApproveError(err as Error);
+      setPhase("idle");
+    }
+  };
+
+  const reset = () => {
+    setPhase("idle");
+    setApproveError(null);
+  };
+
+  return { execute, phase, approveError, reset };
+}
+
 // ─── Swap with Permit2 ──────────────────────────────────
 
 export interface SwapConfig {

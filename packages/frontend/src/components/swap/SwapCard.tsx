@@ -15,7 +15,7 @@ import {
   useExecuteMultiHopSwap,
   useTokenAllowance,
   useTokenBalance,
-  useApprove,
+  useSwapWithAutoApprove,
   useFaucet,
   useSwapQuote,
   useMultiHopQuote,
@@ -72,14 +72,13 @@ export function SwapCard() {
   const swapError = isMultiHop ? swapMultiHopError : swapDirectError;
   const resetSwap = () => { resetSwapDirect(); resetSwapMultiHop(); };
 
-  // Token approval
+  // Auto-approve + swap
   const {
-    approve,
-    isPending: isApproving,
-    isConfirming: isApproveConfirming,
-    isSuccess: isApproveSuccess,
-    reset: resetApprove,
-  } = useApprove();
+    execute: executeWithAutoApprove,
+    phase: autoApprovePhase,
+    approveError,
+    reset: resetAutoApprove,
+  } = useSwapWithAutoApprove();
 
   // Allowance check
   const routerAddr = contracts?.BastionSwapRouter as `0x${string}` | undefined;
@@ -110,23 +109,20 @@ export function SwapCard() {
     isSuccess: isFaucetSuccess,
   } = useFaucet(faucetAddr, address);
 
-  // Refetch allowance after approval succeeds
-  useEffect(() => {
-    if (isApproveSuccess) refetchAllowance();
-  }, [isApproveSuccess, refetchAllowance]);
-
-  // Refetch balances after swap succeeds
+  // Refetch balances and reset auto-approve phase after swap succeeds
   useEffect(() => {
     if (isSuccess) {
       refetchTokenIn();
       refetchTokenOut();
+      resetAutoApprove();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuccess, refetchTokenIn, refetchTokenOut]);
 
   // Reset states when token selection changes
   useEffect(() => {
     resetSwap();
-    resetApprove();
+    resetAutoApprove();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenIn?.address, tokenOut?.address]);
 
@@ -190,7 +186,7 @@ export function SwapCard() {
   const queriesLoading = !tokenInIsNative && tokenIn && address && (allowance === undefined || tokenInBalance === undefined);
   const insufficientBalance = tokenInBalance !== undefined && parsedAmountIn > 0n && parsedAmountIn > tokenInBalance;
   const needsApproval = !tokenInIsNative && parsedAmountIn > 0n
-    && (allowance !== undefined ? allowance < parsedAmountIn : !isApproveSuccess);
+    && allowance !== undefined && allowance < parsedAmountIn;
 
   const slippageBps = Math.floor(parseFloat(slippage || "1") * 100);
   // Use real on-chain quote for minAmountOut
@@ -265,34 +261,38 @@ export function SwapCard() {
     return Math.max(impact, 0);
   }, [quotedOut, poolReserves, parsedAmountIn, tokenIn?.address, tokenOut?.address, route, pools]);
 
-  const handleApprove = () => {
-    if (!tokenIn || !routerAddr) return;
-    approve(tokenIn.address as `0x${string}`, routerAddr, parsedAmountIn * 10n);
-  };
-
   const handleSwap = () => {
     if (!route || parsedAmountIn <= 0n || !quotedOut || !tokenIn) return;
 
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200); // 20 min
 
-    if (isMultiHop) {
-      swapMultiHop({
-        steps: route.steps,
-        amountIn: parsedAmountIn,
-        minAmountOut,
-        deadline,
-        inputToken: tokenIn.address as `0x${string}`,
-        value: tokenInIsNative ? parsedAmountIn : 0n,
-      });
-    } else if (poolKey) {
-      swapDirect({
-        ...poolKey,
-        amountIn: parsedAmountIn,
-        minAmountOut,
-        deadline,
-        value: tokenInIsNative ? parsedAmountIn : 0n,
-      });
-    }
+    const doSwap = () => {
+      if (isMultiHop) {
+        swapMultiHop({
+          steps: route.steps,
+          amountIn: parsedAmountIn,
+          minAmountOut,
+          deadline,
+          inputToken: tokenIn.address as `0x${string}`,
+          value: tokenInIsNative ? parsedAmountIn : 0n,
+        });
+      } else if (poolKey) {
+        swapDirect({
+          ...poolKey,
+          amountIn: parsedAmountIn,
+          minAmountOut,
+          deadline,
+          value: tokenInIsNative ? parsedAmountIn : 0n,
+        });
+      }
+    };
+
+    executeWithAutoApprove({
+      needsApproval,
+      tokenAddress: tokenIn.address as `0x${string}`,
+      swapFn: doSwap,
+      refetchAllowance,
+    });
   };
 
   const formatBalance = (bal: bigint | undefined) => {
@@ -584,20 +584,10 @@ export function SwapCard() {
             <button disabled className="w-full rounded-xl bg-red-50 border border-red-200 py-4 text-base font-semibold text-red-600 cursor-not-allowed">
               Insufficient {tokenIn.symbol} Balance
             </button>
-          ) : needsApproval ? (
-            <button
-              onClick={handleApprove}
-              disabled={isApproving || isApproveConfirming}
-              className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2"
-            >
-              {isApproving || isApproveConfirming ? (
-                <>
-                  <LoadingSpinner size="sm" />
-                  {isApproving ? "Confirm approval..." : "Approving..."}
-                </>
-              ) : (
-                `Approve ${tokenIn.symbol}`
-              )}
+          ) : autoApprovePhase === "approving" || autoApprovePhase === "waitingApproval" ? (
+            <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2">
+              <LoadingSpinner size="sm" />
+              {autoApprovePhase === "approving" ? "Confirm approval..." : "Approving..."}
             </button>
           ) : isQuoteLoading ? (
             <button disabled className="btn-primary w-full py-4 text-base flex items-center justify-center gap-2 opacity-60">
@@ -651,13 +641,13 @@ export function SwapCard() {
         )}
 
         {/* Error */}
-        {swapError && (
+        {(swapError || approveError) && (
           <div className="mt-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
             <p className="text-sm text-red-600">
-              {parseErrorMessage(swapError)}
+              {parseErrorMessage(swapError || approveError!)}
             </p>
             <button
-              onClick={resetSwap}
+              onClick={() => { resetSwap(); resetAutoApprove(); }}
               className="text-xs text-gray-400 hover:text-gray-600 mt-1"
             >
               Try again
