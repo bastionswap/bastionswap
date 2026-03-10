@@ -116,15 +116,21 @@ export function TokenSelectModal({
   const isProtected = (addr: string) =>
     protectedTokens.includes(addr.toLowerCase());
 
-  const filtered = poolTokens.filter((t) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      t.symbol.toLowerCase().includes(q) ||
-      t.name.toLowerCase().includes(q) ||
-      t.address.toLowerCase().includes(q)
-    );
-  });
+  const filtered = poolTokens
+    .filter((t) => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (
+        t.symbol.toLowerCase().includes(q) ||
+        t.name.toLowerCase().includes(q) ||
+        t.address.toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => {
+      const aProtected = a.isProtected || isProtected(a.address) ? 1 : 0;
+      const bProtected = b.isProtected || isProtected(b.address) ? 1 : 0;
+      return bProtected - aProtected;
+    });
 
   const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(search);
 
