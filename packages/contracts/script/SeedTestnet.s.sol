@@ -18,10 +18,10 @@ import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol"
 /// @title SeedTestnet
 /// @notice Deploy test tokens and create pools on Base Sepolia.
 contract SeedTestnet is Script {
-    // Base Sepolia addresses (v4 deployment — split routers)
+    // Base Sepolia addresses (v5 deployment — 3-window trigger)
     address constant POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
-    address constant HOOK = 0x2fd8A3d76815f6a287544261C7A69f181cDC0aC8;
-    address constant ROUTER = 0x9649345E136d2a8804B5D598ee859d18d4A2aBae;
+    address constant HOOK = 0x61590C0544B562571AAad49e255496a0a0350AC8;
+    address constant ROUTER = 0x7Bcf5618c55AadDD2451b93102285267622Bb67A;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
