@@ -127,7 +127,7 @@ contract E2E_LocalFork is Test {
         insurancePool = new InsurancePool(hookAddr, triggerAddr, deployer, escrowAddr, deployer);
         require(address(insurancePool) == insuranceAddr, "insurance addr");
 
-        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, deployer, reputationAddr);
+        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, deployer, reputationAddr, deployer);
         require(address(triggerOracle) == triggerAddr, "trigger addr");
 
         reputationEngine = new ReputationEngine(hookAddr, escrowAddr, triggerAddr);

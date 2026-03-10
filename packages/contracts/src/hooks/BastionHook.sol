@@ -41,7 +41,6 @@ contract BastionHook is BaseTestHooks {
     InsurancePool public immutable insurancePool;
     TriggerOracle public immutable triggerOracle;
     IReputationEngine public immutable reputationEngine;
-    address public immutable GOVERNANCE;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -78,6 +77,27 @@ contract BastionHook is BaseTestHooks {
     /// @dev Minimum base token amount for initial liquidity per base token
     mapping(address => uint256) public minBaseAmount;
 
+    // ─── Governance ──────────────────────────────────────────────────
+
+    address public GOVERNANCE;
+
+    // ─── Governance Parameters ───────────────────────────────────────
+
+    /// @notice Maximum total liquidity per pool (0 = unlimited)
+    uint256 public maxPoolTVL;
+
+    /// @notice Default lock duration when hookData doesn't specify custom (default 7 days)
+    uint40 public defaultLockDuration;
+
+    /// @notice Default vesting duration when hookData doesn't specify custom (default 83 days)
+    uint40 public defaultVestingDuration;
+
+    /// @notice Minimum lock duration issuer can set (default 7 days)
+    uint40 public minLockDuration;
+
+    /// @notice Minimum vesting duration issuer can set (default 7 days)
+    uint40 public minVestingDuration;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyPoolManager();
@@ -94,6 +114,10 @@ contract BastionHook is BaseTestHooks {
     error BaseTokenAlreadySet(address token);
     error BaseTokenNotSet(address token);
     error EscrowTriggered();
+    error ExceedsMaxTVL();
+    error LockDurationTooShort();
+    error VestingDurationTooShort();
+    error InvalidDuration();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -108,6 +132,12 @@ contract BastionHook is BaseTestHooks {
     event BaseTokenAdded(address indexed token, uint256 minAmount);
     event BaseTokenRemoved(address indexed token);
     event MinBaseAmountUpdated(address indexed token, uint256 newMinAmount);
+    event GovernanceTransferred(address indexed oldGov, address indexed newGov);
+    event MaxPoolTVLUpdated(uint256 newMaxTVL);
+    event DefaultLockDurationUpdated(uint256 newDuration);
+    event DefaultVestingDurationUpdated(uint256 newDuration);
+    event MinLockDurationUpdated(uint256 newDuration);
+    event MinVestingDurationUpdated(uint256 newDuration);
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -140,6 +170,13 @@ contract BastionHook is BaseTestHooks {
         reputationEngine = _reputationEngine;
         GOVERNANCE = _governance;
         _owner = _governance;
+
+        // Initialize governance parameters
+        maxPoolTVL = 0; // unlimited
+        defaultLockDuration = 7 days;
+        defaultVestingDuration = 83 days;
+        minLockDuration = 7 days;
+        minVestingDuration = 7 days;
 
         // Initialize base tokens
         allowedBaseTokens[address(0)] = true; // native ETH
@@ -211,6 +248,12 @@ contract BastionHook is BaseTestHooks {
                     escrowVault.addLiquidity(escrowId, liquidity);
                 }
             }
+        }
+
+        // Enforce TVL cap for ALL LP additions
+        if (liquidity > 0 && maxPoolTVL > 0) {
+            uint256 newTotal = _totalLiquidity[poolId] + liquidity;
+            if (newTotal > maxPoolTVL) revert ExceedsMaxTVL();
         }
 
         // Track total liquidity
@@ -522,6 +565,53 @@ contract BastionHook is BaseTestHooks {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  GOVERNANCE — Parameter Setters
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @notice Transfer governance to a new address.
+    function transferGovernance(address newGovernance) external onlyGovernance {
+        if (newGovernance == address(0)) revert NoAllowedBaseToken(); // reuse existing zero-address style error
+        address oldGov = GOVERNANCE;
+        GOVERNANCE = newGovernance;
+        emit GovernanceTransferred(oldGov, newGovernance);
+    }
+
+    /// @notice Set the maximum pool TVL (0 = unlimited, max 1000 ether).
+    function setMaxPoolTVL(uint256 newMaxTVL) external onlyGovernance {
+        if (newMaxTVL > 1000 ether) revert InvalidDuration();
+        maxPoolTVL = newMaxTVL;
+        emit MaxPoolTVLUpdated(newMaxTVL);
+    }
+
+    /// @notice Set the default lock duration (1–90 days).
+    function setDefaultLockDuration(uint40 newDuration) external onlyGovernance {
+        if (newDuration < 1 days || newDuration > 90 days) revert InvalidDuration();
+        defaultLockDuration = newDuration;
+        emit DefaultLockDurationUpdated(newDuration);
+    }
+
+    /// @notice Set the default vesting duration (7–365 days).
+    function setDefaultVestingDuration(uint40 newDuration) external onlyGovernance {
+        if (newDuration < 7 days || newDuration > 365 days) revert InvalidDuration();
+        defaultVestingDuration = newDuration;
+        emit DefaultVestingDurationUpdated(newDuration);
+    }
+
+    /// @notice Set the minimum lock duration (1–30 days).
+    function setMinLockDuration(uint40 newDuration) external onlyGovernance {
+        if (newDuration < 1 days || newDuration > 30 days) revert InvalidDuration();
+        minLockDuration = newDuration;
+        emit MinLockDurationUpdated(newDuration);
+    }
+
+    /// @notice Set the minimum vesting duration (1–30 days).
+    function setMinVestingDuration(uint40 newDuration) external onlyGovernance {
+        if (newDuration < 1 days || newDuration > 30 days) revert InvalidDuration();
+        minVestingDuration = newDuration;
+        emit MinVestingDurationUpdated(newDuration);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  INTERNAL
     // ═══════════════════════════════════════════════════════════════════
 
@@ -544,6 +634,10 @@ contract BastionHook is BaseTestHooks {
             hookData,
             (address, address, uint40, uint40, IEscrowVault.IssuerCommitment, ITriggerOracle.TriggerConfig)
         );
+
+        // Enforce minimum durations from governance params
+        if (lockDuration < minLockDuration) revert LockDurationTooShort();
+        if (vestingDuration < minVestingDuration) revert VestingDurationTooShort();
 
         // Register issuer
         _issuers[poolId] = issuer;

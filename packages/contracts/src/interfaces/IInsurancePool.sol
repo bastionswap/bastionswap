@@ -132,8 +132,8 @@ interface IInsurancePool {
     function getPoolStatus(PoolId poolId) external view returns (PoolStatus memory status);
 
     /// @notice Sets the fee rate for insurance pool deposits.
-    /// @dev Can only be called by governance.
-    /// @param newFeeRate New fee rate in basis points (max 200 = 2%)
+    /// @dev Can only be called by governance. Range: 10–500 bps (0.1%–5%).
+    /// @param newFeeRate New fee rate in basis points
     function setFeeRate(uint16 newFeeRate) external;
 
     /// @notice Pending emergency withdrawal request.
@@ -180,4 +180,36 @@ interface IInsurancePool {
     /// @dev Requires: pool not triggered, escrow fully vested, grace period passed.
     /// @param poolId Uniswap V4 pool identifier
     function claimTreasuryFunds(PoolId poolId) external;
+
+    // ─── Governance ──────────────────────────────────────────────────
+
+    /// @notice Emitted when governance is transferred.
+    event GovernanceTransferred(address indexed oldGov, address indexed newGov);
+
+    /// @notice Emitted when the Merkle claim period is updated.
+    event MerkleClaimPeriodUpdated(uint256 newPeriod);
+
+    /// @notice Emitted when the fallback claim period is updated.
+    event FallbackClaimPeriodUpdated(uint256 newPeriod);
+
+    /// @notice Emitted when the emergency timelock is updated.
+    event EmergencyTimelockUpdated(uint256 newTimelock);
+
+    /// @notice Emitted when the issuer reward bps is updated.
+    event IssuerRewardBpsUpdated(uint256 newBps);
+
+    /// @notice Transfer governance to a new address.
+    function transferGovernance(address newGovernance) external;
+
+    /// @notice Set the Merkle-based claim period (14–90 days).
+    function setMerkleClaimPeriod(uint40 newPeriod) external;
+
+    /// @notice Set the fallback claim period (3–30 days).
+    function setFallbackClaimPeriod(uint40 newPeriod) external;
+
+    /// @notice Set the emergency withdrawal timelock (1–7 days).
+    function setEmergencyTimelock(uint40 newTimelock) external;
+
+    /// @notice Set the issuer reward share in basis points (0–3000).
+    function setIssuerRewardBps(uint256 newBps) external;
 }

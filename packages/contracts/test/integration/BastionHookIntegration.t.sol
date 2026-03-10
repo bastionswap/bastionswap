@@ -76,7 +76,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
-        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
+        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr, governance);
 
         // Deploy hook implementation and etch it at the correct address
         bytes memory creationCode = type(BastionHook).creationCode;
@@ -89,6 +89,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
             deployed := create(0, add(bytecode, 0x20), mload(bytecode))
         }
         vm.etch(hookAddr, deployed.code);
+        // Restore storage lost by vm.etch
+        vm.store(hookAddr, bytes32(uint256(10)), bytes32(uint256(uint160(governance))));
+        // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
+        vm.store(hookAddr, bytes32(uint256(12)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
         hook = BastionHook(payable(hookAddr));
 
         // Deploy tokens
@@ -509,12 +513,12 @@ contract BastionHookIntegrationTest is Test, Deployers {
     //  INSURANCE FEE COLLECTION BRANCHES
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_afterSwap_buyWithZeroFeeRate_noFeeCollected() public {
+    function test_afterSwap_buyWithMinFeeRate_minimalFeeCollected() public {
         _initPoolWithIssuer();
 
-        // Set fee rate to 0
+        // Set fee rate to minimum (10 bps = 0.1%)
         vm.prank(governance);
-        insurancePool.setFeeRate(0);
+        insurancePool.setFeeRate(10);
 
         // Add deep liquidity
         ModifyLiquidityParams memory params = ModifyLiquidityParams({
@@ -668,7 +672,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithIssuer();
 
         vm.prank(governance);
-        insurancePool.setFeeRate(1); // 0.01%
+        insurancePool.setFeeRate(10); // 0.1% — with tiny swap, fee rounds to 0
 
         address issuedAddr = address(issuedToken);
         bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;

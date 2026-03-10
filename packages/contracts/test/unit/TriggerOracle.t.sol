@@ -71,6 +71,7 @@ contract TriggerOracleTest is Test {
 
     address public hook;
     address public guardian;
+    address public governance;
     address public issuer;
     address public bot;
 
@@ -82,6 +83,7 @@ contract TriggerOracleTest is Test {
     function setUp() public {
         hook = makeAddr("hook");
         guardian = makeAddr("guardian");
+        governance = makeAddr("governance");
         issuer = makeAddr("issuer");
         bot = makeAddr("bot");
 
@@ -89,7 +91,7 @@ contract TriggerOracleTest is Test {
         insurancePool = new MockInsurancePool();
 
         MockReputationEngine reputationEngine = new MockReputationEngine();
-        oracle = new TriggerOracle(hook, address(escrowVault), address(insurancePool), guardian, address(reputationEngine));
+        oracle = new TriggerOracle(hook, address(escrowVault), address(insurancePool), guardian, address(reputationEngine), governance);
 
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
 
@@ -743,7 +745,7 @@ contract TriggerOracleTest is Test {
         RevertingEscrowVault revertingEscrow = new RevertingEscrowVault();
         MockReputationEngine repEngine = new MockReputationEngine();
         TriggerOracle oracleWithBadEscrow = new TriggerOracle(
-            hook, address(revertingEscrow), address(insurancePool), guardian, address(repEngine)
+            hook, address(revertingEscrow), address(insurancePool), guardian, address(repEngine), governance
         );
 
         vm.prank(hook);
@@ -766,7 +768,7 @@ contract TriggerOracleTest is Test {
         RevertingInsurancePool revertingInsurance = new RevertingInsurancePool();
         MockReputationEngine repEngine = new MockReputationEngine();
         TriggerOracle oracleWithBadInsurance = new TriggerOracle(
-            hook, address(escrowVault), address(revertingInsurance), guardian, address(repEngine)
+            hook, address(escrowVault), address(revertingInsurance), guardian, address(repEngine), governance
         );
 
         vm.prank(hook);
@@ -789,7 +791,7 @@ contract TriggerOracleTest is Test {
     function test_executeTrigger_reputationEngineReverts_emitsEvent() public {
         RevertingReputationEngine revertingRep = new RevertingReputationEngine();
         TriggerOracle oracleWithBadRep = new TriggerOracle(
-            hook, address(escrowVault), address(insurancePool), guardian, address(revertingRep)
+            hook, address(escrowVault), address(insurancePool), guardian, address(revertingRep), governance
         );
 
         vm.prank(hook);

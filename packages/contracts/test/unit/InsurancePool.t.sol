@@ -633,19 +633,25 @@ contract InsurancePoolTest is Test {
     function test_setFeeRate_revertsTooHigh() public {
         vm.prank(governance);
         vm.expectRevert(InsurancePool.FeeRateTooHigh.selector);
-        pool.setFeeRate(201); // > 2%
+        pool.setFeeRate(501); // > 5%
     }
 
     function test_setFeeRate_allowsMaxRate() public {
         vm.prank(governance);
-        pool.setFeeRate(200); // exactly 2%
-        assertEq(pool.feeRate(), 200);
+        pool.setFeeRate(500); // exactly 5%
+        assertEq(pool.feeRate(), 500);
     }
 
-    function test_setFeeRate_allowsZero() public {
+    function test_setFeeRate_revertsTooLow() public {
         vm.prank(governance);
-        pool.setFeeRate(0);
-        assertEq(pool.feeRate(), 0);
+        vm.expectRevert(InsurancePool.FeeRateTooLow.selector);
+        pool.setFeeRate(9); // < 0.1%
+    }
+
+    function test_setFeeRate_allowsMinRate() public {
+        vm.prank(governance);
+        pool.setFeeRate(10); // exactly 0.1%
+        assertEq(pool.feeRate(), 10);
     }
 
     function test_defaultFeeRate() public view {

@@ -15,20 +15,39 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     // ─── Constants ────────────────────────────────────────────────────
 
     uint16 internal constant BPS_BASE = 10_000;
-    uint40 internal constant GRACE_PERIOD = 1 hours;
     uint256 internal constant MAX_TRACKER_ENTRIES = 50;
-    uint40 internal constant MAX_PAUSE_DURATION = 7 days;
-    uint40 internal constant MIN_LP_AGE = 1 hours;
     uint40 internal constant MERKLE_ROOT_CHALLENGE_PERIOD = 1 hours;
-    uint40 internal constant GUARDIAN_SUBMISSION_DEADLINE = 24 hours;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
     address public immutable BASTION_HOOK;
     address public immutable ESCROW_VAULT;
     address public immutable INSURANCE_POOL;
-    address public immutable GUARDIAN;
     IReputationEngine public immutable REPUTATION_ENGINE;
+
+    // ─── Governance ──────────────────────────────────────────────────
+
+    address public GOVERNANCE;
+
+    // ─── Governance Parameters ───────────────────────────────────────
+
+    /// @notice Grace period before trigger execution (default 1 hour)
+    uint40 public gracePeriod;
+
+    /// @notice Maximum pause duration (default 7 days)
+    uint40 public maxPauseDuration;
+
+    /// @notice Minimum LP age for stable LP calculation (default 1 hour)
+    uint40 public stableLpMinAge;
+
+    /// @notice Guardian submission deadline after grace period (default 24 hours)
+    uint40 public guardianSubmissionDeadline;
+
+    /// @notice Guardian address for trigger operations
+    address public guardian;
+
+    /// @notice Default trigger config inherited by new pools
+    TriggerConfig public defaultTriggerConfig;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -102,6 +121,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     error OnlyHook();
     error OnlyGuardian();
+    error OnlyGovernance();
     error AlreadyTriggered();
     error ConfigNotSet();
     error IsPaused();
@@ -112,6 +132,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     error MerkleRootChallengeNotElapsed();
     error WaitingForMerkleRoot();
     error ZeroMerkleRoot();
+    error InvalidDuration();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -121,7 +142,12 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     }
 
     modifier onlyGuardian() {
-        if (msg.sender != GUARDIAN) revert OnlyGuardian();
+        if (msg.sender != guardian) revert OnlyGuardian();
+        _;
+    }
+
+    modifier onlyGovernance() {
+        if (msg.sender != GOVERNANCE) revert OnlyGovernance();
         _;
     }
 
@@ -136,14 +162,32 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         address bastionHook,
         address escrowVault,
         address insurancePool,
-        address guardian,
-        address reputationEngine
+        address guardian_,
+        address reputationEngine,
+        address governance
     ) {
         BASTION_HOOK = bastionHook;
         ESCROW_VAULT = escrowVault;
         INSURANCE_POOL = insurancePool;
-        GUARDIAN = guardian;
+        guardian = guardian_;
+        GOVERNANCE = governance;
         REPUTATION_ENGINE = IReputationEngine(reputationEngine);
+
+        // Initialize governance parameters with defaults
+        gracePeriod = 1 hours;
+        maxPauseDuration = 7 days;
+        stableLpMinAge = 1 hours;
+        guardianSubmissionDeadline = 24 hours;
+
+        // Initialize default trigger config
+        defaultTriggerConfig = TriggerConfig({
+            lpRemovalThreshold: 5000,
+            dumpThresholdPercent: 3000,
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 8000
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -274,7 +318,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         bytes32 key = _key(poolId);
         PendingTrigger storage pending = _pendingTriggers[key];
         if (pending.detectedAt == 0) revert NoPendingTrigger();
-        if (block.timestamp < pending.detectedAt + GRACE_PERIOD) revert GracePeriodNotElapsed();
+        if (block.timestamp < pending.detectedAt + gracePeriod) revert GracePeriodNotElapsed();
 
         PoolTriggerState storage state = _poolStates[key];
         if (state.isTriggered) revert AlreadyTriggered();
@@ -290,8 +334,8 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
             }
             withMerkleRoot = true;
         } else {
-            // Path B: No Merkle root — require 24h deadline elapsed after grace
-            if (block.timestamp < pending.detectedAt + GRACE_PERIOD + GUARDIAN_SUBMISSION_DEADLINE) {
+            // Path B: No Merkle root — require deadline elapsed after grace
+            if (block.timestamp < pending.detectedAt + gracePeriod + guardianSubmissionDeadline) {
                 revert WaitingForMerkleRoot();
             }
             withMerkleRoot = false;
@@ -385,7 +429,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     /// @notice Pause all trigger detection and execution for up to MAX_PAUSE_DURATION.
     function pause() external onlyGuardian {
-        pausedUntil = uint40(block.timestamp) + MAX_PAUSE_DURATION;
+        pausedUntil = uint40(block.timestamp) + maxPauseDuration;
         emit Paused(msg.sender);
     }
 
@@ -425,7 +469,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         PendingTrigger storage pending = _pendingTriggers[_key(poolId)];
         exists = pending.detectedAt != 0;
         triggerType = pending.triggerType;
-        executeAfter = pending.detectedAt + GRACE_PERIOD;
+        executeAfter = pending.detectedAt + gracePeriod;
     }
 
     /// @notice Get the pending Merkle root and submission timestamp for a pool.
@@ -448,6 +492,67 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @notice Get the initial total supply snapshot for a pool.
     function getInitialTotalSupply(PoolId poolId) external view returns (uint256) {
         return _initialTotalSupply[_key(poolId)];
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  GOVERNANCE PARAMETER SETTERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @notice Transfer governance to a new address.
+    function transferGovernance(address newGovernance) external onlyGovernance {
+        if (newGovernance == address(0)) revert ZeroAddress();
+        address oldGov = GOVERNANCE;
+        GOVERNANCE = newGovernance;
+        emit GovernanceTransferred(oldGov, newGovernance);
+    }
+
+    /// @notice Set the grace period (15 min – 24 hours).
+    function setGracePeriod(uint40 newPeriod) external onlyGovernance {
+        if (newPeriod < 15 minutes || newPeriod > 24 hours) revert InvalidDuration();
+        gracePeriod = newPeriod;
+        emit GracePeriodUpdated(newPeriod);
+    }
+
+    /// @notice Set the max pause duration (1–14 days).
+    function setMaxPauseDuration(uint40 newDuration) external onlyGovernance {
+        if (newDuration < 1 days || newDuration > 14 days) revert InvalidDuration();
+        maxPauseDuration = newDuration;
+        emit MaxPauseDurationUpdated(newDuration);
+    }
+
+    /// @notice Set the stable LP minimum age (30 min – 6 hours).
+    function setStableLpMinAge(uint40 newAge) external onlyGovernance {
+        if (newAge < 30 minutes || newAge > 6 hours) revert InvalidDuration();
+        stableLpMinAge = newAge;
+        emit StableLpMinAgeUpdated(newAge);
+    }
+
+    /// @notice Set the guardian submission deadline (6–72 hours).
+    function setGuardianSubmissionDeadline(uint40 newDeadline) external onlyGovernance {
+        if (newDeadline < 6 hours || newDeadline > 72 hours) revert InvalidDuration();
+        guardianSubmissionDeadline = newDeadline;
+        emit GuardianSubmissionDeadlineUpdated(newDeadline);
+    }
+
+    /// @notice Set a new guardian address.
+    function setGuardian(address newGuardian) external onlyGovernance {
+        if (newGuardian == address(0)) revert ZeroAddress();
+        guardian = newGuardian;
+        emit GuardianUpdated(newGuardian);
+    }
+
+    /// @notice Set the default trigger config for new pools.
+    function setDefaultTriggerConfig(TriggerConfig calldata config) external onlyGovernance {
+        defaultTriggerConfig = config;
+        emit DefaultTriggerConfigUpdated(config);
+    }
+
+    /// @notice Update an individual pool's trigger config (governance override).
+    function updatePoolTriggerConfig(PoolId poolId, TriggerConfig calldata config) external onlyGovernance {
+        bytes32 key = _key(poolId);
+        _poolStates[key].config = config;
+        _poolStates[key].configSet = true;
+        emit TriggerConfigUpdated(poolId, config);
     }
 
     // ─── Internal Functions ───────────────────────────────────────────
@@ -479,7 +584,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
             issuer: _poolIssuers[key]
         });
 
-        emit TriggerPending(poolId, triggerType, uint40(block.timestamp) + GRACE_PERIOD);
+        emit TriggerPending(poolId, triggerType, uint40(block.timestamp) + gracePeriod);
     }
 
     /// @dev Push a new record, pruning old entries beyond MAX_TRACKER_ENTRIES.
@@ -500,7 +605,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     function _computeStableLP(bytes32 key, uint256 totalLP) internal view returns (uint256) {
         Record[] storage additions = _lpAdditions[key];
         uint256 recentLP = 0;
-        uint256 cutoff = block.timestamp > MIN_LP_AGE ? block.timestamp - MIN_LP_AGE : 0;
+        uint256 cutoff = block.timestamp > stableLpMinAge ? block.timestamp - stableLpMinAge : 0;
         uint256 len = additions.length;
         for (uint256 i; i < len; ++i) {
             if (additions[i].timestamp > cutoff) {

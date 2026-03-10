@@ -71,7 +71,7 @@ contract Deploy is Script {
         require(address(insurancePool) == a.insurance, "InsurancePool address mismatch");
 
         // 4. Deploy TriggerOracle (nonce N+3)
-        TriggerOracle triggerOracle = new TriggerOracle(a.hook, a.escrow, a.insurance, guardian, a.reputation);
+        TriggerOracle triggerOracle = new TriggerOracle(a.hook, a.escrow, a.insurance, guardian, a.reputation, governance);
         require(address(triggerOracle) == a.trigger, "TriggerOracle address mismatch");
 
         // 5. Deploy ReputationEngine (nonce N+4)

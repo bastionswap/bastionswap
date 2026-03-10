@@ -114,7 +114,7 @@ contract DeployLocal is Script {
         InsurancePool insurancePool = new InsurancePool(a.hook, a.trigger, deployer, a.escrow, deployer);
         require(address(insurancePool) == a.insurance, "InsurancePool address mismatch");
 
-        TriggerOracle triggerOracle = new TriggerOracle(a.hook, a.escrow, a.insurance, deployer, a.reputation);
+        TriggerOracle triggerOracle = new TriggerOracle(a.hook, a.escrow, a.insurance, deployer, a.reputation, deployer);
         require(address(triggerOracle) == a.trigger, "TriggerOracle address mismatch");
 
         ReputationEngine reputationEngine = new ReputationEngine(a.hook, a.escrow, a.trigger);

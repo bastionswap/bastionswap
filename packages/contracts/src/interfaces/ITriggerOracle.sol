@@ -91,4 +91,33 @@ interface ITriggerOracle {
     /// @param poolId Pool identifier
     /// @param amount Amount of LP added
     function reportLPAddition(PoolId poolId, uint256 amount) external;
+
+    // ─── Governance ──────────────────────────────────────────────────
+
+    /// @notice Emitted when governance is transferred.
+    event GovernanceTransferred(address indexed oldGov, address indexed newGov);
+
+    /// @notice Emitted when the grace period is updated.
+    event GracePeriodUpdated(uint256 newPeriod);
+
+    /// @notice Emitted when the max pause duration is updated.
+    event MaxPauseDurationUpdated(uint256 newDuration);
+
+    /// @notice Emitted when the stable LP min age is updated.
+    event StableLpMinAgeUpdated(uint256 newAge);
+
+    /// @notice Emitted when the guardian submission deadline is updated.
+    event GuardianSubmissionDeadlineUpdated(uint256 newDeadline);
+
+    /// @notice Emitted when the guardian is updated.
+    event GuardianUpdated(address indexed newGuardian);
+
+    /// @notice Emitted when the default trigger config is updated.
+    event DefaultTriggerConfigUpdated(TriggerConfig config);
+
+    /// @notice Set the default trigger config for new pools.
+    function setDefaultTriggerConfig(TriggerConfig calldata config) external;
+
+    /// @notice Update an individual pool's trigger config (governance override).
+    function updatePoolTriggerConfig(PoolId poolId, TriggerConfig calldata config) external;
 }

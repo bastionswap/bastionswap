@@ -16,20 +16,33 @@ import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Mini
 contract InsurancePool is IInsurancePool, ReentrancyGuard {
     // ─── Constants ────────────────────────────────────────────────────
 
-    uint16 internal constant MAX_FEE_RATE = 200; // 2%
-    uint40 internal constant CLAIM_PERIOD = 30 days;
-    uint40 internal constant FALLBACK_CLAIM_PERIOD = 7 days;
-    uint40 internal constant EMERGENCY_DELAY = 2 days;
-    uint256 public constant ISSUER_REWARD_BPS = 1000; // 10%
+    uint16 internal constant MAX_FEE_RATE = 500; // 5%
+    uint16 internal constant MIN_FEE_RATE = 10; // 0.1%
     uint256 public constant BPS_DENOMINATOR = 10000;
-
 
     // ─── Immutables ───────────────────────────────────────────────────
 
     address public immutable BASTION_HOOK;
     address public immutable TRIGGER_ORACLE;
-    address public immutable GOVERNANCE;
     IEscrowVault public immutable ESCROW_VAULT;
+
+    // ─── Governance ──────────────────────────────────────────────────
+
+    address public GOVERNANCE;
+
+    // ─── Governance Parameters ───────────────────────────────────────
+
+    /// @notice Merkle-based claim period after trigger (default 30 days)
+    uint40 public merkleClaimPeriod;
+
+    /// @notice Fallback (balanceOf) claim period after trigger (default 7 days)
+    uint40 public fallbackClaimPeriod;
+
+    /// @notice Timelock delay for emergency withdrawals (default 2 days)
+    uint40 public emergencyTimelock;
+
+    /// @notice Issuer reward share in basis points (default 1000 = 10%)
+    uint256 public issuerRewardBps;
 
     // ─── Storage ──────────────────────────────────────────────────────
 
@@ -94,6 +107,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
     error TreasuryNotSet();
     error IssuerCannotClaim();
+    error FeeRateTooLow();
+    error InvalidDuration();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -121,6 +136,10 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         ESCROW_VAULT = IEscrowVault(escrowVault);
         treasury = treasury_;
         feeRate = 100; // 1% default
+        merkleClaimPeriod = 30 days;
+        fallbackClaimPeriod = 7 days;
+        emergencyTimelock = 2 days;
+        issuerRewardBps = 1000; // 10%
     }
 
     // ─── External Functions ───────────────────────────────────────────
@@ -211,14 +230,14 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
         if (pool.useMerkleProof) {
             // Merkle mode: 30-day claim period, verify proof
-            if (block.timestamp > pool.triggerTimestamp + CLAIM_PERIOD) revert ClaimPeriodExpired();
+            if (block.timestamp > pool.triggerTimestamp + merkleClaimPeriod) revert ClaimPeriodExpired();
             if (pool.merkleRoot == bytes32(0)) revert MerkleRootNotSet();
 
             bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, holderBalance))));
             if (!MerkleProof.verify(merkleProof, pool.merkleRoot, leaf)) revert InvalidMerkleProof();
         } else {
             // Fallback mode: 7-day claim period, verify balanceOf
-            if (block.timestamp > pool.triggerTimestamp + FALLBACK_CLAIM_PERIOD) revert ClaimPeriodExpired();
+            if (block.timestamp > pool.triggerTimestamp + fallbackClaimPeriod) revert ClaimPeriodExpired();
             if (ERC20(pool.issuedToken).balanceOf(msg.sender) < holderBalance) {
                 revert InsufficientTokenBalance();
             }
@@ -278,6 +297,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     /// @inheritdoc IInsurancePool
     function setFeeRate(uint16 newFeeRate) external onlyGovernance {
         if (newFeeRate > MAX_FEE_RATE) revert FeeRateTooHigh();
+        if (newFeeRate < MIN_FEE_RATE) revert FeeRateTooLow();
 
         uint16 oldRate = feeRate;
         feeRate = newFeeRate;
@@ -309,7 +329,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     function executeEmergencyWithdraw(bytes32 requestId) external onlyGovernance nonReentrant {
         IInsurancePool.EmergencyRequest memory req = emergencyRequests[requestId];
         if (req.requestedAt == 0) revert EmergencyRequestNotFound();
-        if (block.timestamp < req.requestedAt + EMERGENCY_DELAY) revert EmergencyDelayNotElapsed();
+        if (block.timestamp < req.requestedAt + emergencyTimelock) revert EmergencyDelayNotElapsed();
 
         // Delete before execution to prevent re-entrancy / double-execute
         delete emergencyRequests[requestId];
@@ -337,6 +357,47 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     function hasClaimed(PoolId poolId, address holder) external view returns (bool) {
         return _getPool(poolId).claimed[holder];
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  GOVERNANCE PARAMETER SETTERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @notice Transfer governance to a new address.
+    function transferGovernance(address newGovernance) external onlyGovernance {
+        if (newGovernance == address(0)) revert ZeroAddress();
+        address oldGov = GOVERNANCE;
+        GOVERNANCE = newGovernance;
+        emit GovernanceTransferred(oldGov, newGovernance);
+    }
+
+    /// @notice Set the Merkle-based claim period (14–90 days).
+    function setMerkleClaimPeriod(uint40 newPeriod) external onlyGovernance {
+        if (newPeriod < 14 days || newPeriod > 90 days) revert InvalidDuration();
+        merkleClaimPeriod = newPeriod;
+        emit MerkleClaimPeriodUpdated(newPeriod);
+    }
+
+    /// @notice Set the fallback claim period (3–30 days).
+    function setFallbackClaimPeriod(uint40 newPeriod) external onlyGovernance {
+        if (newPeriod < 3 days || newPeriod > 30 days) revert InvalidDuration();
+        fallbackClaimPeriod = newPeriod;
+        emit FallbackClaimPeriodUpdated(newPeriod);
+    }
+
+    /// @notice Set the emergency withdrawal timelock (1–7 days).
+    function setEmergencyTimelock(uint40 newTimelock) external onlyGovernance {
+        if (newTimelock < 1 days || newTimelock > 7 days) revert InvalidDuration();
+        emergencyTimelock = newTimelock;
+        emit EmergencyTimelockUpdated(newTimelock);
+    }
+
+    /// @notice Set the issuer reward share in basis points (0–3000).
+    function setIssuerRewardBps(uint256 newBps) external onlyGovernance {
+        if (newBps > 3000) revert FeeRateTooHigh();
+        issuerRewardBps = newBps;
+        emit IssuerRewardBpsUpdated(newBps);
+    }
+
 
     /// @inheritdoc IInsurancePool
     function setTreasury(address treasury_) external onlyGovernance {
@@ -366,7 +427,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         pool.balance = 0;
 
         if (ethAmount > 0) {
-            uint256 issuerEth = ethAmount * ISSUER_REWARD_BPS / BPS_DENOMINATOR;
+            uint256 issuerEth = ethAmount * issuerRewardBps / BPS_DENOMINATOR;
             uint256 treasuryEth = ethAmount - issuerEth;
             totalIssuerReward += issuerEth;
             totalTreasuryAmount += treasuryEth;
@@ -385,7 +446,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 baseTokenAmount = pool.baseTokenFeeBalance;
         if (baseTokenAmount > 0 && pool.baseTokenFeeToken != address(0)) {
             pool.baseTokenFeeBalance = 0;
-            uint256 issuerToken = baseTokenAmount * ISSUER_REWARD_BPS / BPS_DENOMINATOR;
+            uint256 issuerToken = baseTokenAmount * issuerRewardBps / BPS_DENOMINATOR;
             uint256 treasuryToken = baseTokenAmount - issuerToken;
             totalIssuerReward += issuerToken;
             totalTreasuryAmount += treasuryToken;

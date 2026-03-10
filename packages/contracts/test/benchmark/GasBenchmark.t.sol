@@ -73,7 +73,7 @@ contract GasBenchmarkTest is Test, Deployers {
 
         escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
-        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr);
+        triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr, governance);
 
         bytes memory creationCode = type(BastionHook).creationCode;
         bytes memory constructorArgs = abi.encode(
@@ -84,6 +84,10 @@ contract GasBenchmarkTest is Test, Deployers {
         address deployed;
         assembly { deployed := create(0, add(bytecode, 0x20), mload(bytecode)) }
         vm.etch(hookAddr, deployed.code);
+        // Restore storage lost by vm.etch
+        vm.store(hookAddr, bytes32(uint256(10)), bytes32(uint256(uint160(governance))));
+        // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
+        vm.store(hookAddr, bytes32(uint256(12)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
         hook = BastionHook(payable(hookAddr));
 
         issuedToken = new MockERC20("Issued", "ISS", 18);

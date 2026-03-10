@@ -681,9 +681,13 @@ contract CrossContractFuzzTest is Test {
 
     /// @dev Insurance pool fee rate enforcement
     function testFuzz_feeRateBounds(uint16 newRate) public {
-        if (newRate > 200) {
+        if (newRate > 500) {
             vm.prank(governance);
             vm.expectRevert(InsurancePool.FeeRateTooHigh.selector);
+            pool.setFeeRate(newRate);
+        } else if (newRate < 10) {
+            vm.prank(governance);
+            vm.expectRevert(InsurancePool.FeeRateTooLow.selector);
             pool.setFeeRate(newRate);
         } else {
             vm.prank(governance);
