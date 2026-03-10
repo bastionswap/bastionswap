@@ -8,7 +8,6 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import {
   useCreateBastionPool,
-  DEFAULT_TRIGGER_CONFIG,
   type CreatePoolStep,
 } from "@/hooks/useCreatePool";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -58,19 +57,28 @@ const DEFAULT_COMMITMENT = {
   maxSellPercent: 300, // 3% in bps
 };
 
-// Lock + Linear Vesting presets
-type VestingMode = "standard" | "quick" | "extended" | "custom";
+// Unified commitment presets: vesting schedule + trigger detection thresholds
+type CommitmentMode = "quick" | "standard" | "strict" | "custom";
 
-interface VestingPreset {
+interface CommitmentPreset {
   lockDays: number;
   vestingDays: number;
+  dailyWithdrawLimit: number;
+  maxSellPercent: number;
+  lpRemoval: number;
+  dump: number;
+  slowRug: number;
 }
 
-const VESTING_PRESETS: Record<Exclude<VestingMode, "custom">, VestingPreset> = {
-  quick: { lockDays: 7, vestingDays: 23 },       // 30 days total
-  standard: { lockDays: 7, vestingDays: 83 },     // 90 days total
-  extended: { lockDays: 30, vestingDays: 150 },    // 180 days total
+const COMMITMENT_PRESETS: Record<Exclude<CommitmentMode, "custom">, CommitmentPreset> = {
+  quick:    { lockDays: 7,  vestingDays: 23,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 3000, slowRug: 8000 },
+  standard: { lockDays: 7,  vestingDays: 83,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 3000, slowRug: 8000 },
+  strict:   { lockDays: 30, vestingDays: 150, dailyWithdrawLimit: 300, maxSellPercent: 200, lpRemoval: 3000, dump: 2000, slowRug: 5000 },
 };
+
+// Keep backward compatibility alias
+type VestingMode = CommitmentMode;
+const VESTING_PRESETS = COMMITMENT_PRESETS;
 
 const DEFAULT_TOTAL_DAYS = 90;
 
@@ -141,12 +149,17 @@ export default function CreatePoolPage() {
   const [baseAmount, setBaseAmount] = useState("");
   const [tokenAmount, setTokenAmount] = useState("");
   const [commitment, setCommitment] = useState(DEFAULT_COMMITMENT);
-  const [vestingMode, setVestingMode] = useState<VestingMode>("standard");
+  const [vestingMode, setVestingMode] = useState<CommitmentMode>("standard");
   const [lockDays, setLockDays] = useState(7);
   const [vestingDays, setVestingDays] = useState(83);
+  const [triggerThresholds, setTriggerThresholds] = useState({
+    lpRemoval: 5000,
+    dump: 3000,
+    slowRug: 8000,
+  });
 
-  const activeLockDays = vestingMode === "custom" ? lockDays : VESTING_PRESETS[vestingMode].lockDays;
-  const activeVestingDays = vestingMode === "custom" ? vestingDays : VESTING_PRESETS[vestingMode].vestingDays;
+  const activeLockDays = vestingMode === "custom" ? lockDays : COMMITMENT_PRESETS[vestingMode].lockDays;
+  const activeVestingDays = vestingMode === "custom" ? vestingDays : COMMITMENT_PRESETS[vestingMode].vestingDays;
   const totalDays = activeLockDays + activeVestingDays;
 
   const strictness = useMemo(() => computeStrictnessLevel(activeLockDays, activeVestingDays), [activeLockDays, activeVestingDays]);
@@ -182,6 +195,15 @@ export default function CreatePoolPage() {
     isPoolAlreadyExists ? tokenAddress : undefined
   );
 
+  // Active trigger thresholds (from preset or custom)
+  const activeTrigger = vestingMode === "custom"
+    ? triggerThresholds
+    : { lpRemoval: COMMITMENT_PRESETS[vestingMode].lpRemoval, dump: COMMITMENT_PRESETS[vestingMode].dump, slowRug: COMMITMENT_PRESETS[vestingMode].slowRug };
+
+  const activeCommitment = vestingMode === "custom"
+    ? commitment
+    : { dailyWithdrawLimit: COMMITMENT_PRESETS[vestingMode].dailyWithdrawLimit, maxSellPercent: COMMITMENT_PRESETS[vestingMode].maxSellPercent };
+
   const handleCreatePool = () => {
     if (!contracts || !address) return;
     const tokenAddr = tokenAddress as `0x${string}`;
@@ -195,10 +217,17 @@ export default function CreatePoolPage() {
       lockDuration: activeLockDays * 86400,
       vestingDuration: activeVestingDays * 86400,
       commitment: {
-        dailyWithdrawLimit: commitment.dailyWithdrawLimit,
-        maxSellPercent: commitment.maxSellPercent,
+        dailyWithdrawLimit: activeCommitment.dailyWithdrawLimit,
+        maxSellPercent: activeCommitment.maxSellPercent,
       },
-      triggerConfig: DEFAULT_TRIGGER_CONFIG,
+      triggerConfig: {
+        lpRemovalThreshold: activeTrigger.lpRemoval,
+        dumpThresholdPercent: activeTrigger.dump,
+        dumpWindowSeconds: 86400,
+        taxDeviationThreshold: 500,
+        slowRugWindowSeconds: 86400,
+        slowRugCumulativeThreshold: activeTrigger.slowRug,
+      },
     });
   };
 
@@ -488,7 +517,7 @@ export default function CreatePoolPage() {
               {([
                 { mode: "quick" as const, label: "Quick", desc: "30 days" },
                 { mode: "standard" as const, label: "Standard", desc: "90 days" },
-                { mode: "extended" as const, label: "Extended", desc: "180 days" },
+                { mode: "strict" as const, label: "Strict", desc: "180 days" },
                 { mode: "custom" as const, label: "Custom", desc: "Your rules" },
               ]).map(({ mode, label, desc }) => (
                 <button
@@ -496,8 +525,11 @@ export default function CreatePoolPage() {
                   onClick={() => {
                     setVestingMode(mode);
                     if (mode !== "custom") {
-                      setLockDays(VESTING_PRESETS[mode].lockDays);
-                      setVestingDays(VESTING_PRESETS[mode].vestingDays);
+                      const preset = COMMITMENT_PRESETS[mode];
+                      setLockDays(preset.lockDays);
+                      setVestingDays(preset.vestingDays);
+                      setCommitment({ dailyWithdrawLimit: preset.dailyWithdrawLimit, maxSellPercent: preset.maxSellPercent });
+                      setTriggerThresholds({ lpRemoval: preset.lpRemoval, dump: preset.dump, slowRug: preset.slowRug });
                     }
                   }}
                   className={`rounded-xl border px-3 py-2.5 text-center transition-all ${
@@ -556,6 +588,71 @@ export default function CreatePoolPage() {
                 <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 text-center">
                   Total: <span className="font-semibold">{totalDays} days</span>
                 </div>
+
+                {/* Trigger Threshold Sliders */}
+                <div className="pt-4 border-t border-gray-200">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Trigger Detection Thresholds</p>
+                  <p className="text-xs text-gray-400 mb-4">Lower values = stricter protection for buyers</p>
+                  <div className="space-y-5">
+                    <div>
+                      <div className="flex justify-between text-sm mb-3">
+                        <span className="text-gray-600 font-medium">Max LP Removal / tx</span>
+                        <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.lpRemoval)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1000}
+                        max={5000}
+                        step={100}
+                        value={triggerThresholds.lpRemoval}
+                        onChange={(e) => setTriggerThresholds({ ...triggerThresholds, lpRemoval: parseInt(e.target.value) })}
+                        className="w-full accent-bastion-600"
+                      />
+                      <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                        <span className="text-emerald-500">10% (Strict)</span>
+                        <span>50% (Default)</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-sm mb-3">
+                        <span className="text-gray-600 font-medium">Max Cumulative LP / 24h</span>
+                        <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.slowRug)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={3000}
+                        max={8000}
+                        step={100}
+                        value={triggerThresholds.slowRug}
+                        onChange={(e) => setTriggerThresholds({ ...triggerThresholds, slowRug: parseInt(e.target.value) })}
+                        className="w-full accent-bastion-600"
+                      />
+                      <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                        <span className="text-emerald-500">30% (Strict)</span>
+                        <span>80% (Default)</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-sm mb-3">
+                        <span className="text-gray-600 font-medium">Max Daily Issuer Sell</span>
+                        <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.dump)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={500}
+                        max={3000}
+                        step={100}
+                        value={triggerThresholds.dump}
+                        onChange={(e) => setTriggerThresholds({ ...triggerThresholds, dump: parseInt(e.target.value) })}
+                        className="w-full accent-bastion-600"
+                      />
+                      <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                        <span className="text-emerald-500">5% (Strict)</span>
+                        <span>30% (Default)</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -564,8 +661,8 @@ export default function CreatePoolPage() {
               <VestingChart
                 lockDays={activeLockDays}
                 vestingDays={activeVestingDays}
-                defaultLockDays={vestingMode !== "standard" ? VESTING_PRESETS.standard.lockDays : undefined}
-                defaultVestingDays={vestingMode !== "standard" ? VESTING_PRESETS.standard.vestingDays : undefined}
+                defaultLockDays={vestingMode !== "standard" ? COMMITMENT_PRESETS.standard.lockDays : undefined}
+                defaultVestingDays={vestingMode !== "standard" ? COMMITMENT_PRESETS.standard.vestingDays : undefined}
                 label={vestingMode === "custom" ? "Custom" : vestingMode.charAt(0).toUpperCase() + vestingMode.slice(1)}
                 height={160}
               />
@@ -706,7 +803,10 @@ export default function CreatePoolPage() {
 
             <div className="mt-5 flex items-center justify-between">
               <button
-                onClick={() => setCommitment(DEFAULT_COMMITMENT)}
+                onClick={() => {
+                  setCommitment(DEFAULT_COMMITMENT);
+                  setTriggerThresholds({ lpRemoval: 5000, dump: 3000, slowRug: 8000 });
+                }}
                 className="text-xs text-bastion-600 hover:text-bastion-700 hover:underline transition-colors"
               >
                 Reset to defaults
@@ -714,6 +814,7 @@ export default function CreatePoolPage() {
               <button
                 onClick={() => {
                   setCommitment(DEFAULT_COMMITMENT);
+                  setTriggerThresholds({ lpRemoval: 5000, dump: 3000, slowRug: 8000 });
                   setVestingMode("standard");
                   setStep(4);
                 }}
@@ -785,17 +886,42 @@ export default function CreatePoolPage() {
               <span className="text-gray-900 font-medium">1% per buy swap</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Commitments</span>
-              <span className="text-gray-900 font-medium">
-                {commitment.dailyWithdrawLimit === DEFAULT_COMMITMENT.dailyWithdrawLimit &&
-                 commitment.maxSellPercent === DEFAULT_COMMITMENT.maxSellPercent
-                  ? "Default"
-                  : "Custom"}
-              </span>
+              <span className="text-gray-500">Daily Withdraw</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeCommitment.dailyWithdrawLimit)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Max Sell / 24h</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeCommitment.maxSellPercent)}</span>
+            </div>
+            <hr className="border-gray-200" />
+            <div className="flex justify-between">
+              <span className="text-gray-500">Max LP Removal / tx</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.lpRemoval)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Max Cumulative LP / 24h</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.slowRug)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Max Daily Issuer Sell</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.dump)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-gray-500">Protection</span>
               <Badge variant="protected">Bastion Protected</Badge>
+            </div>
+          </div>
+
+          {/* Immutability Warning */}
+          <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-2.5">
+            <svg className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            <div>
+              <p className="text-sm font-medium text-amber-700">These values are immutable</p>
+              <p className="text-xs text-amber-600/70">
+                Once the pool is created, commitment parameters are permanently recorded on-chain and cannot be changed.
+              </p>
             </div>
           </div>
 

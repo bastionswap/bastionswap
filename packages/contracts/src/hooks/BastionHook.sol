@@ -62,6 +62,20 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => PoolKey stored during issuer registration for force removal
     mapping(PoolId => PoolKey) internal _poolKeys;
 
+    /// @dev Per-pool immutable issuer commitment record
+    struct PoolCommitment {
+        uint40 lockDuration;
+        uint40 vestingDuration;
+        uint16 maxSingleLpRemovalBps;      // from TriggerConfig.lpRemovalThreshold
+        uint16 maxCumulativeLpRemovalBps;   // from TriggerConfig.slowRugCumulativeThreshold
+        uint16 maxDailySellBps;             // from TriggerConfig.dumpThresholdPercent
+        uint40 createdAt;
+        bool isSet;
+    }
+
+    /// @dev poolId => immutable commitment set at pool creation
+    mapping(PoolId => PoolCommitment) internal _poolCommitments;
+
     /// @dev BastionRouter address (set via one-time setter, deployed after hook due to CREATE2)
     address public bastionRouter;
 
@@ -118,6 +132,7 @@ contract BastionHook is BaseTestHooks {
     error LockDurationTooShort();
     error VestingDurationTooShort();
     error InvalidDuration();
+    error CommitmentTooLenient();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -138,6 +153,7 @@ contract BastionHook is BaseTestHooks {
     event DefaultVestingDurationUpdated(uint256 newDuration);
     event MinLockDurationUpdated(uint256 newDuration);
     event MinVestingDurationUpdated(uint256 newDuration);
+    event PoolCommitmentSet(PoolId indexed poolId, address indexed issuer, PoolCommitment commitment);
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -519,6 +535,38 @@ contract BastionHook is BaseTestHooks {
         return _issuers[poolId] == account;
     }
 
+    /// @notice Returns the immutable PoolCommitment for a pool.
+    function getPoolCommitment(PoolId poolId) external view returns (PoolCommitment memory) {
+        return _poolCommitments[poolId];
+    }
+
+    /// @notice Returns true if ANY commitment dimension is stricter than governance defaults.
+    function isCommitmentStricterThanDefault(PoolId poolId) external view returns (bool) {
+        PoolCommitment memory c = _poolCommitments[poolId];
+        if (!c.isSet) return false;
+
+        // Duration: stricter if total is longer than default
+        uint80 commitmentTotal = uint80(c.lockDuration) + uint80(c.vestingDuration);
+        uint80 defaultTotal = uint80(defaultLockDuration) + uint80(defaultVestingDuration);
+        if (commitmentTotal > defaultTotal) return true;
+
+        // Thresholds: stricter if lower than defaults from TriggerOracle
+        (
+            uint16 defLpRemoval,
+            uint16 defDump,
+            ,
+            ,
+            ,
+            uint16 defSlowRug
+        ) = triggerOracle.defaultTriggerConfig();
+
+        if (c.maxSingleLpRemovalBps < defLpRemoval) return true;
+        if (c.maxCumulativeLpRemovalBps < defSlowRug) return true;
+        if (c.maxDailySellBps < defDump) return true;
+
+        return false;
+    }
+
     /// @notice Get pool info.
     function getPoolInfo(PoolId poolId)
         external
@@ -638,6 +686,9 @@ contract BastionHook is BaseTestHooks {
         // Enforce minimum durations from governance params
         if (lockDuration < minLockDuration) revert LockDurationTooShort();
         if (vestingDuration < minVestingDuration) revert VestingDurationTooShort();
+
+        // Validate and store immutable PoolCommitment
+        _validateAndStoreCommitment(poolId, issuer, lockDuration, vestingDuration, triggerConfig);
 
         // Register issuer
         _issuers[poolId] = issuer;
@@ -803,6 +854,43 @@ contract BastionHook is BaseTestHooks {
         // The PoolManager will account this delta to the hook and adjust the caller's delta,
         // so the caller pays the fee on top of the swap amount.
         return toBeforeSwapDelta(int128(uint128(feeAmount)), 0);
+    }
+
+    /// @dev Validates issuer trigger thresholds are ≤ governance defaults and stores PoolCommitment.
+    function _validateAndStoreCommitment(
+        PoolId poolId,
+        address issuer,
+        uint40 lockDuration,
+        uint40 vestingDuration,
+        ITriggerOracle.TriggerConfig memory triggerConfig
+    ) internal {
+        // Read governance defaults
+        (
+            uint16 defLpRemoval,
+            uint16 defDump,
+            ,
+            ,
+            ,
+            uint16 defSlowRug
+        ) = triggerOracle.defaultTriggerConfig();
+
+        // Validate: issuer thresholds must be ≤ defaults (lower = stricter)
+        if (triggerConfig.lpRemovalThreshold > defLpRemoval) revert CommitmentTooLenient();
+        if (triggerConfig.slowRugCumulativeThreshold > defSlowRug) revert CommitmentTooLenient();
+        if (triggerConfig.dumpThresholdPercent > defDump) revert CommitmentTooLenient();
+
+        PoolCommitment memory c = PoolCommitment({
+            lockDuration: lockDuration,
+            vestingDuration: vestingDuration,
+            maxSingleLpRemovalBps: triggerConfig.lpRemovalThreshold,
+            maxCumulativeLpRemovalBps: triggerConfig.slowRugCumulativeThreshold,
+            maxDailySellBps: triggerConfig.dumpThresholdPercent,
+            createdAt: uint40(block.timestamp),
+            isSet: true
+        });
+
+        _poolCommitments[poolId] = c;
+        emit PoolCommitmentSet(poolId, issuer, c);
     }
 
     // ─── Transient Storage Helpers (EIP-1153) ──────────────────────────

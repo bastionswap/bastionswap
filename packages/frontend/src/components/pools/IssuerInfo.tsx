@@ -6,6 +6,16 @@ import { shortenAddress, explorerUrl, formatBps, formatDuration } from "@/lib/fo
 import { getContracts } from "@/config/contracts";
 import { ReputationEngineABI } from "@/config/abis";
 
+interface PoolCommitmentData {
+  lockDuration: number;
+  vestingDuration: number;
+  maxSingleLpRemovalBps: number;
+  maxCumulativeLpRemovalBps: number;
+  maxDailySellBps: number;
+  createdAt: number;
+  isSet: boolean;
+}
+
 interface IssuerInfoProps {
   issuer: {
     id: string;
@@ -21,6 +31,8 @@ interface IssuerInfoProps {
   lockDuration?: number;
   vestingDuration?: number;
   vestingStrictness?: "stricter" | "default" | "looser" | null;
+  poolCommitment?: PoolCommitmentData;
+  isStricterThanDefault?: boolean;
 }
 
 const DEFAULTS = {
@@ -134,7 +146,7 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   );
 }
 
-export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness }: IssuerInfoProps) {
+export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness, poolCommitment, isStricterThanDefault }: IssuerInfoProps) {
   const score = parseInt(issuer.reputationScore);
   const created = issuer.totalEscrowsCreated ?? 0;
   const completed = issuer.totalEscrowsCompleted ?? 0;
@@ -242,6 +254,66 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                 </div>
               </div>
             ))}
+            {/* Trigger Detection Thresholds from PoolCommitment */}
+            {poolCommitment?.isSet && (
+              <>
+                <div className="my-2 border-t border-gray-100" />
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Trigger Thresholds</p>
+                {[
+                  {
+                    label: "Max LP Removal / tx",
+                    value: formatBps(poolCommitment.maxSingleLpRemovalBps),
+                    raw: poolCommitment.maxSingleLpRemovalBps,
+                    default_: 5000,
+                    lowerBetter: true,
+                  },
+                  {
+                    label: "Max Cumulative LP / 24h",
+                    value: formatBps(poolCommitment.maxCumulativeLpRemovalBps),
+                    raw: poolCommitment.maxCumulativeLpRemovalBps,
+                    default_: 8000,
+                    lowerBetter: true,
+                  },
+                  {
+                    label: "Max Daily Sell",
+                    value: formatBps(poolCommitment.maxDailySellBps),
+                    raw: poolCommitment.maxDailySellBps,
+                    default_: 3000,
+                    lowerBetter: true,
+                  },
+                ].map(({ label, value, raw, default_, lowerBetter }) => (
+                  <div key={label} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-400">{label}</span>
+                    <div className="flex items-center">
+                      <span className="font-medium text-gray-900 tabular-nums">{value}</span>
+                      <CommitmentTag
+                        value={raw}
+                        defaultValue={default_}
+                        isLowerBetter={lowerBetter}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+            {/* Stricter than default badge */}
+            {isStricterThanDefault && (
+              <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5">
+                <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-1.5-8.25a48.109 48.109 0 011.913-.247C12.735 2.16 14.335 3 16.34 4.37c1.406.96 2.86 2.195 3.66 3.288V19.5a2.25 2.25 0 01-2.25 2.25H6.25A2.25 2.25 0 014 19.5V7.658c.8-1.093 2.254-2.328 3.66-3.288C9.665 3 11.265 2.16 12.587 2.253z" />
+                </svg>
+                <span className="text-xs font-medium text-emerald-700">Stricter than defaults</span>
+              </div>
+            )}
+            {/* Immutable creation timestamp */}
+            {poolCommitment?.isSet && poolCommitment.createdAt > 0 && (
+              <div className="mt-1 text-[10px] text-gray-400 flex items-center gap-1">
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Set on {new Date(poolCommitment.createdAt * 1000).toLocaleDateString()} (immutable)
+              </div>
+            )}
           </div>
         </div>
       ) : (

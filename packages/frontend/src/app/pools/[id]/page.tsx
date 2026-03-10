@@ -24,6 +24,7 @@ import { TokenIcon } from "@/components/ui/TokenIcon";
 import { shortenAddress, explorerUrl } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
 import { InsurancePoolABI, TriggerOracleABI } from "@/config/abis";
+import BastionHookAbi from "@/config/abis/BastionHook.json";
 
 const TRIGGER_NAMES: Record<number, string> = {
   1: "Rug Pull",
@@ -258,6 +259,22 @@ export default function PoolDetailPage() {
   const issuedTokenInfo = useTokenInfo(pool?.issuedToken as `0x${string}` | undefined);
 
   const { data: vestingEndTime } = useVestingEndTime(pool?.isBastion ? poolId as `0x${string}` : undefined);
+
+  const hookAddress = contracts?.BastionHook as `0x${string}` | undefined;
+  const { data: poolCommitment } = useReadContract({
+    address: hookAddress,
+    abi: BastionHookAbi,
+    functionName: "getPoolCommitment",
+    args: [poolId as `0x${string}`],
+    query: { enabled: !!hookAddress && !!pool?.isBastion },
+  });
+  const { data: isStricterThanDefault } = useReadContract({
+    address: hookAddress,
+    abi: BastionHookAbi,
+    functionName: "isCommitmentStricterThanDefault",
+    args: [poolId as `0x${string}`],
+    query: { enabled: !!hookAddress && !!pool?.isBastion },
+  });
 
   const { balance: holderBalance } = useTokenBalance(
     pool?.issuedToken as `0x${string}` | undefined,
@@ -530,6 +547,16 @@ export default function PoolDetailPage() {
                   if (total === defaultTotal) return "default" as const;
                   return "stricter" as const;
                 })()}
+                poolCommitment={poolCommitment as {
+                  lockDuration: number;
+                  vestingDuration: number;
+                  maxSingleLpRemovalBps: number;
+                  maxCumulativeLpRemovalBps: number;
+                  maxDailySellBps: number;
+                  createdAt: number;
+                  isSet: boolean;
+                } | undefined}
+                isStricterThanDefault={isStricterThanDefault as boolean | undefined}
               />
             )}
           </div>

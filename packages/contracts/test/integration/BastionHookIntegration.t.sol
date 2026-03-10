@@ -90,9 +90,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
         }
         vm.etch(hookAddr, deployed.code);
         // Restore storage lost by vm.etch
-        vm.store(hookAddr, bytes32(uint256(10)), bytes32(uint256(uint160(governance))));
+        vm.store(hookAddr, bytes32(uint256(11)), bytes32(uint256(uint160(governance))));
         // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-        vm.store(hookAddr, bytes32(uint256(12)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+        vm.store(hookAddr, bytes32(uint256(13)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
         hook = BastionHook(payable(hookAddr));
 
         // Deploy tokens
@@ -944,6 +944,179 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         _initPoolWithIssuer();
         assertTrue(hook.isIssuer(poolId, issuerAddr));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  POOL COMMITMENT TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_poolCommitment_storedOnCreation() public {
+        _initPoolWithIssuer();
+
+        BastionHook.PoolCommitment memory c = hook.getPoolCommitment(poolId);
+        assertTrue(c.isSet);
+        assertEq(c.lockDuration, DEFAULT_LOCK);
+        assertEq(c.vestingDuration, DEFAULT_VESTING);
+        assertEq(c.maxSingleLpRemovalBps, 5000);
+        assertEq(c.maxCumulativeLpRemovalBps, 8000);
+        assertEq(c.maxDailySellBps, 3000);
+        assertGt(c.createdAt, 0);
+    }
+
+    function test_poolCommitment_defaultValues() public {
+        _initPoolWithIssuer();
+
+        BastionHook.PoolCommitment memory c = hook.getPoolCommitment(poolId);
+        // Default triggerConfig matches governance defaults
+        assertEq(c.maxSingleLpRemovalBps, 5000);
+        assertEq(c.maxCumulativeLpRemovalBps, 8000);
+        assertEq(c.maxDailySellBps, 3000);
+    }
+
+    function test_poolCommitment_revertsLpRemovalTooHigh() public {
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 5001, // > 5000 default
+            dumpThresholdPercent: 3000,
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 8000
+        });
+
+        bytes memory hookData = abi.encode(
+            issuerAddr, address(issuedToken), DEFAULT_LOCK, DEFAULT_VESTING, _defaultCommitment(), badConfig
+        );
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        vm.expectRevert(); // CommitmentTooLenient
+        modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
+    }
+
+    function test_poolCommitment_revertsDumpThresholdTooHigh() public {
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 5000,
+            dumpThresholdPercent: 3001, // > 3000 default
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 8000
+        });
+
+        bytes memory hookData = abi.encode(
+            issuerAddr, address(issuedToken), DEFAULT_LOCK, DEFAULT_VESTING, _defaultCommitment(), badConfig
+        );
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        vm.expectRevert(); // CommitmentTooLenient
+        modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
+    }
+
+    function test_poolCommitment_revertsSlowRugTooHigh() public {
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 5000,
+            dumpThresholdPercent: 3000,
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 8001 // > 8000 default
+        });
+
+        bytes memory hookData = abi.encode(
+            issuerAddr, address(issuedToken), DEFAULT_LOCK, DEFAULT_VESTING, _defaultCommitment(), badConfig
+        );
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        vm.expectRevert(); // CommitmentTooLenient
+        modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
+    }
+
+    function test_poolCommitment_stricterValues() public {
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
+        PoolId _poolId = _key.toId();
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        ITriggerOracle.TriggerConfig memory strictConfig = ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 3000, // < 5000 default
+            dumpThresholdPercent: 2000, // < 3000 default
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 5000 // < 8000 default
+        });
+
+        bytes memory hookData = abi.encode(
+            issuerAddr, address(issuedToken), DEFAULT_LOCK, DEFAULT_VESTING, _defaultCommitment(), strictConfig
+        );
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
+
+        assertTrue(hook.isCommitmentStricterThanDefault(_poolId));
+    }
+
+    function test_isCommitmentStricterThanDefault_falseWhenDefault() public {
+        _initPoolWithIssuer();
+        assertFalse(hook.isCommitmentStricterThanDefault(poolId));
+    }
+
+    function test_governanceChangeDoesNotAffectExistingCommitment() public {
+        _initPoolWithIssuer();
+
+        BastionHook.PoolCommitment memory before = hook.getPoolCommitment(poolId);
+
+        // Change governance defaults
+        vm.startPrank(governance);
+        hook.setDefaultLockDuration(30 days);
+        hook.setDefaultVestingDuration(180 days);
+        vm.stopPrank();
+
+        // Update TriggerOracle defaults
+        vm.prank(governance);
+        triggerOracle.setDefaultTriggerConfig(ITriggerOracle.TriggerConfig({
+            lpRemovalThreshold: 3000,
+            dumpThresholdPercent: 2000,
+            dumpWindowSeconds: 86400,
+            taxDeviationThreshold: 500,
+            slowRugWindowSeconds: 86400,
+            slowRugCumulativeThreshold: 5000
+        }));
+
+        // Existing commitment unchanged
+        BastionHook.PoolCommitment memory after_ = hook.getPoolCommitment(poolId);
+        assertEq(after_.lockDuration, before.lockDuration);
+        assertEq(after_.vestingDuration, before.vestingDuration);
+        assertEq(after_.maxSingleLpRemovalBps, before.maxSingleLpRemovalBps);
+        assertEq(after_.maxCumulativeLpRemovalBps, before.maxCumulativeLpRemovalBps);
+        assertEq(after_.maxDailySellBps, before.maxDailySellBps);
     }
 
     function test_non_issuer_swap_no_false_positive() public {
