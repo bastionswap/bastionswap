@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { baseSepolia } from "wagmi/chains";
@@ -28,12 +29,7 @@ export function Header() {
         <div className="mx-auto flex h-[60px] max-w-7xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-10">
             <Link href="/" className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-bastion-600">
-                <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18l7 3.12v4.7c0 4.47-3.07 8.67-7 9.94-3.93-1.27-7-5.47-7-9.94V6.3l7-3.12z"/>
-                  <path d="M10.5 14.5l-3-3 1.06-1.06L10.5 12.38l4.94-4.94L16.5 8.5l-6 6z" opacity="0.8"/>
-                </svg>
-              </div>
+              <Image src="/logo.png" alt="BastionSwap" width={32} height={32} className="rounded-lg" />
               <span className="text-lg font-bold text-gray-900">
                 Bastion<span className="text-bastion-600">Swap</span>
               </span>
