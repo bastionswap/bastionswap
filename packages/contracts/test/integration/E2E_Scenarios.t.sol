@@ -282,8 +282,10 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario1_rugPullTrigger() internal {
-        // Warp past vesting so issuer can actually remove LP (needed to trigger oracle)
-        vm.warp(block.timestamp + 91 days);
+        // Warp into mid-vesting so issuer has removable LP but vesting period is not yet complete.
+        // (Post-vesting LP removal is considered legitimate and skips trigger reporting.)
+        // Lock=7d, Vesting=83d. Already at day 6. Warp +74d = day 80 (73d into 83d vesting).
+        vm.warp(block.timestamp + 74 days);
 
         uint256 totalLP = _getTotalLP();
         uint128 removable = escrowVault.getRemovableLiquidity(_escrowId);

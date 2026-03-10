@@ -306,9 +306,13 @@ contract BastionHook is BaseTestHooks {
         }
 
         // Report LP removal to TriggerOracle ONLY for issuer removals
+        // Skip reporting if vesting period has fully elapsed (legitimate withdrawal)
         if (isIssuerRemoval && totalLP > 0) {
-            try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
-                emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
+            uint256 vestingEnd = escrowVault.getVestingEndTime(poolId);
+            if (vestingEnd == 0 || block.timestamp < vestingEnd) {
+                try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
+                    emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
+                }
             }
         }
 
