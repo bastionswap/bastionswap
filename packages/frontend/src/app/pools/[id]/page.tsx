@@ -561,6 +561,8 @@ export default function PoolDetailPage() {
                   maxSingleLpRemovalBps: number | bigint;
                   maxCumulativeLpRemovalBps: number | bigint;
                   maxDailySellBps: number | bigint;
+                  weeklyDumpWindowSeconds: number | bigint;
+                  weeklyDumpThresholdBps: number | bigint;
                   createdAt: number | bigint;
                   isSet: boolean;
                 } | undefined}
@@ -572,6 +574,8 @@ export default function PoolDetailPage() {
                   taxDeviationThreshold: number | bigint;
                   slowRugWindowSeconds: number | bigint;
                   slowRugCumulativeThreshold: number | bigint;
+                  weeklyDumpWindowSeconds: number | bigint;
+                  weeklyDumpThresholdPercent: number | bigint;
                 } | undefined}
               />
             )}

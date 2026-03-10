@@ -2,7 +2,7 @@ import { LOCAL_CONTRACTS } from "./contracts.generated";
 
 export const CONTRACTS = {
   84532: {
-    BastionHook: "0x61590C0544B562571AAd49e255496a0a0350AC8",
+    BastionHook: "0x61590C0544B562571AAad49e255496a0a0350AC8",
     EscrowVault: "0xBE3D91851aAf9F6A2ca8B47567180305996E16Dd",
     InsurancePool: "0xf908a6c13C80290993A7c2d57023c8531Ecf3406",
     TriggerOracle: "0x782b6e95072f88fcc7729F46c5FF19a1Fdad2D3b",
