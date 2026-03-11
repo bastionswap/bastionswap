@@ -430,7 +430,7 @@ contract BastionHook is BaseTestHooks {
                 // Single-tx LP removal threshold check (against initial liquidity)
                 uint256 initLiq = _initialLiquidity[poolId];
                 if (initLiq > 0) {
-                    uint256 removalBps = (removeAmount * 10_000) / initLiq;
+                    uint256 removalBps = (removeAmount * 10_000 + initLiq - 1) / initLiq;
                     if (removalBps > commitment.maxSingleLpRemovalBps) revert SingleLPRemovalExceeded();
                 }
 
@@ -441,7 +441,7 @@ contract BastionHook is BaseTestHooks {
 
                 // Cumulative LP removal threshold check (v1: revert instead of trigger)
                 if (initLiq > 0) {
-                    uint256 cumulativeBps = (_lpCumulativeRemoved[poolId] * 10_000) / initLiq;
+                    uint256 cumulativeBps = (_lpCumulativeRemoved[poolId] * 10_000 + initLiq - 1) / initLiq;
                     if (cumulativeBps > commitment.maxCumulativeLpRemovalBps) {
                         revert CumulativeLPRemovalExceeded();
                     }
@@ -1103,7 +1103,7 @@ contract BastionHook is BaseTestHooks {
                 dailyCum = 0;
             }
             uint256 projected = dailyCum + sellAmount;
-            uint256 sellBps = (projected * 10_000) / initialSupply;
+            uint256 sellBps = (projected * 10_000 + initialSupply - 1) / initialSupply;
             if (sellBps > commitment.maxDailySellBps) revert IssuerDailySellExceeded();
         }
 
@@ -1115,7 +1115,7 @@ contract BastionHook is BaseTestHooks {
                 weeklyCum = 0;
             }
             uint256 projected = weeklyCum + sellAmount;
-            uint256 sellBps = (projected * 10_000) / initialSupply;
+            uint256 sellBps = (projected * 10_000 + initialSupply - 1) / initialSupply;
             if (sellBps > commitment.weeklyDumpThresholdBps) revert IssuerWeeklySellExceeded();
         }
     }
@@ -1150,13 +1150,13 @@ contract BastionHook is BaseTestHooks {
 
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
-            uint256 dailyBps = (_dailyCumulative[poolId] * 10_000) / initialSupply;
+            uint256 dailyBps = (_dailyCumulative[poolId] * 10_000 + initialSupply - 1) / initialSupply;
             if (dailyBps > commitment.maxDailySellBps) revert IssuerDumpDetected();
         }
 
         // Check weekly limit
         if (commitment.weeklyDumpThresholdBps > 0) {
-            uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000) / initialSupply;
+            uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000 + initialSupply - 1) / initialSupply;
             if (weeklyBps > commitment.weeklyDumpThresholdBps) revert IssuerDumpDetected();
         }
     }
