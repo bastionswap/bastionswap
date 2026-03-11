@@ -926,7 +926,7 @@ contract E2E_Comprehensive is Test {
         assertEq(escrowVault.getTotalLiquidity(escrowIdA), total, "LP unchanged");
     }
 
-    // Scenario 17: Cumulative LP removal -> revert (v0.1: pre-emptive block)
+    // Scenario 17: Cumulative LP removal -> revert (v1: pre-emptive block)
     function test_e2e_lpRemoval_cumulativeTrigger() public {
         // Add general LP so pool survives
         vm.startPrank(generalLP);
@@ -950,7 +950,7 @@ contract E2E_Comprehensive is Test {
 
         assertFalse(hook.isLPRemovalTriggerable(poolIdA), "not yet triggerable");
 
-        // 40% more -> cumulative 89% > 80% threshold -> reverts (v0.1)
+        // 40% more -> cumulative 89% > 80% threshold -> reverts (v1)
         uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
         uint128 fortyPercent = uint128((uint256(total) * 4000) / 10_000);
         if (fortyPercent > remaining) fortyPercent = remaining;
@@ -959,8 +959,8 @@ contract E2E_Comprehensive is Test {
         vm.expectRevert();
         positionRouter.removeIssuerLiquidity(poolKeyA, fortyPercent, 0, 0, block.timestamp + 3600);
 
-        // Pool is NOT triggered (v0.1: revert, no trigger firing)
-        assertFalse(hook.isPoolTriggered(poolIdA), "not triggered - v0.1 reverts instead");
+        // Pool is NOT triggered (v1: revert, no trigger firing)
+        assertFalse(hook.isPoolTriggered(poolIdA), "not triggered - v1 reverts instead");
     }
 
     // Scenario 18: General LP mass removal -> no trigger
@@ -1001,11 +1001,11 @@ contract E2E_Comprehensive is Test {
         vm.prank(trader);
         tokenA.transfer(holder, 50_000e18);
 
-        // Trigger directly (v0.2 watcher path — preserved infra)
+        // Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        // Set _isTriggered on hook (slot 12) — in v0.2, hook.executeTrigger() does this automatically
+        // Set _isTriggered on hook (slot 12) — in v2, hook.executeTrigger() does this automatically
         vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
 
         // 1. Triggered
@@ -1053,11 +1053,11 @@ contract E2E_Comprehensive is Test {
 
         _buyTokenA(trader, 1 ether);
 
-        // Trigger directly (v0.2 watcher path — preserved infra)
+        // Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        // Set _isTriggered on hook (slot 12) — in v0.2, hook.executeTrigger() does this automatically
+        // Set _isTriggered on hook (slot 12) — in v2, hook.executeTrigger() does this automatically
         vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
 
@@ -1693,10 +1693,10 @@ contract E2E_Comprehensive is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  PART J: v0.1 LP Cumulative Removal Revert Enforcement
+    //  PART J: v1 LP Cumulative Removal Revert Enforcement
     // ═══════════════════════════════════════════════════════════════════
 
-    // v0.1: Cumulative LP removal exceeding threshold reverts
+    // v1: Cumulative LP removal exceeding threshold reverts
     function test_v01_LPCumulativeExceeds_Reverts() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
@@ -1716,7 +1716,7 @@ contract E2E_Comprehensive is Test {
         positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
     }
 
-    // v0.1: Cumulative LP removal below threshold succeeds
+    // v1: Cumulative LP removal below threshold succeeds
     function test_v01_LPCumulativeBelowLimit_Succeeds() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
@@ -1738,7 +1738,7 @@ contract E2E_Comprehensive is Test {
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
     }
 
-    // v0.1: Cumulative window reset allows further removal
+    // v1: Cumulative window reset allows further removal
     function test_v01_LPCumulativeWindowReset() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
@@ -1763,7 +1763,7 @@ contract E2E_Comprehensive is Test {
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered after window reset");
     }
 
-    // v0.1: After cumulative revert, no trigger is fired
+    // v1: After cumulative revert, no trigger is fired
     function test_v01_NoTriggerFired() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
@@ -1785,7 +1785,7 @@ contract E2E_Comprehensive is Test {
         assertFalse(hook.isLPRemovalTriggerable(poolIdA), "not triggerable");
     }
 
-    // v0.1: executeTrigger interface preserved for v0.2 watcher network
+    // v1: executeTrigger interface preserved for v2 watcher network
     function test_v01_TriggerInfraExists() public {
         // Verify executeTrigger exists and is callable (fails with threshold check, not missing function)
         vm.expectRevert(); // "Threshold not met" or similar — function exists
@@ -1794,11 +1794,11 @@ contract E2E_Comprehensive is Test {
         // Verify isLPRemovalTriggerable view works
         assertFalse(hook.isLPRemovalTriggerable(poolIdA));
 
-        // Verify direct trigger from hook context works (v0.2 path)
+        // Verify direct trigger from hook context works (v2 path)
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        // Set _isTriggered on hook (slot 12) — in v0.2, hook.executeTrigger() does this automatically
+        // Set _isTriggered on hook (slot 12) — in v2, hook.executeTrigger() does this automatically
         vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "trigger infra works");
     }

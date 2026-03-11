@@ -145,12 +145,12 @@ Escrow Creation          Lock-up Period              Linear Vesting
 - **Lock Duration**: No LP removal until `lockDuration` seconds pass after escrow creation (default: 7 days, min: 7 days)
 - **Linear Vesting**: After lock expires, LP unlocks linearly over `vestingDuration` (default: 83 days, min: 7 days)
 - **Single-tx LP Removal Limit**: Max LP removable in one transaction (default: 50% of total LP, per PoolCommitment)
-- **Cumulative LP Removal Limit**: Cumulative removals within 24h window (default: 80%, reverts if exceeded in v0.1)
+- **Cumulative LP Removal Limit**: Cumulative removals within 24h window (default: 80%, reverts if exceeded in v1)
 - **Immutable Commitments**: Per-pool parameters set at creation, cannot be changed afterward
 
-### 4. Violation Enforcement (v0.1)
+### 4. Violation Enforcement (v1)
 
-BastionSwap v0.1 uses **revert-only enforcement** for all issuer violations. Every violation — sell limits, single-tx LP removal, and cumulative LP removal — is blocked by reverting the transaction in BastionHook. No trigger is fired.
+BastionSwap v1 uses **revert-only enforcement** for all issuer violations. Every violation — sell limits, single-tx LP removal, and cumulative LP removal — is blocked by reverting the transaction in BastionHook. No trigger is fired.
 
 ```
 Issuer attempts violation
@@ -160,20 +160,20 @@ Issuer attempts violation
     └── Cumulative LP removal > threshold → beforeRemoveLiquidity REVERT
 ```
 
-### 4b. Trigger Infrastructure (Preserved for v0.2)
+### 4b. Trigger Infrastructure (Preserved for v2)
 
-The trigger-based LP seizure flow is preserved for v0.2 watcher network integration. The `executeTrigger()` interface, TriggerOracle, and InsurancePool compensation mechanisms remain functional.
+The trigger-based LP seizure flow is preserved for v2 watcher network integration. The `executeTrigger()` interface, TriggerOracle, and InsurancePool compensation mechanisms remain functional.
 
 ```mermaid
 sequenceDiagram
-    participant Watcher as Watcher Network (v0.2)
+    participant Watcher as Watcher Network (v2)
     participant BastionHook
     participant TriggerOracle
     participant EscrowVault
     participant InsurancePool
     participant ReputationEngine
 
-    Note over Watcher: v0.2: Detects honeypot/hidden-tax
+    Note over Watcher: v2: Detects honeypot/hidden-tax
 
     Watcher->>BastionHook: executeTrigger(poolId)
     BastionHook->>TriggerOracle: executeTrigger(poolId) [onlyHook]
@@ -219,7 +219,7 @@ sequenceDiagram
 
 **Normal completion** (no trigger, vesting fully elapsed): 10% of insurance pool to issuer as vesting reward, 90% to protocol treasury.
 
-## Protection Mechanism Detail (v0.1)
+## Protection Mechanism Detail (v1)
 
 ### Revert-Only Enforcement
 
@@ -240,9 +240,9 @@ All violations are blocked by reverting the transaction. No trigger is fired —
 
 LP removals are tracked using `_lpCumulativeRemoved` and `_lpRemovalWindowStart` mappings per pool. The denominator for BPS calculations is `_initialLiquidity` (not total supply). Both single-tx and cumulative checks are enforced in `beforeRemoveLiquidity` — if either threshold is breached, the transaction reverts and the state change rolls back. Views: `isLPRemovalTriggerable(poolId)` checks if the cumulative threshold is currently exceeded.
 
-### Planned (v0.2 — Trigger-based LP Seizure)
+### Planned (v2 — Trigger-based LP Seizure)
 
-The trigger infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`, InsurancePool compensation) is preserved for v0.2. When a decentralized watcher network is deployed, cumulative LP removal enforcement will upgrade from revert-only to trigger-based LP seizure + compensation.
+The trigger infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`, InsurancePool compensation) is preserved for v2. When a decentralized watcher network is deployed, cumulative LP removal enforcement will upgrade from revert-only to trigger-based LP seizure + compensation.
 
 | Trigger | Detection | Notes |
 |---------|-----------|-------|

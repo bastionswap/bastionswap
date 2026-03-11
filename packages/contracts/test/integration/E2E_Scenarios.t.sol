@@ -300,7 +300,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         // Not yet triggerable (cumulative below threshold)
         assertFalse(hook.isLPRemovalTriggerable(_poolId), "should not be triggerable after first removal");
 
-        // Second LP removal -> reverts (v0.1: cumulative exceeds 80% threshold)
+        // Second LP removal -> reverts (v1: cumulative exceeds 80% threshold)
         vm.warp(block.timestamp + 6 hours);
         vm.prank(issuerAddr);
         vm.expectRevert();
@@ -309,9 +309,9 @@ contract E2E_ScenariosTest is Test, Deployers {
             ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
-        console.log("  v0.1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
+        console.log("  v1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
 
-        // Trigger directly (v0.2 watcher path — preserved infra)
+        // Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = issuedToken.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(_poolId, _poolKey, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
@@ -320,7 +320,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         ITriggerOracle.TriggerResult memory result = triggerOracle.checkTrigger(_poolId);
         assertTrue(result.triggered, "trigger should have fired");
         assertEq(uint8(result.triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
-        console.log("  RUG_PULL trigger fired via direct trigger call (v0.2 path)");
+        console.log("  RUG_PULL trigger fired via direct trigger call (v2 path)");
 
         // Escrow locked down
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
@@ -454,7 +454,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         assertFalse(hook.isPoolTriggered(_poolId), "should not be triggered yet");
 
-        // Second removal -> reverts (v0.1: cumulative exceeds 80% threshold)
+        // Second removal -> reverts (v1: cumulative exceeds 80% threshold)
         vm.warp(block.timestamp + 6 hours);
         vm.prank(issuerAddr);
         vm.expectRevert();
@@ -463,9 +463,9 @@ contract E2E_ScenariosTest is Test, Deployers {
             ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
-        console.log("  v0.1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
+        console.log("  v1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
 
-        // Trigger directly (v0.2 watcher path — preserved infra)
+        // Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = issuedToken.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(_poolId, _poolKey, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
@@ -474,7 +474,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         ITriggerOracle.TriggerResult memory result = triggerOracle.checkTrigger(_poolId);
         assertTrue(result.triggered, "RUG_PULL trigger should have fired");
         assertEq(uint8(result.triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
-        console.log("  RUG_PULL trigger fired via direct trigger call (v0.2 path)");
+        console.log("  RUG_PULL trigger fired via direct trigger call (v2 path)");
 
         // Escrow locked down
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);

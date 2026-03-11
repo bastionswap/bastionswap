@@ -7,7 +7,7 @@
 
 BastionSwap is a **Uniswap V4 Hook-based** decentralized exchange protocol that protects traders from rug-pulls and token exploits through **mandatory escrow vesting**, **on-chain trigger detection**, and **per-token insurance pools**.
 
-When a token issuer creates a liquidity pool, their LP is automatically locked with a vesting schedule (lock-up + linear vesting). All issuer violations are enforced on-chain via **transaction revert** — exceeding sell limits, single-tx LP removal limits, or cumulative LP removal limits reverts the entire transaction, blocking the action via any path including routers and aggregators. Trigger-based LP seizure infrastructure is preserved for v0.2 watcher network integration.
+When a token issuer creates a liquidity pool, their LP is automatically locked with a vesting schedule (lock-up + linear vesting). All issuer violations are enforced on-chain via **transaction revert** — exceeding sell limits, single-tx LP removal limits, or cumulative LP removal limits reverts the entire transaction, blocking the action via any path including routers and aggregators. Trigger-based LP seizure infrastructure is preserved for v2 watcher network integration.
 
 ## Live Demo (Base Sepolia)
 
@@ -124,12 +124,12 @@ graph TB
 | **BastionPositionRouter** | LP management router for pool creation, liquidity add/remove, and fee collection. Emits `LiquidityChanged` for subgraph indexing. |
 | **EscrowVault** | Manages issuer LP removal rights with lock-up + linear vesting. Does not custody assets — controls removal permissions only. Per-pool commitment parameters (immutable) set by issuer at creation. Coordinates forced LP removal on trigger events. |
 | **InsurancePool** | Collects 1% fee from buy-side swaps as per-token insurance premiums. On trigger: distributes insurance pool + seized issuer LP to non-issuer holders (Merkle proof, 30-day window). On normal completion: 10% to issuer as vesting reward, 90% to protocol treasury. Issuer address excluded from all claims. |
-| **TriggerOracle** | Trigger infrastructure for LP seizure and compensation. In v0.1, all violations are enforced via revert in BastionHook. `executeTrigger()` interface is preserved for v0.2 watcher network integration (honeypot/hidden-tax detection). |
+| **TriggerOracle** | Trigger infrastructure for LP seizure and compensation. In v1, all violations are enforced via revert in BastionHook. `executeTrigger()` interface is preserved for v2 watcher network integration (honeypot/hidden-tax detection). |
 | **ReputationEngine** | Computes informational reputation scores (0-1000) for token issuers based on on-chain history. Non-blocking. |
 
-### Protection Mechanisms (v0.1)
+### Protection Mechanisms (v1)
 
-BastionSwap v0.1 uses **revert-only enforcement** — all issuer violations are blocked by reverting the transaction. The issuer cannot extract assets. Trigger-based LP seizure infrastructure is preserved for v0.2.
+BastionSwap v1 uses **revert-only enforcement** — all issuer violations are blocked by reverting the transaction. The issuer cannot extract assets. Trigger-based LP seizure infrastructure is preserved for v2.
 
 #### Hard Enforcement (Transaction Revert)
 
@@ -142,9 +142,9 @@ BastionSwap v0.1 uses **revert-only enforcement** — all issuer violations are 
 | Vesting enforcement | `beforeRemoveLiquidity` revert | Issuer tries to remove more LP than currently vested | Based on lock-up + linear vesting schedule |
 | Token compatibility | `createPool` revert (in router) | Fee-on-transfer or rebase token detected via transfer test | Exact amount must be received |
 
-#### Planned (v0.2 — Trigger-based LP Seizure + Watcher Network)
+#### Planned (v2 — Trigger-based LP Seizure + Watcher Network)
 
-`executeTrigger()` interface and TriggerOracle/InsurancePool compensation infrastructure are preserved for v0.2.
+`executeTrigger()` interface and TriggerOracle/InsurancePool compensation infrastructure are preserved for v2.
 
 | Trigger | Detection | Response |
 |---------|-----------|----------|

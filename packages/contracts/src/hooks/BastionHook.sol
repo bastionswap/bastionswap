@@ -440,7 +440,7 @@ contract BastionHook is BaseTestHooks {
                 _updateLpWindow(poolId, cfg);
                 _lpCumulativeRemoved[poolId] += removeAmount;
 
-                // Cumulative LP removal threshold check (v0.1: revert instead of trigger)
+                // Cumulative LP removal threshold check (v1: revert instead of trigger)
                 if (initLiq > 0) {
                     uint256 cumulativeBps = (_lpCumulativeRemoved[poolId] * 10_000) / initLiq;
                     if (cumulativeBps > commitment.maxCumulativeLpRemovalBps) {

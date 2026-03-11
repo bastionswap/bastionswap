@@ -20,7 +20,7 @@ BastionSwap operates in an adversarial environment where token issuers, traders,
 These properties must **always** hold:
 
 1. **LP removal rights are safe**: Issuer LP can only be removed through valid vesting schedules or trigger-based forced removal
-2. **Violations are blocked pre-emptively**: All issuer violations (sell limits, LP removal limits) revert the transaction before state changes are committed (v0.1). Trigger infrastructure preserved for v0.2
+2. **Violations are blocked pre-emptively**: All issuer violations (sell limits, LP removal limits) revert the transaction before state changes are committed (v1). Trigger infrastructure preserved for v2
 3. **Insurance is solvent**: Payout balance is snapshotted at trigger time; total claims cannot exceed the snapshot
 4. **Cross-contract references are immutable**: No address can modify contract references post-deployment
 5. **Commitments are immutable**: Per-pool parameters set at creation cannot be changed afterward
@@ -33,12 +33,12 @@ These properties must **always** hold:
 
 **Attack**: Issuer removes all liquidity in a single transaction, crashing the token price.
 
-**Mitigation (v0.1 — revert-only enforcement)**:
+**Mitigation (v1 — revert-only enforcement)**:
 - **Single-tx limit**: `beforeRemoveLiquidity` reverts if single-tx removal exceeds threshold (default: >50% of total LP) → `SingleLPRemovalExceeded`
 - **Cumulative limit**: `beforeRemoveLiquidity` reverts if cumulative LP removals within 24h window exceed threshold (default: >80% of total LP) → `CumulativeLPRemovalExceeded`
 - **Vesting enforcement**: Cannot remove more LP than currently vested
 - All checks are pre-emptive — the state change rolls back on revert
-- Trigger-based LP seizure infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`) is preserved for v0.2 watcher network
+- Trigger-based LP seizure infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`) is preserved for v2 watcher network
 
 ### 2. Issuer Token Dump
 
@@ -55,29 +55,29 @@ These properties must **always** hold:
 
 **Known limitation**: Issuer can transfer tokens to secondary wallets before selling. Pre-transferred tokens are not detected. Mitigated by LP/supply ratio transparency on dashboard.
 
-### 3. Honeypot Token (Planned — v0.2)
+### 3. Honeypot Token (Planned — v2)
 
 **Attack**: Token contract blocks `transfer()` after launch, trapping buyer funds.
 
 **Current mitigation**: Fee-on-transfer and rebase tokens are rejected at pool creation via transfer amount validation. This catches some but not all honeypot patterns.
 
-**Planned mitigation (v0.2)**: Decentralized watcher network detects transfer() reverts and submits proofs for LP seizure + compensation.
+**Planned mitigation (v2)**: Decentralized watcher network detects transfer() reverts and submits proofs for LP seizure + compensation.
 
-### 4. Hidden Tax Token (Planned — v0.2)
+### 4. Hidden Tax Token (Planned — v2)
 
 **Attack**: Token implements undisclosed transfer fees (buy/sell tax).
 
 **Current mitigation**: Fee-on-transfer tokens are detected and rejected at pool creation. Tokens that pass the creation check but later enable fees are not currently detected.
 
-**Planned mitigation (v0.2)**: Decentralized watcher network compares expected vs actual swap output and submits proofs for LP seizure.
+**Planned mitigation (v2)**: Decentralized watcher network compares expected vs actual swap output and submits proofs for LP seizure.
 
 ### 5. False Trigger Attack
 
 **Attack**: Malicious actor fabricates a trigger to steal issuer's LP.
 
 **Mitigation**:
-- In v0.1, cumulative LP removal violations revert the transaction — no trigger is fired, so no LP seizure occurs
-- `executeTrigger()` exists for v0.2 but only succeeds when on-chain cumulative LP removal tracking confirms threshold is breached
+- In v1, cumulative LP removal violations revert the transaction — no trigger is fired, so no LP seizure occurs
+- `executeTrigger()` exists for v2 but only succeeds when on-chain cumulative LP removal tracking confirms threshold is breached
 - `isLPRemovalTriggerable(poolId)` view verifies the condition — cannot be spoofed
 - LP removal amounts are tracked in BastionHook via `_lpCumulativeRemoved` mapping, updated only in `beforeRemoveLiquidity` (which only PoolManager can call)
 - TriggerOracle config validation enforces range bounds (BPS 1–10000, time windows 1h–30d)
@@ -175,7 +175,7 @@ These properties must **always** hold:
 - [ ] **Vesting calculation**: Verify linear vesting respects lock duration and returns correct vested amount over time
 - [ ] **Sell limit enforcement**: Verify `afterSwap` correctly detects issuer sells via hookData + BalanceDelta and reverts when daily/weekly limits exceeded
 - [ ] **LP removal enforcement**: Verify `beforeRemoveLiquidity` reverts on both single-tx threshold (`SingleLPRemovalExceeded`) and cumulative threshold (`CumulativeLPRemovalExceeded`)
-- [ ] **Trigger execution**: Verify `executeTrigger()` interface preserved for v0.2; only succeeds when cumulative LP removal threshold is actually breached
+- [ ] **Trigger execution**: Verify `executeTrigger()` interface preserved for v2; only succeeds when cumulative LP removal threshold is actually breached
 - [ ] **Insurance payout**: Verify `executePayout()` correctly snapshots balance and both Merkle and fallback claim modes compute pro-rata correctly
 - [ ] **Claim double-spend**: Verify `claimed` mapping prevents duplicate claims
 - [ ] **Issuer exclusion**: Verify issuer address cannot claim compensation

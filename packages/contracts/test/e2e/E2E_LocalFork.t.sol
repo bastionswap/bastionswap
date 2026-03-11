@@ -591,12 +591,12 @@ contract E2E_LocalFork is Test {
         vm.prank(issuerA);
         positionRouter.removeIssuerLiquidity(poolKeyA, half, 0, 0, block.timestamp + 3600);
 
-        // Second removal: would exceed cumulative 80% threshold -> reverts (v0.1)
+        // Second removal: would exceed cumulative 80% threshold -> reverts (v1)
         vm.prank(issuerA);
         vm.expectRevert();
         positionRouter.removeIssuerLiquidity(poolKeyA, removable - half, 0, 0, block.timestamp + 3600);
 
-        // 8b: Trigger directly (v0.2 watcher path — preserved infra)
+        // 8b: Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);

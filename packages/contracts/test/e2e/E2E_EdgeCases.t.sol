@@ -601,7 +601,7 @@ contract E2E_EdgeCases is Test {
         // Generate insurance fees for poolA
         _buyTokenA(trader, 1 ether);
 
-        // Trigger poolA directly (v0.2 watcher path — preserved infra)
+        // Trigger poolA directly (v2 watcher path — preserved infra)
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
@@ -913,7 +913,7 @@ contract E2E_EdgeCases is Test {
         uint256 attackerEthBefore = attacker.balance;
         _buyTokenA(attacker, 1 ether);
 
-        // Trigger directly (v0.2 watcher path — preserved infra)
+        // Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
