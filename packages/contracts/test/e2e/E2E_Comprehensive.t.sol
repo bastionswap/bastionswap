@@ -279,16 +279,24 @@ contract E2E_Comprehensive is Test {
     function _removeIssuerLPInChunksFor(PoolKey memory key, uint256 eid, address issuer) internal {
         // Use 25% chunks of the initial total (safe for any threshold >= 30%)
         // The single-tx threshold is checked against _initialLiquidity
+        // Advance time between groups to avoid cumulative LP removal revert (80% threshold per 24h window)
         uint128 initialTotal = escrowVault.getTotalLiquidity(eid);
         uint128 maxChunk = uint128((uint256(initialTotal) * 2500) / 10_000); // 25%
 
         uint128 removable = escrowVault.getRemovableLiquidity(eid);
+        uint256 chunksInWindow;
         while (removable > 0) {
+            // After 3 chunks (75%) in one window, advance past the 24h window to reset cumulative
+            if (chunksInWindow == 3) {
+                vm.warp(block.timestamp + 1 days + 1);
+                chunksInWindow = 0;
+            }
             uint128 chunk = removable > maxChunk ? maxChunk : removable;
             if (chunk == 0) break;
             vm.prank(issuer);
             positionRouter.removeIssuerLiquidity(key, chunk, 0, 0, block.timestamp + 3600);
             removable = escrowVault.getRemovableLiquidity(eid);
+            chunksInWindow++;
         }
     }
 
@@ -918,7 +926,7 @@ contract E2E_Comprehensive is Test {
         assertEq(escrowVault.getTotalLiquidity(escrowIdA), total, "LP unchanged");
     }
 
-    // Scenario 17: Cumulative LP removal -> trigger
+    // Scenario 17: Cumulative LP removal -> revert (v0.1: pre-emptive block)
     function test_e2e_lpRemoval_cumulativeTrigger() public {
         // Add general LP so pool survives
         vm.startPrank(generalLP);
@@ -942,27 +950,17 @@ contract E2E_Comprehensive is Test {
 
         assertFalse(hook.isLPRemovalTriggerable(poolIdA), "not yet triggerable");
 
-        // 40% more -> cumulative 89% > 80% threshold
+        // 40% more -> cumulative 89% > 80% threshold -> reverts (v0.1)
         uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
         uint128 fortyPercent = uint128((uint256(total) * 4000) / 10_000);
         if (fortyPercent > remaining) fortyPercent = remaining;
 
         vm.prank(issuerA);
+        vm.expectRevert();
         positionRouter.removeIssuerLiquidity(poolKeyA, fortyPercent, 0, 0, block.timestamp + 3600);
 
-        // Now triggerable
-        assertTrue(hook.isLPRemovalTriggerable(poolIdA), "now triggerable");
-
-        // Anyone can call executeTrigger
-        vm.prank(holder);
-        hook.executeTrigger(poolIdA);
-
-        assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
-
-        // Issuer cannot remove more LP
-        vm.prank(issuerA);
-        vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, 1, 0, 0, block.timestamp + 3600);
+        // Pool is NOT triggered (v0.1: revert, no trigger firing)
+        assertFalse(hook.isPoolTriggered(poolIdA), "not triggered - v0.1 reverts instead");
     }
 
     // Scenario 18: General LP mass removal -> no trigger
@@ -983,7 +981,7 @@ contract E2E_Comprehensive is Test {
     //  PART G: Trigger Execution + Compensation
     // ═══════════════════════════════════════════════════════════════════
 
-    // Scenario 19: LP trigger -> immediate execution -> holder compensation
+    // Scenario 19: Trigger (direct) -> immediate execution -> holder compensation
     function test_e2e_lpTrigger_immediateExecution_compensation() public {
         // Add general LP
         vm.startPrank(generalLP);
@@ -1003,23 +1001,10 @@ contract E2E_Comprehensive is Test {
         vm.prank(trader);
         tokenA.transfer(holder, 50_000e18);
 
-        // Warp and do cumulative LP removal to trigger
-        vm.warp(poolACreatedAt + 90 days);
-        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
-        uint128 firstChunk = uint128((uint256(total) * 4900) / 10_000);
-        uint128 secondChunk = uint128((uint256(total) * 4000) / 10_000);
-
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, firstChunk, 0, 0, block.timestamp + 3600);
-
-        uint128 remainingVested = escrowVault.getRemovableLiquidity(escrowIdA);
-        if (secondChunk > remainingVested) secondChunk = remainingVested;
-
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, secondChunk, 0, 0, block.timestamp + 3600);
-
-        // Execute trigger (permissionless)
-        hook.executeTrigger(poolIdA);
+        // Trigger directly (v0.2 watcher path — preserved infra)
+        uint256 totalSupply = tokenA.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
 
         // 1. Triggered
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
@@ -1066,23 +1051,10 @@ contract E2E_Comprehensive is Test {
 
         _buyTokenA(trader, 1 ether);
 
-        // Trigger via cumulative LP removal -> permissionless executeTrigger
-        // This properly sets _isTriggered[poolId] on the hook
-        vm.warp(poolACreatedAt + 90 days);
-        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
-        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
-        uint128 chunk2 = uint128((uint256(total) * 4000) / 10_000);
-
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
-
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        if (chunk2 > remaining) chunk2 = remaining;
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
-
-        // Permissionless trigger execution
-        hook.executeTrigger(poolIdA);
+        // Trigger directly (v0.2 watcher path — preserved infra)
+        uint256 totalSupply = tokenA.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
 
         // 20a: Issuer sell -> revert
@@ -1714,5 +1686,114 @@ contract E2E_Comprehensive is Test {
         uint256 ratioLow = hook.getLpRatioBps(pidLow);
         // Just verify it's queryable (may be 0 due to integer truncation)
         assertLe(ratioLow, ratioH, "lower LP allocation -> lower or equal ratio");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PART J: v0.1 LP Cumulative Removal Revert Enforcement
+    // ═══════════════════════════════════════════════════════════════════
+
+    // v0.1: Cumulative LP removal exceeding threshold reverts
+    function test_v01_LPCumulativeExceeds_Reverts() public {
+        vm.warp(poolACreatedAt + 90 days);
+        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
+
+        // 49% removal -> succeeds (below single-tx 50% and cumulative 80%)
+        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
+        vm.prank(issuerA);
+        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
+
+        // 40% more -> cumulative 89% > 80% -> reverts
+        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
+        uint128 chunk2 = uint128((uint256(total) * 4000) / 10_000);
+        if (chunk2 > remaining) chunk2 = remaining;
+
+        vm.prank(issuerA);
+        vm.expectRevert();
+        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+    }
+
+    // v0.1: Cumulative LP removal below threshold succeeds
+    function test_v01_LPCumulativeBelowLimit_Succeeds() public {
+        vm.warp(poolACreatedAt + 90 days);
+        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
+
+        // 30% + 30% = 60% < 80% threshold -> both succeed
+        uint128 chunk = uint128((uint256(total) * 3000) / 10_000);
+
+        vm.prank(issuerA);
+        positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
+
+        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
+        uint128 chunk2 = chunk;
+        if (chunk2 > remaining) chunk2 = remaining;
+
+        vm.prank(issuerA);
+        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+
+        // Both succeeded, pool not triggered
+        assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
+    }
+
+    // v0.1: Cumulative window reset allows further removal
+    function test_v01_LPCumulativeWindowReset() public {
+        vm.warp(poolACreatedAt + 90 days);
+        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
+
+        // 49% in first window
+        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
+        vm.prank(issuerA);
+        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
+
+        // Advance past 24h window -> cumulative resets
+        vm.warp(block.timestamp + 1 days + 1);
+
+        // Another 30% -> succeeds (cumulative reset to 30%, below 80%)
+        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
+        uint128 chunk2 = uint128((uint256(total) * 3000) / 10_000);
+        if (chunk2 > remaining) chunk2 = remaining;
+        if (chunk2 > 0) {
+            vm.prank(issuerA);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+        }
+
+        assertFalse(hook.isPoolTriggered(poolIdA), "not triggered after window reset");
+    }
+
+    // v0.1: After cumulative revert, no trigger is fired
+    function test_v01_NoTriggerFired() public {
+        vm.warp(poolACreatedAt + 90 days);
+        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
+
+        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
+        vm.prank(issuerA);
+        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
+
+        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
+        uint128 chunk2 = uint128((uint256(total) * 4000) / 10_000);
+        if (chunk2 > remaining) chunk2 = remaining;
+
+        vm.prank(issuerA);
+        vm.expectRevert();
+        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+
+        // No trigger fired — just reverted
+        assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
+        assertFalse(hook.isLPRemovalTriggerable(poolIdA), "not triggerable");
+    }
+
+    // v0.1: executeTrigger interface preserved for v0.2 watcher network
+    function test_v01_TriggerInfraExists() public {
+        // Verify executeTrigger exists and is callable (fails with threshold check, not missing function)
+        vm.expectRevert(); // "Threshold not met" or similar — function exists
+        hook.executeTrigger(poolIdA);
+
+        // Verify isLPRemovalTriggerable view works
+        assertFalse(hook.isLPRemovalTriggerable(poolIdA));
+
+        // Verify direct trigger from hook context works (v0.2 path)
+        uint256 totalSupply = tokenA.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+        assertTrue(hook.isPoolTriggered(poolIdA), "trigger infra works");
     }
 }

@@ -285,7 +285,6 @@ contract E2E_ScenariosTest is Test, Deployers {
         assertGt(removable, 0, "issuer should have removable LP after vesting progress");
 
         // Issuer removes LP in multiple transactions within the slowRugWindow (24h)
-        // cumulatively exceeding the slowRugCumulativeThreshold (80% of initialTotalSupply).
         // Each removal is below maxSingleLpRemovalBps (50%) individually.
         uint128 firstChunk = removable / 2;
         uint128 secondChunk = removable - firstChunk;
@@ -301,24 +300,27 @@ contract E2E_ScenariosTest is Test, Deployers {
         // Not yet triggerable (cumulative below threshold)
         assertFalse(hook.isLPRemovalTriggerable(_poolId), "should not be triggerable after first removal");
 
-        // Second LP removal (still within 24h window)
+        // Second LP removal -> reverts (v0.1: cumulative exceeds 80% threshold)
         vm.warp(block.timestamp + 6 hours);
         vm.prank(issuerAddr);
+        vm.expectRevert();
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
             ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
+        console.log("  v0.1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
 
-        // Now cumulative LP removal should exceed threshold
-        // Anyone can call executeTrigger
-        hook.executeTrigger(_poolId);
+        // Trigger directly (v0.2 watcher path — preserved infra)
+        uint256 totalSupply = issuedToken.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(_poolId, _poolKey, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
 
         // Trigger fires
         ITriggerOracle.TriggerResult memory result = triggerOracle.checkTrigger(_poolId);
         assertTrue(result.triggered, "trigger should have fired");
         assertEq(uint8(result.triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
-        console.log("  RUG_PULL trigger fired via permissionless executeTrigger");
+        console.log("  RUG_PULL trigger fired via direct trigger call (v0.2 path)");
 
         // Escrow locked down
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
@@ -438,8 +440,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         uint256 insuranceBaseTokenBefore = baseToken.balanceOf(address(insurancePool));
 
-        // Issuer removes LP in two chunks within the slowRug window (24h)
-        // cumulatively exceeding slowRugCumulativeThreshold (80%)
+        // Issuer removes LP — first chunk succeeds
         uint128 firstChunk = removable / 2;
         uint128 secondChunk = removable - firstChunk;
 
@@ -453,25 +454,27 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         assertFalse(hook.isPoolTriggered(_poolId), "should not be triggered yet");
 
-        // Second removal (still within window)
+        // Second removal -> reverts (v0.1: cumulative exceeds 80% threshold)
         vm.warp(block.timestamp + 6 hours);
         vm.prank(issuerAddr);
+        vm.expectRevert();
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
             ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
+        console.log("  v0.1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
 
-        // Permissionless trigger execution by anyone (e.g., a bot)
-        address anyBot = makeAddr("bot");
-        vm.prank(anyBot);
-        hook.executeTrigger(_poolId);
+        // Trigger directly (v0.2 watcher path — preserved infra)
+        uint256 totalSupply = issuedToken.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(_poolId, _poolKey, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
 
         // Verify trigger fired
         ITriggerOracle.TriggerResult memory result = triggerOracle.checkTrigger(_poolId);
         assertTrue(result.triggered, "RUG_PULL trigger should have fired");
         assertEq(uint8(result.triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
-        console.log("  RUG_PULL trigger fired via permissionless executeTrigger");
+        console.log("  RUG_PULL trigger fired via direct trigger call (v0.2 path)");
 
         // Escrow locked down
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);

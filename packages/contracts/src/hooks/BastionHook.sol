@@ -171,6 +171,7 @@ contract BastionHook is BaseTestHooks {
     error PoolTriggered();
     error IssuerDumpDetected();
     error SingleLPRemovalExceeded();
+    error CumulativeLPRemovalExceeded();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -436,6 +437,14 @@ contract BastionHook is BaseTestHooks {
                 ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getTriggerConfig(poolId);
                 _updateLpWindow(poolId, cfg);
                 _lpCumulativeRemoved[poolId] += removeAmount;
+
+                // Cumulative LP removal threshold check (v0.1: revert instead of trigger)
+                if (initLiq > 0) {
+                    uint256 cumulativeBps = (_lpCumulativeRemoved[poolId] * 10_000) / initLiq;
+                    if (cumulativeBps > commitment.maxCumulativeLpRemovalBps) {
+                        revert CumulativeLPRemovalExceeded();
+                    }
+                }
             }
         }
 

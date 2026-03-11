@@ -601,21 +601,10 @@ contract E2E_EdgeCases is Test {
         // Generate insurance fees for poolA
         _buyTokenA(trader, 1 ether);
 
-        // Trigger poolA via cumulative LP removal
-        vm.warp(poolACreatedAt + 90 days);
-        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
-        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
-        uint128 chunk2 = uint128((uint256(total) * 4000) / 10_000);
-
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
-
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        if (chunk2 > remaining) chunk2 = remaining;
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
-
-        hook.executeTrigger(poolIdA);
+        // Trigger poolA directly (v0.2 watcher path — preserved infra)
+        uint256 totalSupply = tokenA.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
         assertTrue(hook.isPoolTriggered(poolIdA), "poolA triggered");
 
         // Pool Y should NOT be triggered
@@ -919,26 +908,14 @@ contract E2E_EdgeCases is Test {
         // Generate insurance
         _buyTokenA(trader, 2 ether);
 
-        // Setup for trigger
-        vm.warp(poolACreatedAt + 90 days);
-        uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
-        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
-        uint128 chunk2 = uint128((uint256(total) * 4000) / 10_000);
-
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
-
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        if (chunk2 > remaining) chunk2 = remaining;
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
-
         // Attacker tries to frontrun trigger by buying tokens to claim compensation
         uint256 attackerEthBefore = attacker.balance;
         _buyTokenA(attacker, 1 ether);
 
-        // Execute trigger
-        hook.executeTrigger(poolIdA);
+        // Trigger directly (v0.2 watcher path — preserved infra)
+        uint256 totalSupply = tokenA.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
 
         // After trigger, trading is blocked (issuer sells blocked, but buys may still work)
