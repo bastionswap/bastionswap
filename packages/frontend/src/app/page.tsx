@@ -68,6 +68,17 @@ const CheckCircle = ({ className = "" }: { className?: string }) => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
   </svg>
 );
+const EyeIcon = ({ className = "" }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+);
+const BoltIcon = ({ className = "" }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+  </svg>
+);
 
 const CheckItem = ({ children }: { children: React.ReactNode }) => (
   <li className="flex items-start gap-2.5 text-sm text-gray-600">
@@ -96,10 +107,10 @@ export default function HomePage() {
   const { data: stats } = useProtocolStats();
 
   const statItems = [
-    { label: "Bastion Pools", value: stats?.totalBastionPools ?? "—" },
-    { label: "Escrow Locked", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 6 })}` : "—", unit: "LP" },
-    { label: "Insurance Available", value: stats ? `${parseFloat(stats.totalInsuranceBalance).toFixed(4)}` : "—", unit: "ETH" },
-    { label: "Compensation Paid", value: stats ? `${parseFloat(stats.totalCompensationPaid).toFixed(4)}` : "—", unit: "ETH" },
+    { label: "Protected Pools", value: stats?.totalBastionPools ?? 0 },
+    { label: "LP Locked in Escrow", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 6 })}` : "0", unit: "LP" },
+    { label: "Insurance Pool Total", value: stats ? `${parseFloat(stats.totalInsuranceBalance).toFixed(4)}` : "0", unit: "ETH" },
+    { label: "Paid to Holders", value: stats ? `${parseFloat(stats.totalCompensationPaid).toFixed(4)}` : "0", unit: "ETH" },
   ];
 
   return (
@@ -109,28 +120,28 @@ export default function HomePage() {
         <div className="pointer-events-none absolute -top-20 h-[500px] w-[700px] rounded-full bg-bastion-400/8 blur-[140px]" />
 
         <div className="relative inline-flex items-center gap-2 rounded-full bg-bastion-50 border border-bastion-100 px-4 py-1.5 text-sm font-medium text-bastion-700 mb-6">
-          <ShieldIcon className="h-4 w-4" />
-          Protected by smart contract escrow
+          Built on Uniswap V4 Hooks &middot; Base
         </div>
 
         <h1 className="relative text-4xl font-extrabold tracking-tight text-gray-900 sm:text-5xl lg:text-6xl leading-[1.1]">
-          Trade any token.
-          <br className="hidden sm:block" />{" "}
+          The DEX where rug pulls{" "}
+          <br className="hidden sm:block" />
           <span className="bg-gradient-to-r from-bastion-600 to-emerald-600 bg-clip-text text-transparent">
-            Get compensated
-          </span>{" "}
-          if it rugs.
+            don&apos;t pay.
+          </span>
         </h1>
-        <p className="relative mt-6 max-w-xl text-lg text-gray-500 leading-relaxed">
-          The first DEX with built-in escrow and insurance protection.
-          Powered by Uniswap V4 hooks on Base.
+        <p className="relative mt-6 max-w-2xl text-lg text-gray-500 leading-relaxed">
+          BastionSwap locks issuer liquidity with on-chain vesting
+          and automatically compensates holders if anything goes wrong.
+          <br className="hidden sm:block" />
+          Trade any token — if the issuer rugs, you get paid back.
         </p>
         <div className="relative mt-10 flex flex-col gap-3 sm:flex-row sm:gap-4">
           <Link href="/swap" className="btn-primary text-center px-8 py-3.5 text-base">
             Start Trading
           </Link>
           <Link href="/create" className="btn-secondary text-center px-8 py-3.5 text-base">
-            Create Pool
+            Launch a Token
           </Link>
         </div>
 
@@ -146,8 +157,36 @@ export default function HomePage() {
                 {unit && <span className="text-sm font-normal text-gray-400 ml-1">{unit}</span>}
               </p>
               <p className="text-xs text-gray-400 mt-1">{label}</p>
+              <p className="text-[10px] text-gray-300 mt-0.5">Testnet</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* --- The Problem --- */}
+      <section className="relative -mx-4 sm:-mx-6 px-4 sm:px-6 py-16 sm:py-20 bg-gray-950 text-white">
+        <div className="mx-auto max-w-3xl text-center">
+          <h2 className="text-2xl font-bold sm:text-3xl lg:text-4xl leading-tight">
+            Every day, thousands of tokens launch on DEXs.
+            <br className="hidden sm:block" />
+            <span className="text-gray-400"> Most are scams.</span>
+          </h2>
+          <div className="mt-8 space-y-5 text-base sm:text-lg text-gray-400 leading-relaxed text-left sm:text-center">
+            <p>
+              On Uniswap alone, new tokens launch every minute. Anyone can
+              create a token, add liquidity, and pull it all out once buyers
+              drive up the price. There&apos;s no protection, no refund, no recourse.
+            </p>
+            <p>
+              Token scanners play whack-a-mole with new scam patterns.
+              Template launchpads restrict what you can build.
+              Neither solves the root cause.
+            </p>
+            <p className="text-white font-medium">
+              BastionSwap takes a different approach: instead of trying to
+              detect scams, we make scamming unprofitable.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -156,36 +195,40 @@ export default function HomePage() {
         <div className="text-center mb-12">
           <p className="text-sm font-semibold text-bastion-600 uppercase tracking-wider mb-2">How it works</p>
           <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-            Three layers of protection
+            Four layers of protection
           </h2>
         </div>
-        <div className="grid gap-8 sm:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {[
             {
               icon: <LockIcon className="h-7 w-7 text-bastion-600" />,
               step: "01",
-              title: "Issuer creates pool",
-              desc: "Token issuer deposits into escrow with a vesting schedule. Commitment parameters are locked on-chain.",
-              color: "bg-bastion-50 border-bastion-100",
+              title: "Issuer launches token",
+              desc: "The issuer creates a pool with initial liquidity. The protocol automatically locks their LP with a vesting schedule — 7-day lockup, then 83-day linear unlock. No extra steps, no separate escrow deposit.",
               iconBg: "bg-bastion-100",
             },
             {
-              icon: <SwapIcon className="h-7 w-7 text-emerald-600" />,
+              icon: <ShieldIcon className="h-7 w-7 text-emerald-600" />,
               step: "02",
-              title: "You trade freely",
-              desc: "A small fee from each swap automatically builds the insurance pool. Trade with confidence.",
-              color: "bg-emerald-50 border-emerald-100",
+              title: "Insurance builds automatically",
+              desc: "Every time someone buys the token, 1% goes into a per-token insurance pool denominated in ETH or USDC. The issuer can't touch it. Nobody can — except the protocol.",
               iconBg: "bg-emerald-100",
             },
             {
-              icon: <ShieldIcon className="h-7 w-7 text-amber-600" />,
+              icon: <EyeIcon className="h-7 w-7 text-blue-600" />,
               step: "03",
-              title: "If issuer rugs",
-              desc: "Triggers detect rug pulls automatically. Escrow is redistributed and insurance pays compensation.",
-              color: "bg-amber-50 border-amber-100",
+              title: "You trade with full transparency",
+              desc: "The dashboard shows everything: escrow countdown, insurance pool size, issuer reputation score, and commitment parameters. You see exactly how protected you are before you buy.",
+              iconBg: "bg-blue-100",
+            },
+            {
+              icon: <BoltIcon className="h-7 w-7 text-amber-600" />,
+              step: "04",
+              title: "If anything goes wrong",
+              desc: "The protocol detects rug pulls, mass dumps, and commitment breaches automatically on-chain. Issuer LP is seized, combined with the insurance pool, and distributed to holders as compensation. No claims process — it's automatic.",
               iconBg: "bg-amber-100",
             },
-          ].map(({ icon, step, title, desc, color, iconBg }) => (
+          ].map(({ icon, step, title, desc, iconBg }) => (
             <div key={step} className="glass-card relative overflow-hidden p-7">
               <div className="flex items-center gap-3 mb-4">
                 <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${iconBg}`}>
@@ -200,12 +243,51 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* --- For Issuers --- */}
+      <section className="relative">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-sm font-semibold text-bastion-600 uppercase tracking-wider mb-2">For token issuers</p>
+          <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">
+            Launching a token? Build trust from day one.
+          </h2>
+          <div className="mt-8 space-y-5 text-base text-gray-500 leading-relaxed text-left sm:text-center">
+            <p>
+              Buyers avoid new tokens because they can&apos;t tell scams
+              from real projects. BastionSwap fixes this.
+            </p>
+            <p>
+              When you launch on BastionSwap, your commitment is
+              visible on-chain: lock-up period, vesting schedule,
+              sell limits — all immutable. Buyers see exactly what
+              you&apos;ve promised and can verify it themselves.
+            </p>
+            <p>
+              Stricter commitments earn higher reputation scores
+              and featured placement. Complete your vesting and
+              earn 10% of the insurance pool as a reward.
+            </p>
+            <p className="text-gray-700 font-medium">
+              Same Uniswap V4 liquidity. Same trading experience.
+              More buyers who trust you.
+            </p>
+          </div>
+          <div className="mt-10">
+            <Link href="/create" className="btn-primary inline-flex items-center gap-2 px-8 py-3.5 text-base">
+              Launch Your Token
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              </svg>
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* --- Protected vs Standard --- */}
       <section>
         <div className="text-center mb-12">
           <p className="text-sm font-semibold text-bastion-600 uppercase tracking-wider mb-2">Compare</p>
           <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-            Protected vs Standard
+            Two types of pools. One clear choice for new tokens.
           </h2>
         </div>
         <div className="grid gap-6 sm:grid-cols-2 max-w-4xl mx-auto">
@@ -226,11 +308,12 @@ export default function HomePage() {
                 </div>
               </div>
               <ul className="space-y-3">
-                <CheckItem>Issuer escrow with vesting schedule</CheckItem>
-                <CheckItem>Automatic insurance pool from swap fees</CheckItem>
-                <CheckItem>On-chain reputation tracking</CheckItem>
-                <CheckItem>Rug-pull trigger detection</CheckItem>
-                <CheckItem>Automatic compensation claims</CheckItem>
+                <CheckItem>Issuer LP locked with customizable vesting (7d–365d)</CheckItem>
+                <CheckItem>1% insurance pool auto-funded from every buy</CheckItem>
+                <CheckItem>On-chain rug pull detection (LP removal, dumps, commitment breach)</CheckItem>
+                <CheckItem>Automatic compensation to holders if triggered</CheckItem>
+                <CheckItem>Issuer reputation score visible on dashboard</CheckItem>
+                <CheckItem>Works through any frontend or aggregator — protection is at the protocol level</CheckItem>
               </ul>
             </div>
           </div>
@@ -247,11 +330,10 @@ export default function HomePage() {
               </div>
             </div>
             <ul className="space-y-3">
-              <XItem>No escrow protection</XItem>
+              <XItem>No LP restrictions — issuer can remove anytime</XItem>
               <XItem>No insurance mechanism</XItem>
-              <XItem>No issuer reputation</XItem>
-              <XItem>No trigger detection</XItem>
-              <XItem>Suitable for major token pairs (ETH/USDC)</XItem>
+              <XItem>No on-chain monitoring</XItem>
+              <XItem>Suitable for established pairs (ETH/USDC, WBTC/ETH)</XItem>
             </ul>
           </div>
         </div>

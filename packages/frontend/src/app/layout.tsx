@@ -42,11 +42,18 @@ export default function RootLayout({
             </main>
             <footer className="border-t border-subtle bg-white py-8">
               <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-2 text-sm text-gray-400">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
                   <img src="/logo.png" alt="BastionSwap" width={20} height={20} className="rounded" />
-                  BastionSwap
+                  <span className="font-medium">BastionSwap</span>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-xs text-gray-400">Escrow-native DEX on Base</span>
                 </div>
-                <p className="text-xs text-gray-400">Protected swaps on Uniswap V4 &middot; Base Sepolia Testnet</p>
+                <div className="flex items-center gap-4 text-xs text-gray-400">
+                  <span className="text-gray-300 cursor-default" title="Coming soon">Docs</span>
+                  <a href="https://github.com/BastionSwap" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition-colors">GitHub</a>
+                  <a href="https://x.com/BastionSwap" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition-colors">X</a>
+                </div>
+                <p className="text-xs text-gray-400">Built with Uniswap V4 Hooks</p>
               </div>
             </footer>
           </div>
