@@ -9,6 +9,13 @@ optimizer = true
 optimizer_runs = 200
 fs_permissions = [{ access = "read-write", path = "./" }]
 
+[lint]
+# Suppress false-positive linter warnings:
+# - unsafe-typecast: V4 API requires int256/uint256/int128/uint128 conversions (safe by design)
+# - divide-before-multiply: tick alignment (MIN_TICK / tickSpacing) * tickSpacing is intentional rounding
+# - erc20-unchecked-transfer: remaining warnings are in test/script files (TestToken always returns true)
+exclude_lints = ["unsafe-typecast", "divide-before-multiply", "erc20-unchecked-transfer"]
+
 [profile.deploy]
 optimizer_runs = 1_000_000
 via_ir = true

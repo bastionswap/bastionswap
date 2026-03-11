@@ -167,7 +167,7 @@ contract ProtocolHandler is Test {
         if (ghost_poolTriggered[poolKey]) return;
 
         vm.prank(oracle);
-        try pool.executePayout(poolId, 1, 1000 ether, bytes32(0), address(0)) returns (uint256 payout) {
+        try pool.executePayout(poolId, 1, 1000 ether, address(0)) returns (uint256 payout) {
             ghost_poolTriggered[poolKey] = true;
             ghost_poolPayoutBalance[poolKey] = payout;
         } catch {}
@@ -191,11 +191,14 @@ contract ProtocolHandler is Test {
 
         if (!ghost_poolTriggered[poolKey]) return;
 
+        // Fallback mode: warp past 24h merkle submission deadline + advance block
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.roll(block.number + 1);
+
         address holder = msg.sender;
-        bytes32[] memory proof = new bytes32[](0);
 
         vm.prank(holder);
-        try pool.claimCompensation(poolId, holderBalance, proof) returns (uint256 amt) {
+        try pool.claimCompensationFallback(poolId, holderBalance) returns (uint256 amt) {
             ghost_totalClaimed += amt;
             ghost_poolTotalClaimed[poolKey] += amt;
         } catch {}
@@ -609,21 +612,21 @@ contract CrossContractFuzzTest is Test {
         claimToken.mint(holder, holderBalance);
 
         vm.prank(oracle);
-        pool.executePayout(poolId, 1, totalSupply, bytes32(0), address(claimToken));
+        pool.executePayout(poolId, 1, totalSupply, address(claimToken));
 
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
         // Calculate expected compensation
         uint256 expectedAmount = (feeAmount * holderBalance) / totalSupply;
         if (expectedAmount == 0) return;
 
-        // Claim
-        bytes32[] memory proof = new bytes32[](0);
+        // Claim using fallback mode
         uint256 holderBalBefore = holder.balance;
 
         vm.prank(holder);
-        uint256 claimed = pool.claimCompensation(poolId, holderBalance, proof);
+        uint256 claimed = pool.claimCompensationFallback(poolId, holderBalance);
 
         // Pro-rata check
         assertEq(claimed, expectedAmount);
@@ -632,7 +635,7 @@ contract CrossContractFuzzTest is Test {
         // Double claim should revert
         vm.prank(holder);
         vm.expectRevert(InsurancePool.AlreadyClaimed.selector);
-        pool.claimCompensation(poolId, holderBalance, proof);
+        pool.claimCompensationFallback(poolId, holderBalance);
     }
 
     /// @dev Multiple holders claiming never exceeds pool balance
@@ -663,14 +666,17 @@ contract CrossContractFuzzTest is Test {
         pool.depositFee{value: feeAmount}(poolId);
 
         vm.prank(oracle);
-        pool.executePayout(poolId, 1, totalSupply, bytes32(0), address(claimToken));
+        pool.executePayout(poolId, 1, totalSupply, address(claimToken));
 
-        // All holders claim
+        // Advance past 24h merkle submission deadline
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.roll(block.number + 1);
+
+        // All holders claim using fallback mode
         uint256 totalClaimed;
-        bytes32[] memory proof = new bytes32[](0);
         for (uint256 i; i < holderCount; ++i) {
             vm.prank(holders[i]);
-            try pool.claimCompensation(poolId, balancePerHolder, proof) returns (uint256 amt) {
+            try pool.claimCompensationFallback(poolId, balancePerHolder) returns (uint256 amt) {
                 totalClaimed += amt;
             } catch {}
         }

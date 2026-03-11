@@ -11,6 +11,8 @@ import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 
@@ -446,7 +448,7 @@ contract BastionSwapRouter is IUnlockCallback {
                     poolManager.settle{value: amount}();
                 } else {
                     poolManager.sync(currencies[i]);
-                    IERC20Minimal(Currency.unwrap(currencies[i])).transferFrom(
+                    SafeTransferLib.safeTransferFrom(ERC20(Currency.unwrap(currencies[i])),
                         sender, address(poolManager), amount
                     );
                     poolManager.settle();
@@ -492,7 +494,7 @@ contract BastionSwapRouter is IUnlockCallback {
                 poolManager.settle{value: amountToSend}();
             } else {
                 poolManager.sync(currency);
-                IERC20Minimal(Currency.unwrap(currency)).transferFrom(
+                SafeTransferLib.safeTransferFrom(ERC20(Currency.unwrap(currency)),
                     sender, address(poolManager), amountToSend
                 );
                 poolManager.settle();

@@ -586,11 +586,23 @@ contract E2E_LocalFork is Test {
         uint256 escrowId = _getEscrowId(poolIdA);
         uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
 
-        // Remove all vested LP — triggers rug-pull detection (>50% of total)
+        // Remove LP in two batches to stay within single-tx threshold (50% of initial)
+        // First removal: 50% of removable
+        uint128 half = removable / 2;
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, removable, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, half, 0, 0, block.timestamp + 3600);
 
-        // 8b: Check trigger fired immediately
+        // Second removal: remaining LP — cumulative now exceeds slow-rug threshold
+        vm.prank(issuerA);
+        positionRouter.removeIssuerLiquidity(poolKeyA, removable - half, 0, 0, block.timestamp + 3600);
+
+        // 8b: Cumulative removal should make pool triggerable (permissionless executeTrigger)
+        bool triggerable = hook.isLPRemovalTriggerable(poolIdA);
+        assertTrue(triggerable, "LP removal triggerable");
+
+        // Execute trigger permissionlessly
+        hook.executeTrigger(poolIdA);
+
         ITriggerOracle.TriggerResult memory trigStatus = triggerOracle.checkTrigger(poolIdA);
         assertTrue(trigStatus.triggered, "trigger fired");
         assertTrue(
@@ -601,10 +613,10 @@ contract E2E_LocalFork is Test {
         // 8c: Verify escrow is triggered (getRemovableLiquidity returns 0 when triggered)
         assertEq(escrowVault.getRemovableLiquidity(escrowId), 0, "escrow triggered - 0 removable");
 
-        // RUG_PULL has totalEligibleSupply=0, so InsurancePool payout is NOT triggered
-        // (InsurancePool payout is tested in ISSUER_DUMP scenario which has eligible supply)
+        // Permissionless executeTrigger passes initialTotalSupply as totalEligibleSupply,
+        // so InsurancePool payout IS triggered
         InsurancePool.PoolStatus memory postTrigger = insurancePool.getPoolStatus(poolIdA);
-        assertFalse(postTrigger.isTriggered, "insurance not triggered for rug-pull (no eligible supply)");
+        assertTrue(postTrigger.isTriggered, "insurance triggered after rug-pull");
 
         // Pool still tradable via general LP
         uint256 outAfterTrigger = _buyTokenA(trader, 0.01 ether);
@@ -645,18 +657,21 @@ contract E2E_LocalFork is Test {
         assertTrue(postTrigger.isTriggered, "insurance triggered for dump");
 
         // Holder claims compensation (fallback mode — no merkle root)
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.roll(block.number + 1);
+
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
         vm.prank(holder);
-        bytes32[] memory emptyProof = new bytes32[](0);
-        insurancePool.claimCompensation(poolIdA, holderBal, emptyProof);
+        insurancePool.claimCompensationFallback(poolIdA, holderBal);
 
         assertGt(holder.balance, holderEthBefore, "holder got ETH");
 
         // Duplicate claim → revert
         vm.prank(holder);
         vm.expectRevert();
-        insurancePool.claimCompensation(poolIdA, holderBal, emptyProof);
+        insurancePool.claimCompensationFallback(poolIdA, holderBal);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -693,8 +708,12 @@ contract E2E_LocalFork is Test {
         uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
         assertGt(removable, 0, "can remove");
 
+        // Remove in two batches to stay within single-tx threshold (50% of initial LP)
+        uint128 half = removable / 2;
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, removable, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, half, 0, 0, block.timestamp + 3600);
+        vm.prank(issuerA);
+        positionRouter.removeIssuerLiquidity(poolKeyA, removable - half, 0, 0, block.timestamp + 3600);
 
         // 11b: Reputation increased (ESCROW_COMPLETED event)
         // The escrow completion recording depends on the protocol flow.
@@ -794,21 +813,24 @@ contract E2E_LocalFork is Test {
         assertTrue(status.isTriggered, "triggered");
 
         // Holder claims via fallback (balanceOf check)
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.roll(block.number + 1);
+
         uint256 holderBal = tokenA.balanceOf(holder);
         vm.prank(holder);
-        bytes32[] memory emptyProof = new bytes32[](0);
         uint256 holderEthBefore = holder.balance;
-        insurancePool.claimCompensation(poolIdA, holderBal, emptyProof);
+        insurancePool.claimCompensationFallback(poolIdA, holderBal);
         assertGt(holder.balance, holderEthBefore, "holder compensated");
 
-        // After 7-day fallback period expires, claims should fail
+        // After 7-day fallback period (from 24h deadline) expires, claims should fail
         vm.warp(block.timestamp + 8 days);
         address lateClaimer = makeAddr("late");
         vm.deal(lateClaimer, 1 ether);
         deal(address(tokenA), lateClaimer, 1000e18);
         vm.prank(lateClaimer);
         vm.expectRevert();
-        insurancePool.claimCompensation(poolIdA, 1000e18, emptyProof);
+        insurancePool.claimCompensationFallback(poolIdA, 1000e18);
     }
 
     // ═══════════════════════════════════════════════════════════════════

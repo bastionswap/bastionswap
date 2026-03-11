@@ -5,8 +5,13 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 /// @title IInsurancePool
 /// @notice Per-token isolated insurance pool funded by a portion of buy-side swap fees.
-///         When a trigger event is detected, the pool automatically compensates affected
-///         token holders on a pro-rata basis via pull-based claims.
+///         When a trigger event is detected, the pool enters a 24h waiting period.
+///         Guardian can submit a Merkle root (Merkle mode) or it falls back to balanceOf (Fallback mode).
+///
+///         Claim Mode State Machine:
+///         State A — Triggered, 24h not elapsed: no claims possible, guardian can submit merkle root
+///         State B — Merkle root submitted: only claimCompensation (Merkle proof) available
+///         State C — 24h elapsed + no merkle root: only claimCompensationFallback (balanceOf) available
 interface IInsurancePool {
     // ─── Structs ──────────────────────────────────────────────────────
 
@@ -65,6 +70,16 @@ interface IInsurancePool {
     /// @param amount Amount withdrawn
     event EmergencyWithdrawal(PoolId indexed poolId, address indexed to, uint256 amount);
 
+    /// @notice Emitted when the guardian submits a Merkle root, transitioning to Merkle mode.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param root Merkle root of (holder, balance) snapshot
+    event MerkleRootSubmitted(PoolId indexed poolId, bytes32 root);
+
+    /// @notice Emitted when the guardian address is updated.
+    /// @param oldGuardian Previous guardian address
+    /// @param newGuardian New guardian address
+    event GuardianSet(address indexed oldGuardian, address indexed newGuardian);
+
     // ─── Functions ────────────────────────────────────────────────────
 
     /// @notice Deposits ETH swap fees into the insurance pool.
@@ -81,29 +96,45 @@ interface IInsurancePool {
     function depositFeeToken(PoolId poolId, address token, uint256 amount) external;
 
     /// @notice Executes a payout from the insurance pool after a trigger event is confirmed.
-    /// @dev Can only be called by TriggerOracle. Marks pool as triggered and records snapshot.
+    /// @dev Can only be called by TriggerOracle. Marks pool as triggered and enters 24h waiting
+    ///      state. Guardian must call submitMerkleRoot() within 24h, otherwise Fallback mode activates.
     /// @param poolId Uniswap V4 pool identifier
     /// @param triggerType The type of trigger event that occurred
     /// @param totalEligibleSupply Total token supply eligible for pro-rata claims
-    /// @param merkleRoot Merkle root of (holder, balance) snapshot at trigger time
     /// @param issuedToken Address of the issued token (for fallback balanceOf claims)
     /// @return totalPayout Total amount earmarked for distribution
     function executePayout(
         PoolId poolId,
         uint8 triggerType,
         uint256 totalEligibleSupply,
-        bytes32 merkleRoot,
         address issuedToken
     ) external returns (uint256 totalPayout);
 
-    /// @notice Allows a holder to claim their pro-rata compensation after a payout.
-    /// @dev Reverts if not triggered, already claimed, or claim period expired.
+    /// @notice Guardian submits a Merkle root within 24h of trigger, entering Merkle mode.
+    /// @dev Reverts if: not triggered, already in Merkle mode, 24h deadline passed (Fallback active).
+    ///      Once Fallback mode is active, this function is permanently blocked (irreversible).
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param root Merkle root of (holder, balance) snapshot at trigger time
+    function submitMerkleRoot(PoolId poolId, bytes32 root) external;
+
+    /// @notice Allows a holder to claim their pro-rata compensation using Merkle proof (State B only).
+    /// @dev Only available after guardian has submitted a Merkle root. Reverts in Fallback mode.
     ///      Holder is msg.sender. Balance is verified via Merkle proof.
     /// @param poolId Uniswap V4 pool identifier
     /// @param holderBalance Holder's token balance at trigger snapshot
     /// @param merkleProof Merkle proof for (msg.sender, holderBalance) leaf
     /// @return amount Amount of compensation transferred to the holder
     function claimCompensation(PoolId poolId, uint256 holderBalance, bytes32[] calldata merkleProof)
+        external
+        returns (uint256 amount);
+
+    /// @notice Allows a holder to claim their pro-rata compensation using balanceOf fallback (State C only).
+    /// @dev Only available after 24h deadline has passed without Merkle root submission.
+    ///      Reverts in Merkle mode or during the 24h waiting period.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param holderBalance Holder's token balance to claim with (verified via balanceOf)
+    /// @return amount Amount of compensation transferred to the holder
+    function claimCompensationFallback(PoolId poolId, uint256 holderBalance)
         external
         returns (uint256 amount);
 
@@ -135,6 +166,8 @@ interface IInsurancePool {
     /// @dev Can only be called by governance. Range: 10–500 bps (0.1%–5%).
     /// @param newFeeRate New fee rate in basis points
     function setFeeRate(uint16 newFeeRate) external;
+
+    // ─── Emergency ───────────────────────────────────────────────────
 
     /// @notice Pending emergency withdrawal request.
     struct EmergencyRequest {
@@ -177,7 +210,7 @@ interface IInsurancePool {
     function setTreasury(address treasury_) external;
 
     /// @notice Claims insurance pool funds to the treasury after normal pool completion.
-    /// @dev Requires: pool not triggered, escrow fully vested, grace period passed.
+    /// @dev Requires: pool not triggered, escrow fully vested.
     /// @param poolId Uniswap V4 pool identifier
     function claimTreasuryFunds(PoolId poolId) external;
 
@@ -200,6 +233,10 @@ interface IInsurancePool {
 
     /// @notice Transfer governance to a new address.
     function transferGovernance(address newGovernance) external;
+
+    /// @notice Set the guardian address responsible for Merkle root submission.
+    /// @param newGuardian New guardian address
+    function setGuardian(address newGuardian) external;
 
     /// @notice Set the Merkle-based claim period (14–90 days).
     function setMerkleClaimPeriod(uint40 newPeriod) external;

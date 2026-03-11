@@ -8,18 +8,25 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 
 /// @title InsurancePool
 /// @notice Per-token isolated insurance pool funded by a portion of buy-side swap fees.
 ///         On trigger events, affected token holders claim pro-rata compensation.
+///
+///         Claim Mode State Machine:
+///         State A — Triggered, 24h not elapsed: no claims, guardian can submit merkle root
+///         State B — Merkle root submitted: only claimCompensation (Merkle proof)
+///         State C — 24h elapsed + no merkle root: only claimCompensationFallback (balanceOf)
 contract InsurancePool is IInsurancePool, ReentrancyGuard {
     // ─── Constants ────────────────────────────────────────────────────
 
     uint16 internal constant MAX_FEE_RATE = 500; // 5%
     uint16 internal constant MIN_FEE_RATE = 10; // 0.1%
     uint256 public constant BPS_DENOMINATOR = 10000;
+    uint40 public constant MERKLE_SUBMISSION_DEADLINE = 24 hours;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -31,12 +38,17 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
     address public GOVERNANCE;
 
+    // ─── Guardian ────────────────────────────────────────────────────
+
+    /// @notice Guardian address responsible for submitting Merkle roots after triggers
+    address public guardian;
+
     // ─── Governance Parameters ───────────────────────────────────────
 
-    /// @notice Merkle-based claim period after trigger (default 30 days)
+    /// @notice Merkle-based claim period after merkle root submission (default 30 days from trigger)
     uint40 public merkleClaimPeriod;
 
-    /// @notice Fallback (balanceOf) claim period after trigger (default 7 days)
+    /// @notice Fallback (balanceOf) claim period after 24h deadline (default 7 days)
     uint40 public fallbackClaimPeriod;
 
     /// @notice Timelock delay for emergency withdrawals (default 2 days)
@@ -56,7 +68,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 payoutBalance; // balance snapshot at trigger time for claims
         bytes32 merkleRoot; // Merkle root of (holder, balance) snapshot at trigger time
         uint256 totalClaimed; // cumulative claimed amount (safety check)
-        bool useMerkleProof; // true = Merkle path, false = balanceOf fallback
+        bool useMerkleProof; // true = Merkle mode, false = waiting/fallback
         address issuedToken; // issued token address for fallback balanceOf claims
         uint256 escrowEthBalance; // ETH from force-removed issuer LP
         uint256 escrowTokenBalance; // tokens from force-removed issuer LP
@@ -88,6 +100,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error OnlyHook();
     error OnlyTriggerOracle();
     error OnlyGovernance();
+    error OnlyGuardian();
     error ZeroAmount();
     error ZeroAddress();
     error AlreadyTriggered();
@@ -106,12 +119,16 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error EmergencyRequestAlreadyExecuted();
     error InsufficientTokenBalance();
     error EscrowNotFullyVested();
-
     error TreasuryNotSet();
     error IssuerCannotClaim();
     error FeeRateTooLow();
     error InvalidDuration();
     error MustWaitOneBlock();
+    error FallbackAlreadyActive();
+    error MerkleAlreadySubmitted();
+    error NotInMerkleMode();
+    error NotInFallbackMode();
+    error MerkleSubmissionWindowActive();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -127,6 +144,11 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
     modifier onlyGovernance() {
         if (msg.sender != GOVERNANCE) revert OnlyGovernance();
+        _;
+    }
+
+    modifier onlyGuardian() {
+        if (msg.sender != guardian) revert OnlyGuardian();
         _;
     }
 
@@ -192,7 +214,6 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         PoolId poolId,
         uint8 triggerType,
         uint256 totalEligibleSupply,
-        bytes32 merkleRoot,
         address issuedToken
     ) external onlyTriggerOracle nonReentrant returns (uint256 totalPayout) {
         PoolData storage pool = _getPool(poolId);
@@ -200,7 +221,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (totalEligibleSupply == 0) revert ZeroEligibleSupply();
 
         // Include escrow ETH in total payout — merge into balance so
-        // claimCompensation's `pool.balance -= amount` doesn't underflow.
+        // claim functions' `pool.balance -= amount` doesn't underflow.
         pool.balance += pool.escrowEthBalance;
         pool.escrowEthBalance = 0;
         totalPayout = pool.balance;
@@ -212,15 +233,43 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         pool.totalEligibleSupply = totalEligibleSupply;
         pool.payoutBalance = totalPayout;
         pool.tokenPayoutBalance = pool.escrowTokenBalance; // snapshot issued token balance
-        pool.baseTokenFeePayoutBalance = pool.baseTokenFeeBalance + pool.escrowBaseTokenBalance; // snapshot base token fees + escrow
-        pool.merkleRoot = merkleRoot;
-        pool.useMerkleProof = (merkleRoot != bytes32(0));
+        pool.baseTokenFeePayoutBalance = pool.baseTokenFeeBalance + pool.escrowBaseTokenBalance;
+        // No merkle root set — guardian has 24h to submit via submitMerkleRoot()
+        pool.useMerkleProof = false;
         pool.issuedToken = issuedToken;
 
         emit PayoutExecuted(poolId, triggerType, totalPayout);
     }
 
-    /// @inheritdoc IInsurancePool
+    /// @notice Guardian submits a Merkle root within 24h of trigger, entering Merkle mode.
+    /// @dev Must be called within MERKLE_SUBMISSION_DEADLINE of trigger. Once fallback mode
+    ///      is active (24h elapsed without submission), this is permanently blocked.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param root Merkle root of (holder, balance) snapshot
+    function submitMerkleRoot(PoolId poolId, bytes32 root) external onlyGuardian {
+        if (root == bytes32(0)) revert MerkleRootNotSet();
+
+        PoolData storage pool = _getPool(poolId);
+        if (!pool.isTriggered) revert NotTriggered();
+        if (pool.useMerkleProof) revert MerkleAlreadySubmitted();
+
+        // Fallback is irreversible: if 24h has passed, merkle submission is permanently blocked
+        if (block.timestamp > pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE) {
+            revert FallbackAlreadyActive();
+        }
+
+        pool.merkleRoot = root;
+        pool.useMerkleProof = true;
+
+        emit MerkleRootSubmitted(poolId, root);
+    }
+
+    /// @notice Claim compensation using Merkle proof (State B only).
+    /// @dev Only available after guardian has submitted a Merkle root.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param holderBalance Holder's token balance at trigger snapshot
+    /// @param merkleProof Merkle proof for (msg.sender, holderBalance) leaf
+    /// @return amount Amount of compensation transferred
     function claimCompensation(PoolId poolId, uint256 holderBalance, bytes32[] calldata merkleProof)
         external
         nonReentrant
@@ -228,60 +277,56 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     {
         PoolData storage pool = _getPool(poolId);
         if (!pool.isTriggered) revert NotTriggered();
+        if (!pool.useMerkleProof) revert NotInMerkleMode();
         if (msg.sender == IBastionHook(BASTION_HOOK).getPoolIssuer(poolId)) revert IssuerCannotClaim();
         if (pool.claimed[msg.sender]) revert AlreadyClaimed();
         if (holderBalance == 0) revert ZeroAmount();
 
-        if (pool.useMerkleProof) {
-            // Merkle mode: 30-day claim period, verify proof
-            if (block.timestamp > pool.triggerTimestamp + merkleClaimPeriod) revert ClaimPeriodExpired();
-            if (pool.merkleRoot == bytes32(0)) revert MerkleRootNotSet();
+        // Merkle mode: claim period from trigger timestamp
+        if (block.timestamp > pool.triggerTimestamp + merkleClaimPeriod) revert ClaimPeriodExpired();
+        if (pool.merkleRoot == bytes32(0)) revert MerkleRootNotSet();
 
-            bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, holderBalance))));
-            if (!MerkleProof.verify(merkleProof, pool.merkleRoot, leaf)) revert InvalidMerkleProof();
-        } else {
-            // Fallback mode: 7-day claim period, verify balanceOf
-            if (block.timestamp > pool.triggerTimestamp + fallbackClaimPeriod) revert ClaimPeriodExpired();
-            // Flash-loan protection: must wait at least one block after trigger
-            if (block.number <= pool.triggerBlockNumber) revert MustWaitOneBlock();
-            if (ERC20(pool.issuedToken).balanceOf(msg.sender) < holderBalance) {
-                revert InsufficientTokenBalance();
-            }
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, holderBalance))));
+        if (!MerkleProof.verify(merkleProof, pool.merkleRoot, leaf)) revert InvalidMerkleProof();
+
+        amount = _executeClaimTransfers(pool, poolId, holderBalance);
+    }
+
+    /// @notice Claim compensation using balanceOf fallback (State C only).
+    /// @dev Only available after 24h deadline has passed without Merkle root submission.
+    /// @param poolId Uniswap V4 pool identifier
+    /// @param holderBalance Holder's token balance to claim with
+    /// @return amount Amount of compensation transferred
+    function claimCompensationFallback(PoolId poolId, uint256 holderBalance)
+        external
+        nonReentrant
+        returns (uint256 amount)
+    {
+        PoolData storage pool = _getPool(poolId);
+        if (!pool.isTriggered) revert NotTriggered();
+        if (pool.useMerkleProof) revert NotInFallbackMode();
+        if (msg.sender == IBastionHook(BASTION_HOOK).getPoolIssuer(poolId)) revert IssuerCannotClaim();
+        if (pool.claimed[msg.sender]) revert AlreadyClaimed();
+        if (holderBalance == 0) revert ZeroAmount();
+
+        // Must wait for merkle submission deadline to pass (24h)
+        if (block.timestamp <= pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE) {
+            revert MerkleSubmissionWindowActive();
         }
 
-        amount = _calculateCompensation(pool, holderBalance);
-        uint256 tokenShare = _calculateTokenCompensation(pool, holderBalance);
-        uint256 baseTokenShare = _calculateBaseTokenCompensation(pool, holderBalance);
-        if (amount == 0 && tokenShare == 0 && baseTokenShare == 0) revert ZeroAmount();
-
-        // Safety check: totalClaimed must not exceed pool balance
-        if (pool.totalClaimed + amount > pool.payoutBalance) revert ExceedsPoolBalance();
-
-        // CEI: mark claimed before transfer
-        pool.claimed[msg.sender] = true;
-        pool.totalClaimed += amount;
-        pool.balance -= amount;
-
-        // Transfer ETH
-        if (amount > 0) {
-            (bool success,) = msg.sender.call{value: amount}("");
-            if (!success) revert TransferFailed();
+        // Fallback claim period: 7 days after the 24h deadline
+        if (block.timestamp > pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE + fallbackClaimPeriod) {
+            revert ClaimPeriodExpired();
         }
 
-        // Transfer issued tokens from escrow funds
-        if (tokenShare > 0 && pool.escrowToken != address(0)) {
-            IERC20Minimal(pool.escrowToken).transfer(msg.sender, tokenShare);
+        // Flash-loan protection: must wait at least one block after trigger
+        if (block.number <= pool.triggerBlockNumber) revert MustWaitOneBlock();
+
+        if (ERC20(pool.issuedToken).balanceOf(msg.sender) < holderBalance) {
+            revert InsufficientTokenBalance();
         }
 
-        // Transfer ERC-20 base token fees + escrow base tokens
-        if (baseTokenShare > 0) {
-            address baseToken = pool.baseTokenFeeToken != address(0) ? pool.baseTokenFeeToken : pool.escrowBaseToken;
-            if (baseToken != address(0)) {
-                IERC20Minimal(baseToken).transfer(msg.sender, baseTokenShare);
-            }
-        }
-
-        emit CompensationClaimed(poolId, msg.sender, amount);
+        amount = _executeClaimTransfers(pool, poolId, holderBalance);
     }
 
     /// @inheritdoc IInsurancePool
@@ -364,6 +409,19 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         return _getPool(poolId).claimed[holder];
     }
 
+    /// @notice Check if a pool is in fallback mode (24h elapsed, no merkle root)
+    function isFallbackMode(PoolId poolId) external view returns (bool) {
+        PoolData storage pool = _getPool(poolId);
+        return pool.isTriggered && !pool.useMerkleProof
+            && block.timestamp > pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE;
+    }
+
+    /// @notice Check if a pool is in merkle mode
+    function isMerkleMode(PoolId poolId) external view returns (bool) {
+        PoolData storage pool = _getPool(poolId);
+        return pool.isTriggered && pool.useMerkleProof;
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  GOVERNANCE PARAMETER SETTERS
     // ═══════════════════════════════════════════════════════════════════
@@ -374,6 +432,14 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         address oldGov = GOVERNANCE;
         GOVERNANCE = newGovernance;
         emit GovernanceTransferred(oldGov, newGovernance);
+    }
+
+    /// @notice Set the guardian address responsible for Merkle root submission.
+    function setGuardian(address newGuardian) external onlyGovernance {
+        if (newGuardian == address(0)) revert ZeroAddress();
+        address old = guardian;
+        guardian = newGuardian;
+        emit GuardianSet(old, newGuardian);
     }
 
     /// @notice Set the Merkle-based claim period (14–90 days).
@@ -403,7 +469,6 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         issuerRewardBps = newBps;
         emit IssuerRewardBpsUpdated(newBps);
     }
-
 
     /// @inheritdoc IInsurancePool
     function setTreasury(address treasury_) external onlyGovernance {
@@ -458,10 +523,10 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
             totalTreasuryAmount += treasuryToken;
 
             if (issuerToken > 0) {
-                IERC20Minimal(pool.baseTokenFeeToken).transfer(issuer, issuerToken);
+                SafeTransferLib.safeTransfer(ERC20(pool.baseTokenFeeToken), issuer, issuerToken);
             }
             if (treasuryToken > 0) {
-                IERC20Minimal(pool.baseTokenFeeToken).transfer(treasury, treasuryToken);
+                SafeTransferLib.safeTransfer(ERC20(pool.baseTokenFeeToken), treasury, treasuryToken);
             }
         }
 
@@ -472,6 +537,46 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
     function _getPool(PoolId poolId) internal view returns (PoolData storage) {
         return _pools[PoolId.unwrap(poolId)];
+    }
+
+    /// @dev Shared claim execution logic for both Merkle and Fallback modes.
+    function _executeClaimTransfers(PoolData storage pool, PoolId poolId, uint256 holderBalance)
+        internal
+        returns (uint256 amount)
+    {
+        amount = _calculateCompensation(pool, holderBalance);
+        uint256 tokenShare = _calculateTokenCompensation(pool, holderBalance);
+        uint256 baseTokenShare = _calculateBaseTokenCompensation(pool, holderBalance);
+        if (amount == 0 && tokenShare == 0 && baseTokenShare == 0) revert ZeroAmount();
+
+        // Safety check: totalClaimed must not exceed pool balance
+        if (pool.totalClaimed + amount > pool.payoutBalance) revert ExceedsPoolBalance();
+
+        // CEI: mark claimed before transfer
+        pool.claimed[msg.sender] = true;
+        pool.totalClaimed += amount;
+        pool.balance -= amount;
+
+        // Transfer ETH
+        if (amount > 0) {
+            (bool success,) = msg.sender.call{value: amount}("");
+            if (!success) revert TransferFailed();
+        }
+
+        // Transfer issued tokens from escrow funds
+        if (tokenShare > 0 && pool.escrowToken != address(0)) {
+            SafeTransferLib.safeTransfer(ERC20(pool.escrowToken), msg.sender, tokenShare);
+        }
+
+        // Transfer ERC-20 base token fees + escrow base tokens
+        if (baseTokenShare > 0) {
+            address baseToken = pool.baseTokenFeeToken != address(0) ? pool.baseTokenFeeToken : pool.escrowBaseToken;
+            if (baseToken != address(0)) {
+                SafeTransferLib.safeTransfer(ERC20(baseToken), msg.sender, baseTokenShare);
+            }
+        }
+
+        emit CompensationClaimed(poolId, msg.sender, amount);
     }
 
     function _calculateCompensation(PoolData storage pool, uint256 holderBalance)

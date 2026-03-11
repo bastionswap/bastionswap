@@ -204,10 +204,10 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
             }
         }
 
-        // Propagate to InsurancePool (zero merkle root → balanceOf fallback mode)
+        // Propagate to InsurancePool (enters 24h waiting state for guardian Merkle root submission)
         if (totalEligibleSupply > 0) {
             try IInsurancePool(INSURANCE_POOL).executePayout(
-                poolId, uint8(triggerType), totalEligibleSupply, bytes32(0), _poolIssuedTokens[key]
+                poolId, uint8(triggerType), totalEligibleSupply, _poolIssuedTokens[key]
             ) {} catch {
                 emit ExternalCallFailed("InsurancePool.executePayout", poolId);
             }

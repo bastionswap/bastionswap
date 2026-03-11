@@ -17,6 +17,7 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 import {IBastionRouter} from "../interfaces/IBastionRouter.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 
 /// @title BastionPositionRouter
 /// @notice Pool creation and LP management router for Uniswap V4 pools with BastionHook.
@@ -759,7 +760,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
                 poolManager.settle{value: amountToSend}();
             } else {
                 poolManager.sync(currency);
-                IERC20Minimal(Currency.unwrap(currency)).transferFrom(
+                SafeTransferLib.safeTransferFrom(ERC20(Currency.unwrap(currency)),
                     sender, address(poolManager), amountToSend
                 );
                 poolManager.settle();
@@ -807,7 +808,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
                 poolManager.settle{value: amountToSend}();
             } else {
                 poolManager.sync(currency);
-                IERC20Minimal(Currency.unwrap(currency)).transferFrom(
+                SafeTransferLib.safeTransferFrom(ERC20(Currency.unwrap(currency)),
                     address(this), address(poolManager), amountToSend
                 );
                 poolManager.settle();
@@ -857,7 +858,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
                 uint256 received = balAfter - balBefore;
                 if (received < 1) revert FeeOnTransferNotSupported();
                 // Return the 1 wei back to sender
-                IERC20Minimal(token).transfer(msg.sender, received);
+                SafeTransferLib.safeTransfer(ERC20(token), msg.sender, received);
             }
         }
     }

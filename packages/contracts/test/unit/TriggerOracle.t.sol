@@ -35,7 +35,7 @@ contract MockInsurancePool {
     uint256 public lastTotalSupply;
     bool public payoutCalled;
 
-    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, bytes32, address)
+    function executePayout(PoolId poolId, uint8 triggerType, uint256 totalEligibleSupply, address)
         external
         returns (uint256)
     {
@@ -48,7 +48,7 @@ contract MockInsurancePool {
 }
 
 contract RevertingInsurancePool {
-    function executePayout(PoolId, uint8, uint256, bytes32, address) external pure returns (uint256) {
+    function executePayout(PoolId, uint8, uint256, address) external pure returns (uint256) {
         revert("insurance pool revert");
     }
 }

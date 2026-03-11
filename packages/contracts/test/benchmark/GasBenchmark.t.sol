@@ -75,6 +75,10 @@ contract GasBenchmarkTest is Test, Deployers {
         insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr, governance);
 
+        // Set guardian for InsurancePool Merkle root submission
+        vm.prank(governance);
+        insurancePool.setGuardian(guardian);
+
         bytes memory creationCode = type(BastionHook).creationCode;
         bytes memory constructorArgs = abi.encode(
             address(manager), address(escrowVault), address(insurancePool),
@@ -293,16 +297,15 @@ contract GasBenchmarkTest is Test, Deployers {
 
         // Trigger payout (fallback mode)
         vm.prank(address(triggerOracle));
-        insurancePool.executePayout(pid, 1, 1000 ether, bytes32(0), address(claimToken));
+        insurancePool.executePayout(pid, 1, 1000 ether, address(claimToken));
 
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
-
-        bytes32[] memory proof = new bytes32[](0);
 
         uint256 gasBefore = gasleft();
         vm.prank(holder);
-        insurancePool.claimCompensation(pid, 100 ether, proof);
+        insurancePool.claimCompensationFallback(pid, 100 ether);
         uint256 gasUsed = gasBefore - gasleft();
         console.log("claimCompensation (fallback mode):", gasUsed);
     }
@@ -320,7 +323,11 @@ contract GasBenchmarkTest is Test, Deployers {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(holder, holderBalance))));
 
         vm.prank(address(triggerOracle));
-        insurancePool.executePayout(pid, 1, 1000 ether, leaf, address(0));
+        insurancePool.executePayout(pid, 1, 1000 ether, address(0));
+
+        // Guardian submits merkle root
+        vm.prank(guardian);
+        insurancePool.submitMerkleRoot(pid, leaf);
 
         bytes32[] memory proof = new bytes32[](0);
 

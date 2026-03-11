@@ -18,6 +18,7 @@ import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
 import {InsurancePool} from "../core/InsurancePool.sol";
 import {ITriggerOracle} from "../interfaces/ITriggerOracle.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
@@ -596,7 +597,7 @@ contract BastionHook is BaseTestHooks {
         if (token != address(0)) {
             tokenAmount = ERC20(token).balanceOf(address(this));
             if (tokenAmount > 0) {
-                IERC20Minimal(token).transfer(address(insurancePool), tokenAmount);
+                SafeTransferLib.safeTransfer(ERC20(token), address(insurancePool), tokenAmount);
             }
         }
 
@@ -611,7 +612,7 @@ contract BastionHook is BaseTestHooks {
         if (baseToken != address(0)) {
             baseTokenAmount = ERC20(baseToken).balanceOf(address(this));
             if (baseTokenAmount > 0) {
-                IERC20Minimal(baseToken).transfer(address(insurancePool), baseTokenAmount);
+                SafeTransferLib.safeTransfer(ERC20(baseToken), address(insurancePool), baseTokenAmount);
             }
         }
 
@@ -1016,7 +1017,7 @@ contract BastionHook is BaseTestHooks {
             insurancePool.depositFee{value: feeAmount}(poolId);
         } else {
             // ERC-20 base token (USDC, WETH, etc.)
-            IERC20Minimal(baseToken).transfer(address(insurancePool), feeAmount);
+            SafeTransferLib.safeTransfer(ERC20(baseToken), address(insurancePool), feeAmount);
             insurancePool.depositFeeToken(poolId, baseToken, feeAmount);
         }
 

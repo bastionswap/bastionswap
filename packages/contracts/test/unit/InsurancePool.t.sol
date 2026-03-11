@@ -18,6 +18,7 @@ contract InsurancePoolTest is Test {
     address public holder2;
     address public holder3;
     address public issuer;
+    address public guardianAddr;
 
     PoolId public defaultPoolId;
 
@@ -33,12 +34,17 @@ contract InsurancePoolTest is Test {
         holder2 = makeAddr("holder2");
         holder3 = makeAddr("holder3");
         issuer = makeAddr("issuer");
+        guardianAddr = makeAddr("guardian");
 
         pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
 
         // Set default issuer for pools
         mockHook.setIssuer(defaultPoolId, issuer);
+
+        // Set guardian for Merkle root submission
+        vm.prank(governance);
+        pool.setGuardian(guardianAddr);
 
         // Fund the hook for deposits
         vm.deal(hook, 100 ether);
@@ -127,7 +133,20 @@ contract InsurancePoolTest is Test {
 
     function _triggerPayoutWithRoot(uint256 totalSupply, bytes32 merkleRoot) internal {
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, totalSupply, merkleRoot, address(0));
+        pool.executePayout(defaultPoolId, 1, totalSupply, address(0));
+
+        vm.prank(guardianAddr);
+        pool.submitMerkleRoot(defaultPoolId, merkleRoot);
+    }
+
+    function _submitMerkleRoot(bytes32 root) internal {
+        vm.prank(guardianAddr);
+        pool.submitMerkleRoot(defaultPoolId, root);
+    }
+
+    function _submitMerkleRoot(InsurancePool targetPool, bytes32 root) internal {
+        vm.prank(guardianAddr);
+        targetPool.submitMerkleRoot(defaultPoolId, root);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -194,7 +213,7 @@ contract InsurancePoolTest is Test {
 
         _setupDefaultTree();
         vm.prank(oracle);
-        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot, address(0));
+        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
 
         assertEq(totalPayout, DEPOSIT_AMOUNT);
 
@@ -212,14 +231,14 @@ contract InsurancePoolTest is Test {
         emit IInsurancePool.PayoutExecuted(defaultPoolId, 1, DEPOSIT_AMOUNT);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
     }
 
     function test_executePayout_revertsNotOracle() public {
         _deposit(DEPOSIT_AMOUNT);
 
         vm.expectRevert(InsurancePool.OnlyTriggerOracle.selector);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
     }
 
     function test_executePayout_revertsAlreadyTriggered() public {
@@ -228,7 +247,7 @@ contract InsurancePoolTest is Test {
 
         vm.prank(oracle);
         vm.expectRevert(InsurancePool.AlreadyTriggered.selector);
-        pool.executePayout(defaultPoolId, 2, TOTAL_SUPPLY, bytes32(0), address(0));
+        pool.executePayout(defaultPoolId, 2, TOTAL_SUPPLY, address(0));
     }
 
     function test_executePayout_revertsZeroEligibleSupply() public {
@@ -236,14 +255,14 @@ contract InsurancePoolTest is Test {
 
         vm.prank(oracle);
         vm.expectRevert(InsurancePool.ZeroEligibleSupply.selector);
-        pool.executePayout(defaultPoolId, 1, 0, bytes32(0), address(0));
+        pool.executePayout(defaultPoolId, 1, 0, address(0));
     }
 
     function test_executePayout_emptyPool() public {
         // Triggering on empty pool is allowed but payout is 0
         _setupDefaultTree();
         vm.prank(oracle);
-        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, _defaultRoot, address(0));
+        uint256 totalPayout = pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
         assertEq(totalPayout, 0);
 
         IInsurancePool.PoolStatus memory status = pool.getPoolStatus(defaultPoolId);
@@ -265,7 +284,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         uint256 claimed = pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -285,7 +305,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         vm.expectEmit(true, true, false, true);
         emit IInsurancePool.CompensationClaimed(defaultPoolId, holder1, expectedAmount);
@@ -306,7 +327,8 @@ contract InsurancePoolTest is Test {
             _buildTree3(holder1, balance1, holder2, balance2, holder3, balance3);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         uint256 claim1 = pool.claimCompensation(defaultPoolId, balance1, p1);
@@ -337,7 +359,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, totalSupply - holderBalance);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, totalSupply, root, address(0));
+        pool.executePayout(defaultPoolId, 1, totalSupply, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         uint256 claimed = pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -364,7 +387,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -382,7 +406,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // Warp past claim period (30 days)
         vm.warp(block.timestamp + 30 days + 1);
@@ -400,7 +425,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // Warp to exactly the deadline (should still work)
         vm.warp(block.timestamp + 30 days);
@@ -418,7 +444,8 @@ contract InsurancePoolTest is Test {
         (bytes32 root,,) = _buildTree2(holder1, 100_000 ether, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(holder1);
@@ -433,7 +460,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // Claim should revert with ZeroAmount because compensation = 0
         vm.prank(holder1);
@@ -449,7 +477,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         assertFalse(pool.hasClaimed(defaultPoolId, holder1));
 
@@ -474,7 +503,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         uint256 claimed = pool.claimCompensation(defaultPoolId, balance1, proof1);
@@ -492,7 +522,8 @@ contract InsurancePoolTest is Test {
         (bytes32 root,,) = _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // Use a bogus proof
         bytes32[] memory badProof = new bytes32[](1);
@@ -513,7 +544,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, realBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // Claim with wrong balance + correct proof for real balance => proof check fails
         vm.prank(holder1);
@@ -531,7 +563,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // holder3 (not in tree) tries to use holder2's proof
         vm.prank(holder3);
@@ -547,7 +580,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         pool.claimCompensation(defaultPoolId, holderBalance, proof1);
@@ -574,7 +608,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // Both can claim their share (may be 0 due to rounding)
         vm.prank(holder1);
@@ -827,7 +862,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         pool.claimCompensation(defaultPoolId, balance1, proof1); // 50%
@@ -873,7 +909,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, balance1, holder2, balance2);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, root, address(0));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
 
         // Claim from pool 1 gets pool 1's funds
         vm.prank(holder1);
@@ -898,15 +935,15 @@ contract InsurancePoolTest is Test {
 
         // Trigger payout without merkle root (fallback mode)
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(mockToken));
 
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
-        // Claim using balanceOf
-        bytes32[] memory emptyProof = new bytes32[](0);
+        // Claim using balanceOf fallback
         vm.prank(holder1);
-        uint256 claimed = pool.claimCompensation(defaultPoolId, 100_000 ether, emptyProof);
+        uint256 claimed = pool.claimCompensationFallback(defaultPoolId, 100_000 ether);
 
         assertEq(claimed, 1 ether); // 10% of 10 ether
     }
@@ -918,15 +955,14 @@ contract InsurancePoolTest is Test {
         mockToken.mint(holder1, 100_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(mockToken));
 
-        // Warp past 7-day fallback claim period
-        vm.warp(block.timestamp + 7 days + 1);
+        // Warp past 24h deadline + 7-day fallback claim period
+        vm.warp(block.timestamp + 24 hours + 7 days + 1);
 
-        bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(holder1);
         vm.expectRevert(InsurancePool.ClaimPeriodExpired.selector);
-        pool.claimCompensation(defaultPoolId, 100_000 ether, emptyProof);
+        pool.claimCompensationFallback(defaultPoolId, 100_000 ether);
     }
 
     function test_fallbackClaim_insufficientBalance() public {
@@ -936,15 +972,15 @@ contract InsurancePoolTest is Test {
         mockToken.mint(holder1, 50_000 ether); // less than claimed
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(mockToken));
 
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
-        bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(holder1);
         vm.expectRevert(InsurancePool.InsufficientTokenBalance.selector);
-        pool.claimCompensation(defaultPoolId, 100_000 ether, emptyProof);
+        pool.claimCompensationFallback(defaultPoolId, 100_000 ether);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -993,7 +1029,7 @@ contract InsurancePoolTest is Test {
 
         // Trigger the pool
         vm.prank(oracle);
-        treasuryPool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(0));
+        treasuryPool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
 
         mockEscrow.setFullyVested(true);
 
@@ -1073,7 +1109,8 @@ contract InsurancePoolTest is Test {
         // Use total supply excluding issuer for fair distribution
         uint256 eligibleSupply = holderABalance; // only non-issuer holders
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, eligibleSupply, root, address(0));
+        pool.executePayout(defaultPoolId, 1, eligibleSupply, address(0));
+        _submitMerkleRoot(root);
 
         // Issuer tries to claim → revert
         vm.prank(issuer);
@@ -1088,12 +1125,15 @@ contract InsurancePoolTest is Test {
         mockToken.mint(issuer, 400_000 ether);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(mockToken));
 
-        bytes32[] memory emptyProof = new bytes32[](0);
+        // Advance past 24h merkle submission deadline
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.roll(block.number + 1);
+
         vm.prank(issuer);
         vm.expectRevert(InsurancePool.IssuerCannotClaim.selector);
-        pool.claimCompensation(defaultPoolId, 400_000 ether, emptyProof);
+        pool.claimCompensationFallback(defaultPoolId, 400_000 ether);
     }
 
     function test_CompensationDistribution_ExcludesIssuer() public {
@@ -1109,7 +1149,8 @@ contract InsurancePoolTest is Test {
             _buildTree2(holder1, holderABalance, holder2, holderBBalance);
 
         vm.prank(oracle);
-        pool.executePayout(defaultPoolId, 1, eligibleSupply, root, address(0));
+        pool.executePayout(defaultPoolId, 1, eligibleSupply, address(0));
+        _submitMerkleRoot(root);
 
         vm.prank(holder1);
         uint256 claimA = pool.claimCompensation(defaultPoolId, holderABalance, proofA);
@@ -1180,7 +1221,7 @@ contract InsurancePoolTest is Test {
 
         // Trigger the pool
         vm.prank(oracle);
-        treasuryPool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(0));
+        treasuryPool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
 
         mockEscrow.setFullyVested(true);
 
@@ -1217,6 +1258,128 @@ contract InsurancePoolTest is Test {
 
         vm.prank(governance);
         treasuryPool.claimTreasuryFunds(defaultPoolId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  CLAIM MODE STATE MACHINE TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @dev State C is irreversible: once fallback mode activates (24h elapsed without merkle root),
+    ///      guardian can never submit a merkle root for this pool.
+    function test_FallbackMode_MerkleRootSubmission_Reverts() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+
+        // Warp past 24h deadline → State C (Fallback mode)
+        vm.warp(block.timestamp + 24 hours + 1);
+
+        // Guardian tries to submit merkle root → reverts
+        bytes32 root = keccak256("fake_root");
+        vm.prank(guardianAddr);
+        vm.expectRevert(InsurancePool.FallbackAlreadyActive.selector);
+        pool.submitMerkleRoot(defaultPoolId, root);
+    }
+
+    /// @dev In Fallback mode (State C), Merkle-based claimCompensation is blocked.
+    function test_FallbackMode_MerkleClaimBlocked() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        MockToken mockToken = new MockToken();
+        mockToken.mint(holder1, 100_000 ether);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(mockToken));
+
+        // Warp past 24h deadline → State C
+        vm.warp(block.timestamp + 24 hours + 1);
+
+        // Merkle claim should revert with NotInMerkleMode
+        bytes32[] memory proof = new bytes32[](0);
+        vm.prank(holder1);
+        vm.expectRevert(InsurancePool.NotInMerkleMode.selector);
+        pool.claimCompensation(defaultPoolId, 100_000 ether, proof);
+    }
+
+    /// @dev In Merkle mode (State B), fallback claimCompensationFallback is blocked.
+    function test_MerkleMode_FallbackClaimBlocked() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        uint256 holderBalance = 100_000 ether;
+        (bytes32 root, ,) = _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
+
+        // Warp past 24h to ensure time isn't the blocker
+        vm.warp(block.timestamp + 24 hours + 1);
+
+        // Fallback claim should revert with NotInFallbackMode
+        vm.prank(holder1);
+        vm.expectRevert(InsurancePool.NotInFallbackMode.selector);
+        pool.claimCompensationFallback(defaultPoolId, holderBalance);
+    }
+
+    /// @dev Guardian cannot submit a second merkle root (State B is irreversible).
+    function test_MerkleMode_DoubleSubmit_Reverts() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        uint256 holderBalance = 100_000 ether;
+        (bytes32 root, ,) = _buildTree2(holder1, holderBalance, holder2, 900_000 ether);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+        _submitMerkleRoot(root);
+
+        // Second submission → reverts
+        bytes32 newRoot = keccak256("different_root");
+        vm.prank(guardianAddr);
+        vm.expectRevert(InsurancePool.MerkleAlreadySubmitted.selector);
+        pool.submitMerkleRoot(defaultPoolId, newRoot);
+    }
+
+    /// @dev During State A (triggered, 24h not elapsed, no merkle root), both claim paths blocked.
+    function test_BeforeTimeout_BothClaimsBlocked() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        MockToken mockToken = new MockToken();
+        mockToken.mint(holder1, 100_000 ether);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(mockToken));
+
+        // We're in State A: triggered, within 24h, no merkle root
+
+        // Merkle claim blocked (no merkle root submitted)
+        bytes32[] memory proof = new bytes32[](0);
+        vm.prank(holder1);
+        vm.expectRevert(InsurancePool.NotInMerkleMode.selector);
+        pool.claimCompensation(defaultPoolId, 100_000 ether, proof);
+
+        // Fallback claim blocked (24h hasn't elapsed)
+        vm.prank(holder1);
+        vm.expectRevert(InsurancePool.MerkleSubmissionWindowActive.selector);
+        pool.claimCompensationFallback(defaultPoolId, 100_000 ether);
+    }
+
+    /// @dev Fallback mode is permanent: even after the fallback claim period expires,
+    ///      guardian still cannot submit a merkle root.
+    function test_FallbackMode_Irreversible() public {
+        _deposit(DEPOSIT_AMOUNT);
+
+        vm.prank(oracle);
+        pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, address(0));
+
+        // Warp past 24h + fallback claim period (7 days)
+        vm.warp(block.timestamp + 24 hours + 7 days + 1);
+
+        // Guardian still cannot submit merkle root
+        bytes32 root = keccak256("late_root");
+        vm.prank(guardianAddr);
+        vm.expectRevert(InsurancePool.FallbackAlreadyActive.selector);
+        pool.submitMerkleRoot(defaultPoolId, root);
     }
 }
 

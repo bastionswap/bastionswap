@@ -1029,15 +1029,15 @@ contract E2E_Comprehensive is Test {
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(poolIdA);
         assertTrue(ps.isTriggered, "insurance triggered");
 
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
-        // 4. Holder claims
+        // 4. Holder claims using fallback mode
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
         vm.prank(holder);
-        bytes32[] memory proof = new bytes32[](0);
-        insurancePool.claimCompensation(poolIdA, holderBal, proof);
+        insurancePool.claimCompensationFallback(poolIdA, holderBal);
         assertGt(holder.balance, holderEthBefore, "holder compensated");
 
         // 5. Issuer cannot claim
@@ -1045,13 +1045,13 @@ contract E2E_Comprehensive is Test {
         if (issuerBal > 0) {
             vm.prank(issuerA);
             vm.expectRevert();
-            insurancePool.claimCompensation(poolIdA, issuerBal, proof);
+            insurancePool.claimCompensationFallback(poolIdA, issuerBal);
         }
 
         // 6. Duplicate claim -> revert
         vm.prank(holder);
         vm.expectRevert();
-        insurancePool.claimCompensation(poolIdA, holderBal, proof);
+        insurancePool.claimCompensationFallback(poolIdA, holderBal);
     }
 
     // Scenario 20: After trigger — all issuer actions blocked
@@ -1127,15 +1127,15 @@ contract E2E_Comprehensive is Test {
         IInsurancePool.PoolStatus memory status = insurancePool.getPoolStatus(poolIdA);
         assertTrue(status.isTriggered, "triggered");
 
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
         // Holder claims via fallback (no merkle root)
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
         vm.prank(holder);
-        bytes32[] memory proof = new bytes32[](0);
-        insurancePool.claimCompensation(poolIdA, holderBal, proof);
+        insurancePool.claimCompensationFallback(poolIdA, holderBal);
         assertGt(holder.balance, holderEthBefore, "compensated");
 
         // After 7-day fallback period -> claims fail
@@ -1145,7 +1145,7 @@ contract E2E_Comprehensive is Test {
         deal(address(tokenA), lateClaimer, 1000e18);
         vm.prank(lateClaimer);
         vm.expectRevert();
-        insurancePool.claimCompensation(poolIdA, 1000e18, proof);
+        insurancePool.claimCompensationFallback(poolIdA, 1000e18);
     }
 
     // Scenario 22: Compensation distribution excludes issuer
@@ -1164,14 +1164,14 @@ contract E2E_Comprehensive is Test {
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.ISSUER_DUMP, totalSupply);
 
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
         // Holder claims -> succeeds
         uint256 holderEthBefore = holder.balance;
         vm.prank(holder);
-        bytes32[] memory proof = new bytes32[](0);
-        insurancePool.claimCompensation(poolIdA, holderBalance, proof);
+        insurancePool.claimCompensationFallback(poolIdA, holderBalance);
         assertGt(holder.balance, holderEthBefore, "holder got ETH");
 
         // Issuer claims -> revert
@@ -1179,7 +1179,7 @@ contract E2E_Comprehensive is Test {
         if (issuerBal > 0) {
             vm.prank(issuerA);
             vm.expectRevert();
-            insurancePool.claimCompensation(poolIdA, issuerBal, proof);
+            insurancePool.claimCompensationFallback(poolIdA, issuerBal);
         }
     }
 

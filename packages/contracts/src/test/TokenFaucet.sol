@@ -2,6 +2,7 @@
 pragma solidity =0.8.26;
 
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 
 /// @title TokenFaucet — Dispenses test tokens for demo purposes
 /// @notice Rate-limited: 1 claim per address per 24 hours
@@ -29,7 +30,7 @@ contract TokenFaucet {
         );
 
         lastClaim[msg.sender] = block.timestamp;
-        token.transfer(msg.sender, CLAIM_AMOUNT);
+        SafeTransferLib.safeTransfer(token, msg.sender, CLAIM_AMOUNT);
 
         emit Claimed(msg.sender, CLAIM_AMOUNT);
     }

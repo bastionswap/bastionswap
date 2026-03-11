@@ -489,27 +489,26 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario3_claims() internal {
-        // Advance one block for flash-loan protection
+        // Advance past 24h merkle submission deadline + one block for flash-loan protection
+        vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
         uint256 t1Bal = issuedToken.balanceOf(trader1);
         uint256 t2Bal = issuedToken.balanceOf(trader2);
 
-        bytes32[] memory emptyProof = new bytes32[](0);
-
-        // Trader1 claims
+        // Trader1 claims using fallback mode
         uint256 baseBefore1 = baseToken.balanceOf(trader1);
         vm.prank(trader1);
-        insurancePool.claimCompensation(_poolId, t1Bal, emptyProof);
+        insurancePool.claimCompensationFallback(_poolId, t1Bal);
 
         uint256 baseReceived1 = baseToken.balanceOf(trader1) - baseBefore1;
         assertGt(baseReceived1, 0, "trader1 should receive base token compensation");
         console.log("  Trader1 base token claimed:", baseReceived1);
 
-        // Trader2 claims
+        // Trader2 claims using fallback mode
         uint256 baseBefore2 = baseToken.balanceOf(trader2);
         vm.prank(trader2);
-        insurancePool.claimCompensation(_poolId, t2Bal, emptyProof);
+        insurancePool.claimCompensationFallback(_poolId, t2Bal);
 
         uint256 baseReceived2 = baseToken.balanceOf(trader2) - baseBefore2;
         assertGt(baseReceived2, 0, "trader2 should receive base token compensation");
@@ -521,16 +520,15 @@ contract E2E_ScenariosTest is Test, Deployers {
         // Duplicate claim blocked
         vm.prank(trader1);
         vm.expectRevert(abi.encodeWithSelector(InsurancePool.AlreadyClaimed.selector));
-        insurancePool.claimCompensation(_poolId, t1Bal, emptyProof);
+        insurancePool.claimCompensationFallback(_poolId, t1Bal);
     }
 
     function _scenario3_claimExpiry() internal {
         vm.warp(block.timestamp + 8 days);
 
-        bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(InsurancePool.ClaimPeriodExpired.selector));
-        insurancePool.claimCompensation(_poolId, 1000 ether, emptyProof);
+        insurancePool.claimCompensationFallback(_poolId, 1000 ether);
         console.log("  Claim after 7d fallback window correctly blocked");
     }
 }
