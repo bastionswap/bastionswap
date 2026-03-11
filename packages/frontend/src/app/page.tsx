@@ -225,7 +225,7 @@ export default function HomePage() {
               icon: <BoltIcon className="h-7 w-7 text-amber-600" />,
               step: "04",
               title: "If anything goes wrong",
-              desc: "The protocol detects rug pulls, mass dumps, and commitment breaches automatically on-chain. Issuer LP is seized, combined with the insurance pool, and distributed to holders as compensation. No claims process — it's automatic.",
+              desc: "The protocol detects rug pulls, mass dumps, and commitment breaches automatically on-chain. Issuer LP is seized, combined with the insurance pool, and distributed to holders as compensation. Detection and seizure are automatic — holders claim their share from the dashboard.",
               iconBg: "bg-amber-100",
             },
           ].map(({ icon, step, title, desc, iconBg }) => (
