@@ -382,7 +382,18 @@ function CreatePoolContent() {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-red-500">No ERC-20 contract found at this address.</p>
+                <div>
+                  <p className="text-sm text-red-500">No ERC-20 contract found at this address.</p>
+                  <Link
+                    href="/create-token"
+                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-bastion-600 hover:text-bastion-700 transition-colors"
+                  >
+                    Deploy a new token instead
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                    </svg>
+                  </Link>
+                </div>
               )}
             </div>
           )}
@@ -393,6 +404,16 @@ function CreatePoolContent() {
           >
             Continue
           </button>
+          {!isValidToken && (
+            <div className="mt-4 text-center">
+              <p className="text-sm text-gray-400">
+                Don&apos;t have a token yet?{" "}
+                <Link href="/create-token" className="font-medium text-bastion-600 hover:text-bastion-700 transition-colors">
+                  Deploy one here
+                </Link>
+              </p>
+            </div>
+          )}
         </Card>
       )}
 
