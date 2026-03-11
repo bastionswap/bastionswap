@@ -11,11 +11,11 @@ When a token issuer creates a liquidity pool, their LP tokens are automatically 
 
 ## Live Demo (Base Sepolia)
 
-> **[bastionswap-frontend.vercel.app](https://bastionswap-frontend.vercel.app/)** — Try it now on Base Sepolia testnet
+> **[bastionswap.xyz](https://bastionswap.xyz/)** — Try it now on Base Sepolia testnet
 
 | Resource | Link |
 |----------|------|
-| Frontend | [bastionswap-frontend.vercel.app](https://bastionswap-frontend.vercel.app/) |
+| Frontend | [bastionswap.xyz](https://bastionswap.xyz/) |
 | Subgraph Studio | [thegraph.com/studio/subgraph/bastionswap-base-sepolia](https://thegraph.com/studio/subgraph/bastionswap-base-sepolia/) |
 | Subgraph API | [GraphQL Playground](https://api.studio.thegraph.com/query/1724500/bastionswap-base-sepolia/version/latest) |
 | Block Explorer | [BaseScan (Sepolia)](https://sepolia.basescan.org) |

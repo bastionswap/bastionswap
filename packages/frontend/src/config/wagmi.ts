@@ -62,7 +62,7 @@ const phantomWalletCustom = ({
       getUri: (_uri: string) => {
         const dappUrl = typeof window !== "undefined"
           ? window.location.href
-          : "https://bastionswap-frontend.vercel.app";
+          : "https://bastionswap.xyz";
         return `https://phantom.app/ul/browse/${encodeURIComponent(dappUrl)}`;
       },
     },
