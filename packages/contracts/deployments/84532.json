@@ -1,11 +1,11 @@
 {
-  "bastionDeployer": "0xFeCfAbC7B012c421755E60F3Dc5eB14F60Da1500",
-  "bastionHook": "0x61590C0544B562571AAad49e255496a0a0350AC8",
-  "bastionPositionRouter": "0x7Bcf5618c55AadDD2451b93102285267622Bb67A",
-  "bastionSwapRouter": "0xF21Ae872b7C544b83b25b1D639190Dd98C7a8062",
+  "bastionDeployer": "0xB208B467b02D32baab6937988a94f920dA891d7e",
+  "bastionHook": "0x88214539803B55a86f7e924BCE0eECB6B610cac8",
+  "bastionPositionRouter": "0x3Ae0B68e0e36A57d8e416CD4e57d89058d0d1A11",
+  "bastionSwapRouter": "0x8997d846A8bF5E8Ef662aFC620f35aB692dc166C",
   "chainId": 84532,
-  "escrowVault": "0xBE3D91851aAf9F6A2ca8B47567180305996E16Dd",
-  "insurancePool": "0xf908a6c13C80290993A7c2d57023c8531Ecf3406",
-  "reputationEngine": "0x3eC8DeFc934fbD99fC64EFBae4B7e72f24DAF034",
-  "triggerOracle": "0x782b6e95072f88fcc7729F46c5FF19a1Fdad2D3b"
+  "escrowVault": "0x0e7A077Bbc902f179Ae136D3a9810b97eB1aEB3b",
+  "insurancePool": "0x9646d06B5d7F914481214e8870C883a4D2B5f858",
+  "reputationEngine": "0x093D568eCc2620Af3E11Eb2906a5DdC08Defa0d8",
+  "triggerOracle": "0x3909f264a3f92622c05420Fb0af6F219600825B8"
 }

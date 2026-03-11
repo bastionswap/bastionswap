@@ -5,6 +5,7 @@ import {
   CompensationClaimed,
   FeeRateUpdated,
   EscrowFundsReceived,
+  MerkleRootSubmitted,
 } from "../../generated/InsurancePool/InsurancePool";
 import {
   InsurancePool as InsurancePoolEntity,
@@ -85,4 +86,14 @@ export function handleEscrowFundsReceived(event: EscrowFundsReceived): void {
 export function handleFeeRateUpdated(event: FeeRateUpdated): void {
   // FeeRate is global — update all future pools' default
   // For now, this is a global event with no poolId; log only
+}
+
+export function handleMerkleRootSubmitted(event: MerkleRootSubmitted): void {
+  let poolId = event.params.poolId.toHexString();
+  let insurance = InsurancePoolEntity.load(poolId);
+  if (insurance != null) {
+    insurance.merkleRoot = event.params.root;
+    insurance.useMerkleProof = true;
+    insurance.save();
+  }
 }
