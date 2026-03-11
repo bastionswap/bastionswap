@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
 import { useAccount, useChainId, useReadContract } from "wagmi";
 import { useSearchParams } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
@@ -141,6 +141,14 @@ function formatCompact(n: number): string {
 
 
 export default function CreatePoolPage() {
+  return (
+    <Suspense>
+      <CreatePoolContent />
+    </Suspense>
+  );
+}
+
+function CreatePoolContent() {
   const { isConnected, address } = useAccount();
   const chainId = useChainId();
   const contracts = getContracts(chainId);
