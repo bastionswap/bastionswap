@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -14,7 +14,6 @@ const DECIMALS_OPTIONS = [18, 8, 6];
 
 export default function CreateTokenPage() {
   const { isConnected } = useAccount();
-  const chainId = useChainId();
   const { step, error, result, deploy, reset, isActive } = useDeployToken();
 
   const [name, setName] = useState("");
@@ -24,8 +23,7 @@ export default function CreateTokenPage() {
   const [history, setHistory] = useState<DeployTokenResult[]>([]);
   const [copied, setCopied] = useState(false);
 
-  const isTestnet = chainId === 84532 || chainId === 31337;
-  const canSubmit = isConnected && isTestnet && name.trim() && symbol.trim() && supply.trim() && !isActive;
+  const canSubmit = isConnected && name.trim() && symbol.trim() && supply.trim() && !isActive;
 
   async function handleDeploy() {
     await deploy({ name: name.trim(), symbol: symbol.trim().toUpperCase(), decimals, initialSupply: supply.trim() });
@@ -47,9 +45,9 @@ export default function CreateTokenPage() {
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Create Test Token</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Deploy Token</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Deploy a standard ERC-20 token on testnet for pool creation testing.
+          Deploy a standard ERC-20 token and launch it on BastionSwap.
         </p>
       </div>
 
@@ -64,7 +62,7 @@ export default function CreateTokenPage() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. My Test Token"
+                placeholder="e.g. My Token"
                 disabled={isActive}
                 maxLength={32}
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors focus:border-bastion-400 focus:bg-white disabled:opacity-50"
@@ -121,7 +119,7 @@ export default function CreateTokenPage() {
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors focus:border-bastion-400 focus:bg-white disabled:opacity-50"
               />
               <p className="mt-1 text-xs text-gray-400">
-                All tokens will be minted to your wallet. Built-in faucet provides 1,000 tokens per 24h.
+                All tokens will be minted to your wallet.
               </p>
             </div>
 
@@ -136,10 +134,6 @@ export default function CreateTokenPage() {
             {!isConnected ? (
               <div className="flex justify-center">
                 <ConnectButton />
-              </div>
-            ) : !isTestnet ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-700">
-                Token deployment is only available on testnet (Base Sepolia).
               </div>
             ) : (
               <button
