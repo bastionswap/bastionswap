@@ -9,22 +9,23 @@ BastionSwap operates in an adversarial environment where token issuers, traders,
 | Entity | Trust Level | Rationale |
 |---|---|---|
 | Uniswap V4 PoolManager | Fully trusted | Core infrastructure; hook callbacks are authoritative |
-| Deployer | Trusted at deployment | Sets immutable addresses; no ongoing privilege after deployment |
-| Governance | Semi-trusted | Can only adjust fee rate (capped at 2%) and emergency withdraw |
-| Guardian | Semi-trusted | Can only pause/unpause TriggerOracle; no fund access |
-| Token Issuers | **Untrusted** | Primary adversary; escrow + triggers enforce accountability |
-| Traders | **Untrusted** | May attempt to game insurance claims |
-| Off-chain Bots | **Untrusted** | Proof submissions are validated on-chain before acceptance |
+| Deployer | Trusted at deployment | Sets initial addresses; governance transferable post-deployment |
+| Governance | Semi-trusted | Controls protocol-wide params (fee rate, durations, thresholds, whitelist). Changes only affect new pools. Fee range capped at 10–500 BPS. Emergency withdraw has 2-day timelock. |
+| Guardian | Semi-trusted | Can pause TriggerOracle (max 7 days) and submit Merkle roots. No fund access. |
+| Token Issuers | **Untrusted** | Primary adversary; sell limits + LP seizure enforce accountability |
+| Traders | **Untrusted** | May attempt to game insurance claims; Merkle proofs + flash-loan guard mitigate |
 
 ### Security Invariants
 
 These properties must **always** hold:
 
-1. **Escrow funds are safe**: Escrowed tokens can only be released through valid vesting schedules or trigger redistribution
-2. **Triggers are honest**: Only verified on-chain state or validated proofs can fire triggers
+1. **LP removal rights are safe**: Issuer LP can only be removed through valid vesting schedules or trigger-based forced removal
+2. **Triggers are honest**: Only verified on-chain state (cumulative LP removal exceeding threshold) can fire triggers
 3. **Insurance is solvent**: Payout balance is snapshotted at trigger time; total claims cannot exceed the snapshot
-4. **Access control is immutable**: No address can modify cross-contract references post-deployment
-5. **Commitments are monotonically strict**: Issuers can only tighten, never loosen, their commitments
+4. **Cross-contract references are immutable**: No address can modify contract references post-deployment
+5. **Commitments are immutable**: Per-pool parameters set at creation cannot be changed afterward
+6. **Sell limits are enforced**: Issuer swaps exceeding daily/weekly limits revert the entire transaction
+7. **Governance cannot affect existing pools**: Parameter changes only apply to newly created pools
 
 ## Known Attack Vectors & Mitigations
 
@@ -32,48 +33,50 @@ These properties must **always** hold:
 
 **Attack**: Issuer removes all liquidity in a single transaction, crashing the token price.
 
-**Mitigation**:
-- `beforeRemoveLiquidity` hook reports all LP removals to TriggerOracle
-- Single-transaction threshold detection (default: 50% of total LP)
-- Cumulative sliding window detection for slow-rug patterns (default: 80%)
-- On trigger: remaining escrow funds are redistributed to InsurancePool
+**Mitigation (two layers)**:
+- **Layer 1 (revert)**: `beforeRemoveLiquidity` reverts if single-tx removal exceeds threshold (default: >50% of total LP) or exceeds vested amount
+- **Layer 2 (trigger)**: Cumulative LP removals tracked per 24h window. If >80% threshold breached, `executeTrigger(poolId)` becomes callable by anyone (permissionless, immediate). Seized LP + insurance pool redistributed to non-issuer holders
+- Post-trigger: `_isTriggered[poolId]` flag blocks all further issuer sells and LP removal
 
 ### 2. Issuer Token Dump
 
 **Attack**: Issuer sells large amounts of their token to extract value before rug-pull.
 
-**Mitigation**:
-- `afterSwap` hook detects issuer sell transactions
-- 24-hour sliding window tracks cumulative issuer sales
-- Threshold-based trigger (default: 30% of total supply in 24h)
-- `maxSellPercent` commitment limits issuer's daily sell volume
+**Mitigation (hard enforcement via revert)**:
+- `beforeSwap` identifies issuer via hookData (`abi.encode(actualSwapper)` from cooperating routers)
+- `afterSwap` checks BalanceDelta to detect sell direction (negative delta = issuer sends tokens)
+- Epoch-based daily/weekly sliding windows track cumulative issuer sells
+- Daily limit: >3% of initial supply per 24h → **revert entire swap**
+- Weekly limit: >15% of initial supply per 7d → **revert entire swap**
+- Blocks sales via any path including routers and aggregators
+- No trigger fired — the sale simply cannot complete
 
-### 3. Honeypot Token
+**Known limitation**: Issuer can transfer tokens to secondary wallets before selling. Pre-transferred tokens are not detected. Mitigated by LP/supply ratio transparency on dashboard.
+
+### 3. Honeypot Token (Planned — v0.2)
 
 **Attack**: Token contract blocks `transfer()` after launch, trapping buyer funds.
 
-**Mitigation**:
-- Off-chain monitoring bots submit proofs via `submitHoneypotProof()`
-- 1-hour grace period before trigger execution
-- Insurance pool compensates affected holders
+**Current mitigation**: Fee-on-transfer and rebase tokens are rejected at pool creation via transfer amount validation. This catches some but not all honeypot patterns.
 
-### 4. Hidden Tax Token
+**Planned mitigation (v0.2)**: Decentralized watcher network detects transfer() reverts and submits proofs for LP seizure + compensation.
+
+### 4. Hidden Tax Token (Planned — v0.2)
 
 **Attack**: Token implements undisclosed transfer fees (buy/sell tax).
 
-**Mitigation**:
-- Off-chain bots compare expected vs actual swap output
-- `submitHiddenTaxProof()` with deviation threshold (default: >5%)
-- On-chain validation: `actualOutput < expectedOutput` and deviation exceeds threshold
+**Current mitigation**: Fee-on-transfer tokens are detected and rejected at pool creation. Tokens that pass the creation check but later enable fees are not currently detected.
+
+**Planned mitigation (v0.2)**: Decentralized watcher network compares expected vs actual swap output and submits proofs for LP seizure.
 
 ### 5. False Trigger Attack
 
-**Attack**: Malicious actor fabricates a trigger to steal issuer's escrow funds.
+**Attack**: Malicious actor fabricates a trigger to steal issuer's LP.
 
 **Mitigation**:
-- On-chain triggers (RUG_PULL, ISSUER_DUMP) are based on verified blockchain state — cannot be spoofed
-- Off-chain triggers (HONEYPOT, HIDDEN_TAX) require proof validation against on-chain data
-- 1-hour grace period allows detection of false positives
+- `executeTrigger()` is permissionless but only succeeds when on-chain cumulative LP removal tracking confirms threshold is breached
+- `isLPRemovalTriggerable(poolId)` view verifies the condition — cannot be spoofed
+- LP removal amounts are tracked in BastionHook via `_lpCumulativeRemoved` mapping, updated only in `beforeRemoveLiquidity` (which only PoolManager can call)
 - Guardian can pause the system if a vulnerability is discovered
 
 ### 6. Insurance Claim Fraud
@@ -81,59 +84,66 @@ These properties must **always** hold:
 **Attack**: Trader claims more compensation than entitled or claims without holding tokens.
 
 **Mitigation**:
-- Claims are pull-based: holder self-reports their `holderBalance`
-- Pro-rata formula: `payoutBalance × holderBalance / totalEligibleSupply`
+- **Merkle mode**: Guardian submits Merkle root of trigger-time balances within 24h. Holders submit Merkle proofs — cannot inflate balance.
+- **Fallback mode**: If guardian does not respond within 24h, fallback mode activates (irreversible). Claims use `balanceOf` but require token holding at or before trigger block (flash-loan prevention).
 - Each address can only claim once per triggered pool (`claimed` mapping)
-- 30-day claim window limits exposure
+- Issuer address excluded from all compensation claims
+- Merkle mode: 30-day window. Fallback mode: 7-day window.
 
-**Known Limitation**: The current implementation relies on self-reported `holderBalance`. A production deployment should integrate a token balance snapshot mechanism (e.g., ERC20Snapshot or Merkle proof against a block hash) to prevent inflated claims.
+**Known Limitation**: Fallback mode reflects claim-time balances, not trigger-time balances. The 7-day window + trigger-block holding requirement minimize manipulation but do not eliminate it.
 
 ### 7. Commitment Bypass
 
-**Attack**: Issuer attempts to set looser vesting commitments after pool creation.
+**Attack**: Issuer attempts to weaken pool parameters after creation.
 
 **Mitigation**:
-- `setCommitment()` enforces a **strictness ratchet**: new commitment must be strictly tighter than current
-  - `dailyWithdrawLimit` can only decrease (or stay equal)
-  - `lockDuration` can only increase (or stay equal)
-  - `maxSellPercent` can only decrease (or stay equal)
-- At least one field must actually change (prevents no-op calls)
+- Per-pool `PoolCommitment` is **immutable** — set once at pool creation and stored permanently
+- Validated at creation: all thresholds must be equal to or stricter than governance minimums (`CommitmentTooLenient` error)
+- No `setCommitment()` function exists — there is no way to modify commitments after creation
+- Governance parameter changes never affect existing pool commitments
 
 ### 8. Governance Key Compromise
 
 **Attack**: Attacker gains control of governance address.
 
 **Impact** (limited to):
-- Adjusting insurance fee rate (capped at 2% max by `MAX_FEE_RATE`)
-- Emergency withdrawal from InsurancePool
+- Adjusting insurance fee rate (capped within 10–500 BPS range)
+- Modifying base token whitelist, default durations, and threshold defaults
+- Emergency withdrawal from InsurancePool (2-day timelock)
+- Transferring governance to another address
 
 **Mitigation**:
 - Governance address should be a multisig or timelock contract in production
-- Fee rate has a hard cap of 200 BPS (2%) enforced in contract
-- No governance control over escrow funds, trigger thresholds, or hook behavior
+- Fee rate has hard bounds (10–500 BPS) enforced in contract
+- Emergency withdrawal requires 2-day timelock
+- **Changes only affect newly created pools** — existing pool commitments are immutable
+- No governance control over existing pool parameters or escrow states
 
 ### 9. Guardian Key Compromise
 
 **Attack**: Attacker gains control of guardian address.
 
 **Impact** (limited to):
-- Pausing/unpausing TriggerOracle (disabling new trigger detection)
+- Pausing/unpausing TriggerOracle (max 7-day duration)
+- Submitting Merkle roots for triggered pool compensation (could submit incorrect roots)
 
 **Mitigation**:
 - Guardian address should be a multisig in production
-- Pause only affects **new** trigger detection — existing pending triggers remain executable
+- Pause has max duration of 7 days — auto-expires
+- If guardian submits no Merkle root within 24h, fallback mode activates automatically (irreversible) — holders can still claim via balanceOf
 - Guardian cannot modify thresholds, steal funds, or bypass escrow
+- Guardian is set by governance and can be replaced
 
-### 10. Sliding Window Overflow
+### 10. LP Removal Tracking Manipulation
 
-**Attack**: Spamming small LP removals or sales to fill the sliding window array, evading cumulative detection.
+**Attack**: Spamming small LP removals to evade cumulative detection.
 
 **Mitigation**:
-- `MAX_TRACKER_ENTRIES = 50` — oldest entries are pruned when limit reached
-- `_pushRecord()` shifts array left, removing stale entries
-- Window sum only considers entries within `dumpWindowSeconds`
-
-**Known Limitation**: If an attacker submits >50 small removals before a large one, early entries are pruned. The 50-entry cap provides practical protection for typical usage patterns but could theoretically be gamed with sustained high-frequency micro-removals.
+- LP removal tracking uses `_lpCumulativeRemoved` and `_lpRemovalWindowStart` per pool — simple cumulative counter within time window
+- Each removal in `beforeRemoveLiquidity` adds to the cumulative counter
+- Window resets when `_lpRemovalWindowStart` + window duration has elapsed
+- Denominator is `_initialLiquidity` (set at pool creation) — cannot be manipulated
+- Single-tx LP removal limit (default: >50% of total LP) provides first line of defense via revert
 
 ### 11. Reentrancy
 
@@ -156,52 +166,58 @@ These properties must **always** hold:
 
 ### Critical Path
 
-- [ ] **Escrow fund safety**: Verify `createEscrow()` correctly transfers and locks tokens
-- [ ] **Vesting calculation**: Verify `_calculateVestedAmount()` respects lock duration and schedule monotonicity
-- [ ] **Daily withdrawal limit**: Verify per-day tracking cannot be bypassed across day boundaries
-- [ ] **Trigger redistribution**: Verify `triggerRedistribution()` sends correct remaining amount to InsurancePool
-- [ ] **Insurance payout**: Verify `executePayout()` correctly snapshots balance and `claimCompensation()` computes pro-rata correctly
+- [ ] **LP removal rights**: Verify `createEscrow()` correctly records lock-up and vesting parameters
+- [ ] **Vesting calculation**: Verify linear vesting respects lock duration and returns correct vested amount over time
+- [ ] **Sell limit enforcement**: Verify `afterSwap` correctly detects issuer sells via hookData + BalanceDelta and reverts when daily/weekly limits exceeded
+- [ ] **LP removal enforcement**: Verify `beforeRemoveLiquidity` reverts on single-tx threshold and tracks cumulative removals correctly
+- [ ] **Trigger execution**: Verify `executeTrigger()` only succeeds when cumulative LP removal threshold is actually breached
+- [ ] **Insurance payout**: Verify `executePayout()` correctly snapshots balance and both Merkle and fallback claim modes compute pro-rata correctly
 - [ ] **Claim double-spend**: Verify `claimed` mapping prevents duplicate claims
+- [ ] **Issuer exclusion**: Verify issuer address cannot claim compensation
+- [ ] **Fallback irreversibility**: Verify Merkle root cannot be submitted after fallback mode activates
+- [ ] **Flash-loan guard**: Verify trigger-block holding requirement prevents flash-loan claims
 
 ### Access Control
 
 - [ ] **Hook authorization**: Only PoolManager can call hook functions
-- [ ] **EscrowVault authorization**: `createEscrow()` only from BastionHook, `triggerRedistribution()` only from TriggerOracle
+- [ ] **EscrowVault authorization**: `createEscrow()` only from BastionHook, `forceRemoveIssuerLP()` only from TriggerOracle
 - [ ] **InsurancePool authorization**: `depositFee()` only from BastionHook, `executePayout()` only from TriggerOracle
-- [ ] **TriggerOracle authorization**: `reportLPRemoval()` / `reportIssuerSale()` only from BastionHook
+- [ ] **TriggerOracle authorization**: `executeTrigger()` only from BastionHook
 - [ ] **ReputationEngine authorization**: `recordEvent()` only from BastionHook, EscrowVault, or TriggerOracle
-- [ ] **Immutable addresses**: Verify all cross-contract references are immutable (no setter functions)
+- [ ] **Immutable references**: Verify all cross-contract references are immutable (no setter functions)
+- [ ] **Governance transfer**: Verify `transferGovernance()` only callable by current governance
 
 ### Arithmetic Safety
 
 - [ ] **BPS calculations**: Verify no overflow in `(amount * bps) / 10000` calculations
-- [ ] **Vesting schedule validation**: Final step must be exactly 10000 BPS
-- [ ] **Daily limit rounding**: Verify floor division doesn't allow over-withdrawal via repeated small calls
+- [ ] **Linear vesting calculation**: Verify `(elapsed - lockDuration) / vestingDuration` computes correctly at boundaries
+- [ ] **Sell limit epoch tracking**: Verify epoch-based daily/weekly windows cannot be bypassed at epoch boundaries
 - [ ] **Insurance pro-rata rounding**: Verify floor division doesn't allow over-claiming
-- [ ] **Sliding window sum**: Verify no overflow in cumulative amount tracking
+- [ ] **LP cumulative tracking**: Verify no overflow in `_lpCumulativeRemoved` accumulation
 
 ### Edge Cases
 
 - [ ] **Zero-amount escrow**: Should revert
-- [ ] **Empty vesting schedule**: Should revert
 - [ ] **Duplicate escrow for same pool+issuer**: Should revert
-- [ ] **Trigger on already-triggered pool**: Should revert
+- [ ] **Trigger on already-triggered pool**: Should revert (`PoolTriggered` error)
 - [ ] **Claim on non-triggered pool**: Should revert
-- [ ] **Claim after 30-day window**: Should revert
+- [ ] **Claim after window expiry**: Should revert (30d for Merkle, 7d for fallback)
 - [ ] **Release from triggered escrow**: Should revert
-- [ ] **LP removal underflow**: `_totalLiquidity` subtraction should not underflow
-- [ ] **Grace period re-trigger**: Cannot create a new pending trigger while one exists
+- [ ] **LP removal underflow**: Subtraction should not underflow
+- [ ] **Issuer sell after trigger**: Should revert (`PoolTriggered` error)
+- [ ] **Fee-on-transfer token pool creation**: Should revert
+- [ ] **Commitment too lenient**: Should revert if issuer thresholds exceed governance defaults
+- [ ] **Merkle root after fallback**: Should revert (fallback is irreversible)
 
 ### Gas & DoS
 
-- [ ] **Sliding window gas cost**: `_sumWindow()` iterates up to 50 entries — acceptable for on-chain calls
-- [ ] **Vesting schedule iteration**: Up to 10 steps — acceptable
-- [ ] **Array shift in `_pushRecord()`**: Up to 49 iterations — acceptable gas cost
-- [ ] **Hook callbacks**: All hook functions complete within reasonable gas limits for V4 hooks
+- [ ] **Hook callbacks**: All hook functions (beforeAddLiquidity, beforeRemoveLiquidity, beforeSwap, afterSwap) complete within reasonable gas limits for V4 hooks
+- [ ] **executeTrigger gas**: LP seizure + insurance payout in single transaction — verify gas cost is acceptable
+- [ ] **Sell limit check gas**: Epoch tracking + BPS calculation in afterSwap — verify minimal overhead
 
 ### Integration
 
-- [ ] **V4 Hook flag alignment**: Deployed address lower 14 bits must equal `0x0A40` (BEFORE_ADD_LIQUIDITY | BEFORE_REMOVE_LIQUIDITY | AFTER_SWAP)
+- [ ] **V4 Hook flag alignment**: Deployed address lower bits must match (BEFORE_ADD_LIQUIDITY | BEFORE_REMOVE_LIQUIDITY | BEFORE_SWAP | AFTER_SWAP)
 - [ ] **Cross-contract address consistency**: All five contracts reference the same set of addresses
 - [ ] **Deployment nonce ordering**: Verify pre-computed addresses match deployed addresses
 - [ ] **PoolManager compatibility**: Verify hook return values match V4 expectations
@@ -223,7 +239,7 @@ These properties must **always** hold:
 **Out of scope:**
 - Frontend/UI issues
 - Off-chain bot implementations
-- Known limitations documented above (self-reported balance, sliding window cap)
+- Known limitations documented above (multi-wallet evasion, fallback mode accuracy, slow drain within limits)
 - Issues requiring compromised governance/guardian keys
 - Gas optimization suggestions
 

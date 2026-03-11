@@ -4,7 +4,7 @@
 
 BastionSwap is an escrow-native DEX protocol built as a **Uniswap V4 Hook**. It intercepts pool lifecycle events to enforce **issuer accountability** through mandatory escrow vesting, and provides **trader protection** through automated rug-pull detection and insurance compensation.
 
-All access control is enforced via **immutable constructor parameters** — there are no owner-upgradeable proxy patterns or mutable admin roles (except governance fee rate adjustment and guardian pause).
+Access control uses a combination of **immutable constructor parameters** and **storage-based governance**. Cross-contract references are immutable. Governance address is stored (transferable) and controls protocol-wide parameters. There are no upgradeable proxy patterns.
 
 ## System Architecture
 
@@ -37,18 +37,17 @@ graph LR
 
     BH -->|createEscrow| EV
     BH -->|depositFee| IP
-    BH -->|reportLPRemoval / reportIssuerSale| TO
+    BH -->|reportLPRemoval| TO
+    BH -->|enforce sell limits via revert| BH
     BH -->|recordEvent: POOL_CREATED| RE
 
-    TO -->|triggerRedistribution| EV
+    TO -->|executeTrigger: permissionless, immediate| EV
     TO -->|executePayout| IP
-    BOT -->|submitHoneypotProof / submitHiddenTaxProof| TO
 
-    EV -.->|remaining funds on trigger| IP
-    CL -->|claimCompensation| IP
+    EV -.->|seized LP on trigger| IP
+    CL -->|claimCompensation: Merkle or Fallback| IP
 
     IS -->|releaseVested| EV
-    IS -->|setCommitment| EV
 ```
 
 ### Cross-Contract Reference Map
@@ -61,7 +60,7 @@ TriggerOracle → BastionHook, EscrowVault, InsurancePool, Guardian
 ReputationEngine → BastionHook, EscrowVault, TriggerOracle
 ```
 
-All references are **immutable** — set at deployment and cannot be changed.
+Cross-contract references are **immutable** — set at deployment and cannot be changed. Governance address is storage-based and transferable via `transferGovernance()` in BastionHook, InsurancePool, and TriggerOracle.
 
 ## Contract Interactions
 
@@ -80,31 +79,22 @@ sequenceDiagram
 
     Issuer->>PoolManager: addLiquidity(hookData)
     PoolManager->>BastionHook: beforeAddLiquidity()
-    Note over BastionHook: Decode hookData:<br/>issuer, token, amount,<br/>vestingSchedule, commitment,<br/>triggerConfig
+    Note over BastionHook: Validate base token allowlist<br/>Decode hookData:<br/>issuer, PoolCommitment
 
-    BastionHook->>BastionHook: Register issuer for pool
-    BastionHook->>EscrowVault: createEscrow(poolId, issuer, token, amount, schedule, commitment)
-    EscrowVault->>EscrowVault: Validate schedule (1-10 steps, monotonic BPS, final=10000)
-    EscrowVault->>EscrowVault: Store escrow + transfer tokens from hook
-
-    BastionHook->>TriggerOracle: registerIssuer(poolId, issuer)
-    BastionHook->>TriggerOracle: setTriggerConfig(poolId, config)
+    BastionHook->>BastionHook: Validate token compatibility<br/>(reject fee-on-transfer / rebase)
+    BastionHook->>BastionHook: Register issuer + store PoolCommitment<br/>(immutable, must be ≥ governance minimums)
+    BastionHook->>BastionHook: Record initial LP and total supply<br/>for LP/supply ratio transparency
+    BastionHook->>EscrowVault: createEscrow(poolId, issuer, lockDuration, vestingDuration)
+    BastionHook->>TriggerOracle: registerPool(poolId, triggerConfig)
     BastionHook->>ReputationEngine: recordEvent(issuer, POOL_CREATED, data)
 ```
 
-**hookData encoding:**
-```solidity
-abi.encode(
-    address issuer,
-    address token,
-    uint256 amount,
-    VestingStep[] vestingSchedule,
-    IssuerCommitment commitment,
-    TriggerConfig triggerConfig
-)
-```
+**PoolCommitment struct** (immutable per pool, set at creation):
+- `lockDuration`, `vestingDuration` — lock-up + linear vesting schedule
+- `maxSingleLpRemovalBps`, `maxCumulativeLpRemovalBps` — LP removal limits
+- `maxDailySellBps`, `weeklyDumpWindowSeconds`, `weeklyDumpThresholdBps` — sell limits
 
-The first LP provider is automatically registered as the **issuer** for that pool. Subsequent LP adds do not create new escrows.
+The first LP provider is automatically registered as the **issuer** for that pool. Subsequent LP adds do not create new escrows. Both pool tokens are validated — at least one must be a whitelisted base token (ETH, WETH, USDC). If both are base tokens, Bastion protection is skipped.
 
 ### 2. Normal Trading Flow
 
@@ -123,151 +113,159 @@ sequenceDiagram
     BastionHook->>BastionHook: Calculate fee = |baseAmount| × feeRate / 10000
     BastionHook->>InsurancePool: depositFee{value: fee}(poolId)
 
-    Note over BastionHook: If issuer is selling
-    BastionHook->>TriggerOracle: reportIssuerSale(poolId, issuer, amount, totalSupply)
+    Note over BastionHook: If issuer is selling (detected via hookData + BalanceDelta)
+    BastionHook->>BastionHook: Check daily/weekly sell limits
+    Note over BastionHook: Exceeds limit → REVERT entire swap<br/>(no trigger, just block the sale)
 ```
 
-Insurance fees are collected on **buy-side swaps only** (when the trader receives the issued token). The default fee rate is **1% (100 BPS)**, adjustable by governance up to **2% (200 BPS)**.
+**Issuer sell detection**: Cooperating routers pass `abi.encode(actualSwapper)` in hookData. The hook decodes this to identify whether the swapper is the registered issuer. Sell limits are enforced via `afterSwap` revert — if the issuer's cumulative sales exceed daily (default: 3% of initial supply per 24h) or weekly (default: 15% per 7d) limits, the entire transaction reverts. This blocks sales via any path including routers and aggregators.
+
+Insurance fees are collected on **buy-side swaps only** (when the trader receives the issued token). The default fee rate is **1% (100 BPS)**, adjustable by governance within **0.1%–5% (10–500 BPS)**.
 
 ### 3. Vesting & Release Flow
 
 ```
-Escrow Creation                    Vesting Timeline
-     │                                  │
-     ▼                                  ▼
-┌─────────┐    lockDuration     ┌──────────────────────────────────┐
-│ Locked   │◄──────────────────►│  Vesting Steps                   │
-│ (no      │                    │                                  │
-│ release) │                    │  Step 1:  30d → 25% unlocked     │
-└─────────┘                    │  Step 2:  90d → 50% unlocked     │
-                                │  Step 3: 180d → 75% unlocked     │
-                                │  Step 4: 365d → 100% unlocked    │
-                                └──────────────────────────────────┘
-                                         │
-                                         ▼
-                                ┌──────────────────────────────────┐
-                                │  Per-Day Release                  │
-                                │  max = totalAmount × dailyLimit  │
-                                │           / 10000                 │
-                                └──────────────────────────────────┘
+Escrow Creation          Lock-up Period              Linear Vesting
+     │                        │                           │
+     ▼                        ▼                           ▼
+┌─────────┐    lockDuration     ┌────────────────────────────────┐
+│ Locked   │◄──────────────────►│  Linear Vesting                 │
+│ (no      │  (default: 7d)     │  (default: 83d)                 │
+│ release) │                    │                                 │
+└─────────┘                    │  vestedAmount = totalLP ×        │
+                                │    (elapsed - lockDuration)      │
+                                │    / vestingDuration             │
+                                │                                 │
+                                │  Day 0:   0% unlocked           │
+                                │  Day 42: ~50% unlocked          │
+                                │  Day 83: 100% unlocked          │
+                                └────────────────────────────────┘
 ```
 
 **Constraints enforced:**
-- **Lock Duration**: No tokens released until `lockDuration` seconds pass after escrow creation
-- **Vesting Schedule**: Up to 10 steps, each with `timeOffset` (seconds after lock expires) and cumulative `basisPoints` (0–10000)
-- **Daily Withdrawal Limit**: Maximum percentage of total amount withdrawable per calendar day (`dailyWithdrawLimit` BPS)
-- **Commitment Ratchet**: Issuer can only make commitments stricter (lower daily limit, longer lock, lower sell percent) via `setCommitment()`
+- **Lock Duration**: No LP removal until `lockDuration` seconds pass after escrow creation (default: 7 days, min: 7 days)
+- **Linear Vesting**: After lock expires, LP unlocks linearly over `vestingDuration` (default: 83 days, min: 7 days)
+- **Single-tx LP Removal Limit**: Max LP removable in one transaction (default: 50% of total LP, per PoolCommitment)
+- **Cumulative LP Removal Limit**: Cumulative removals within 24h window (default: 80%, triggers LP seizure if exceeded)
+- **Immutable Commitments**: Per-pool parameters set at creation, cannot be changed afterward
 
 ### 4. Trigger Detection & Execution Flow
 
+BastionSwap uses two distinct defense layers:
+
+**Layer 1 — Hard Enforcement (revert)**: Issuer sell limits and single-tx LP removal limits are enforced by reverting the transaction. No trigger is fired.
+
+**Layer 2 — Trigger-based (LP seizure)**: Cumulative LP removal threshold breaches trigger immediate LP seizure via `executeTrigger()`.
+
 ```mermaid
 sequenceDiagram
-    participant Event Source
+    participant Anyone
+    participant BastionHook
     participant TriggerOracle
     participant EscrowVault
     participant InsurancePool
     participant ReputationEngine
 
-    Event Source->>TriggerOracle: reportLPRemoval / reportIssuerSale / submitProof
-    TriggerOracle->>TriggerOracle: Check thresholds against sliding window
-    Note over TriggerOracle: Threshold exceeded!<br/>Create PendingTrigger
+    Note over BastionHook: LP removal tracked cumulatively
+    Note over BastionHook: Threshold breached (>80% in 24h window)
 
-    Note over TriggerOracle: ⏳ 1-hour grace period
+    Anyone->>BastionHook: executeTrigger(poolId) [permissionless]
+    BastionHook->>TriggerOracle: executeTrigger(poolId) [onlyHook]
 
     rect rgb(255, 230, 230)
-        Note over TriggerOracle: After grace period
-        TriggerOracle->>TriggerOracle: executeTrigger(poolId)
-        TriggerOracle->>EscrowVault: triggerRedistribution(escrowId, triggerType)
-        EscrowVault->>InsurancePool: Transfer remaining escrow funds
-        TriggerOracle->>InsurancePool: executePayout(poolId, triggerType, totalSupply)
+        Note over TriggerOracle: Immediate execution (no grace period)
+        TriggerOracle->>EscrowVault: forceRemoveIssuerLP(poolId)
+        EscrowVault->>InsurancePool: Transfer seized issuer LP
+        TriggerOracle->>InsurancePool: executePayout(poolId)
         InsurancePool->>InsurancePool: Snapshot balance for pro-rata claims
         TriggerOracle->>ReputationEngine: recordEvent(issuer, TRIGGER_FIRED)
     end
 
-    Note over InsurancePool: 30-day claim window opens
+    Note over InsurancePool: Claim window opens<br/>(Merkle: 30d, Fallback: 7d)
 ```
 
 ### 5. Compensation Claim Flow
 
-After trigger execution, affected token holders can claim compensation:
+After trigger execution, affected non-issuer token holders can claim compensation via one of two mutually exclusive modes:
 
 ```mermaid
 sequenceDiagram
+    participant Guardian
     participant Holder
     participant InsurancePool
 
-    Note over InsurancePool: Pool is triggered<br/>payoutBalance = snapshotted ETH<br/>totalEligibleSupply = total token supply
+    Note over InsurancePool: Pool is triggered<br/>payoutBalance = insurance + seized LP<br/>Issuer excluded from all claims
 
-    Holder->>InsurancePool: claimCompensation(poolId, holderBalance)
-    InsurancePool->>InsurancePool: Verify pool is triggered
-    InsurancePool->>InsurancePool: Verify within 30-day window
-    InsurancePool->>InsurancePool: Verify holder has not claimed
-    InsurancePool->>InsurancePool: Calculate: payout × holderBalance / totalSupply
-    InsurancePool->>Holder: Transfer ETH compensation
+    alt Merkle Mode (guardian submits root within 24h)
+        Guardian->>InsurancePool: submitMerkleRoot(poolId, root)
+        Holder->>InsurancePool: claimWithMerkleProof(poolId, amount, proof)
+        InsurancePool->>InsurancePool: Verify Merkle proof for trigger-time balance
+        InsurancePool->>Holder: Transfer ETH compensation
+        Note over InsurancePool: 30-day claim window
+    else Fallback Mode (guardian does not respond within 24h)
+        Note over InsurancePool: Fallback mode activates automatically<br/>(irreversible — Merkle root submission blocked)
+        Holder->>InsurancePool: claimFallback(poolId)
+        InsurancePool->>InsurancePool: Verify holder has tokens via balanceOf<br/>Must have held at or before trigger block
+        InsurancePool->>Holder: Transfer ETH compensation
+        Note over InsurancePool: 7-day claim window
+    end
 ```
 
-## Trigger Mechanism Detail
+**Normal completion** (no trigger, vesting fully elapsed): 10% of insurance pool to issuer as vesting reward, 90% to protocol treasury.
 
-### Trigger Types
+## Protection Mechanism Detail
 
-| Type | ID | Detection Method | Default Threshold |
-|---|---|---|---|
-| **RUG_PULL** | 1 | Single LP removal exceeds threshold | 50% of total LP |
-| **ISSUER_DUMP** | 2 | Cumulative issuer sales in time window | 30% of supply in 24h |
-| **HONEYPOT** | 3 | Off-chain bot proof: token blocks transfers | Proof-based |
-| **HIDDEN_TAX** | 4 | Swap output deviates from expected | >5% deviation |
-| **SLOW_RUG** | 5 | Cumulative LP drain in time window | 80% in configured window |
-| **COMMITMENT_BREACH** | 6 | Issuer violates on-chain constraints | Direct trigger |
+### Hard Enforcement (Transaction Revert)
 
-### On-Chain vs Off-Chain Detection
+These protections block violations by reverting the transaction. No trigger is fired — the issuer simply cannot complete the action.
 
-**On-chain (real-time, via BastionHook callbacks):**
-- `RUG_PULL` — Detected in `beforeRemoveLiquidity` via `reportLPRemoval()`
-- `ISSUER_DUMP` — Detected in `afterSwap` via `reportIssuerSale()`
-- `SLOW_RUG` — Cumulative LP removal tracking with sliding window
-- `COMMITMENT_BREACH` — Direct report from hook via `reportCommitmentBreach()`
+| Protection | Hook | Default Limit |
+|-----------|------|---------------|
+| **Single-tx LP removal** | `beforeRemoveLiquidity` revert | >50% of total LP |
+| **Daily sell limit** | `afterSwap` revert | >3% of initial supply per 24h |
+| **Weekly sell limit** | `afterSwap` revert | >15% of initial supply per 7d |
+| **Vesting enforcement** | `beforeRemoveLiquidity` revert | Based on lock-up + linear vesting |
+| **Token compatibility** | Pool creation revert | Fee-on-transfer / rebase tokens rejected |
 
-**Off-chain (bot-submitted proofs):**
-- `HONEYPOT` — External bot submits proof via `submitHoneypotProof()`
-- `HIDDEN_TAX` — External bot submits expected vs actual output via `submitHiddenTaxProof()`
+**Issuer sell detection**: The hook identifies issuers via `hookData` — cooperating routers (BastionSwapRouter) encode `abi.encode(actualSwapper)`. The hook uses V4 `BalanceDelta` (negative = user sends tokens) to detect sell direction. Epoch-based daily/weekly sliding windows track cumulative sales.
 
-### Sliding Window Implementation
+### Trigger-based (LP Seizure)
 
-LP removals and issuer sales are tracked in a sliding window array (max 50 entries per pool). The `_sumWindow()` function aggregates amounts within the configured time window:
+| Trigger | Detection | Default Threshold |
+|---------|-----------|-------------------|
+| **Cumulative LP removal** | On-chain: cumulative within 24h window | >80% of total LP |
 
-```
-Time ──────────────────────────────────────────────────────►
-       │    │     │        │   │                          │
-       R1   R2    R3       R4  R5                     Current
-       ◄────── dumpWindowSeconds (default: 86400s) ───────►
+**Execution flow**: When cumulative LP removals exceed the threshold, `hook.executeTrigger(poolId)` becomes callable by anyone (permissionless). It delegates to `triggerOracle.executeTrigger()` which executes immediately with no grace period. The `_isTriggered[poolId]` flag is set, blocking all further issuer sells and LP removal.
 
-Sum = R3.amount + R4.amount + R5.amount    (R1, R2 outside window — excluded)
-```
+### LP Removal Tracking
 
-**Key properties:**
-- Max 50 entries per pool to prevent unbounded gas costs
-- `_pushRecord()` prunes oldest entries when limit reached (array shift)
-- Only entries within `dumpWindowSeconds` contribute to the cumulative sum
-- Both single-transaction and cumulative thresholds are checked
+LP removals are tracked using `_lpCumulativeRemoved` and `_lpRemovalWindowStart` mappings per pool. The denominator for BPS calculations is `_initialLiquidity` (not total supply). Views: `isLPRemovalTriggerable(poolId)` checks if the threshold is currently exceeded.
 
-### Grace Period
+### Planned (v0.2)
 
-All triggers enter a **1-hour grace period** before execution. This serves to:
-- Prevent false positives from temporary market conditions
-- Allow time for legitimate explanations or counter-evidence
-- Enable permissionless execution — **anyone** can call `executeTrigger()` after the grace period
-- Prevent MEV-based front-running of trigger execution
+| Trigger | Detection | Notes |
+|---------|-----------|-------|
+| **Honeypot** | Decentralized watcher network: transfer() revert detection | Requires off-chain infrastructure |
+| **Hidden Tax** | Decentralized watcher network: swap output deviation >5% | Requires off-chain infrastructure |
 
-### Protocol Constants
+### Protocol Constants & Governance Defaults
 
-| Component | Constant | Value | Purpose |
+| Component | Parameter | Default Value | Purpose |
 |-----------|----------|-------|---------|
-| TriggerOracle | `GRACE_PERIOD` | 1 hour | Time before trigger execution |
-| TriggerOracle | `MAX_TRACKER_ENTRIES` | 50 | Sliding window max size |
-| InsurancePool | `CLAIM_PERIOD` | 30 days | Compensation claim window |
-| InsurancePool | `MAX_FEE_RATE` | 200 BPS (2%) | Maximum insurance fee |
+| TriggerOracle | `maxPauseDuration` | 7 days | Max guardian pause duration |
+| InsurancePool | `merkleClaimPeriod` | 30 days | Merkle proof claim window |
+| InsurancePool | `fallbackClaimPeriod` | 7 days | Fallback balanceOf claim window |
+| InsurancePool | `emergencyTimelock` | 2 days | Emergency withdrawal delay |
+| InsurancePool | `issuerRewardBps` | 1000 (10%) | Issuer vesting completion reward |
+| InsurancePool | Fee range | 10–500 BPS (0.1%–5%) | Governance-adjustable fee bounds |
 | InsurancePool | Default `feeRate` | 100 BPS (1%) | Default insurance fee |
-| EscrowVault | `MAX_SCHEDULE_LENGTH` | 10 | Max vesting steps |
+| BastionHook | `defaultLockDuration` | 7 days | Default escrow lock-up |
+| BastionHook | `defaultVestingDuration` | 83 days | Default linear vesting period |
+| BastionHook | `minLockDuration` | 7 days | Minimum allowed lock-up |
+| BastionHook | `minVestingDuration` | 7 days | Minimum allowed vesting |
+| BastionHook | `maxPoolTVL` | 0 (unlimited) | TVL cap per pool |
+| EscrowVault | `MIN_LOCK_DURATION` | 7 days | Safety floor (immutable) |
+| EscrowVault | `MIN_VESTING_DURATION` | 7 days | Safety floor (immutable) |
 | ReputationEngine | `BASELINE_SCORE` | 100 | Starting score for new issuers |
 
 ## Reputation Engine
@@ -277,11 +275,10 @@ The ReputationEngine computes **non-blocking** scores (0–1000) based on on-cha
 | Component | Max Points | Source |
 |---|---|---|
 | Vesting completion rate | 300 | completedEscrows / totalPools |
-| Escrow history (value-weighted) | 200 | totalLockedWeighted / 1,000,000 scale |
-| Commitment strictness | 200 | Average strictness across commitments |
+| Commitment score | 300 | 4-component formula: lock duration + vesting duration + sell limits + LP limits (reads governance params dynamically) |
 | Wallet age | 100 | Time since first event (~1 year for max) |
 | Token diversity | 200 | Unique tokens used (5 tokens for max) |
-| Trigger penalty | -500 | -100 per severe trigger (RUG_PULL/DUMP), -50 per other |
+| Trigger penalty | -500 | -100 per severe trigger, -50 per other |
 
 Scores are **informational only** and never block transactions. They can be encoded via `encodeScoreData()` for potential cross-chain transmission.
 
@@ -320,7 +317,7 @@ graph TD
 ```
 
 1. **Pre-compute** all contract addresses using `vm.computeCreateAddress(deployer, nonce)`
-2. **Mine** a CREATE2 salt for BastionHook so its address matches V4 hook flag pattern (`0x0A40` = BEFORE_ADD_LIQUIDITY | BEFORE_REMOVE_LIQUIDITY | AFTER_SWAP)
+2. **Mine** a CREATE2 salt for BastionHook so its address matches V4 hook flag pattern (BEFORE_ADD_LIQUIDITY | BEFORE_REMOVE_LIQUIDITY | BEFORE_SWAP | AFTER_SWAP)
 3. **Deploy** core contracts (EscrowVault, InsurancePool, TriggerOracle, ReputationEngine) with the pre-computed hook address
 4. **Deploy** BastionHook via CREATE2 with the pre-computed core contract addresses
 5. **Verify** all deployed addresses match pre-computed addresses
@@ -329,9 +326,19 @@ See `script/Deploy.s.sol` for the full implementation, `script/BastionDeployer.s
 
 ## Security Model
 
-All access control is **immutable** — set once at deployment and enforced via `require(msg.sender == IMMUTABLE_ADDRESS)`. There are only two mutable admin capabilities:
+Cross-contract references are **immutable** — set at deployment and cannot be changed. Governance address is **storage-based** and transferable via `transferGovernance()` in BastionHook, InsurancePool, and TriggerOracle.
 
-1. **Governance** (InsurancePool): Can adjust fee rate (capped at 2%) and execute emergency withdrawals
-2. **Guardian** (TriggerOracle): Can pause/unpause trigger detection and execution
+**Governance capabilities** (protocol-wide, affects new pools only):
+- Adjust insurance fee rate (within 10–500 BPS range)
+- Manage base token whitelist and minimum liquidity requirements
+- Set default/minimum lock-up and vesting durations
+- Set default LP removal and sell limit thresholds
+- Emergency withdrawal from InsurancePool (with 2-day timelock)
+- Set TVL cap, treasury address, guardian address, claim periods
+- Set issuer vesting reward percentage
+
+**Guardian capabilities** (TriggerOracle):
+- Pause/unpause trigger detection (max 7-day duration)
+- Submit Merkle roots for triggered pool compensation
 
 No contract is upgradeable. No proxy patterns are used. See [SECURITY.md](SECURITY.md) for detailed threat model and attack vector analysis.
