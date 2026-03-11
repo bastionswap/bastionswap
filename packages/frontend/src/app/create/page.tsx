@@ -237,6 +237,7 @@ export default function CreatePoolPage() {
       baseAmount,
       baseDecimals: selectedBaseToken.decimals,
       tokenAmount,
+      tokenDecimals: effectiveTokenDecimals,
       lockDuration: activeLockDays * 86400,
       vestingDuration: activeVestingDays * 86400,
       commitment: {

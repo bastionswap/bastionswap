@@ -8,7 +8,7 @@ import {
   usePublicClient,
   useSignTypedData,
 } from "wagmi";
-import { parseAbi, encodeAbiParameters, parseAbiParameters, parseEther, parseUnits } from "viem";
+import { parseAbi, encodeAbiParameters, parseAbiParameters, parseUnits } from "viem";
 import { getContracts } from "@/config/contracts";
 import { BastionPositionRouterABI } from "@/config/abis";
 
@@ -40,6 +40,7 @@ export interface CreatePoolInput {
   baseAmount: string;        // in base token units (e.g. "1.5" ETH or "2000" USDC)
   baseDecimals: number;      // 18 for ETH/WETH, 6 for USDC
   tokenAmount: string;       // in token units (e.g. "1000000")
+  tokenDecimals: number;     // decimals of the issued token (e.g. 18, 8, 6)
   lockDuration: number;      // in seconds (min 7 days)
   vestingDuration: number;   // in seconds (min 7 days)
   commitment: {
@@ -291,7 +292,7 @@ export function useCreateBastionPool() {
     setStep("signing");
 
     const isNativeBase = params.baseToken === ZERO_ADDR;
-    const tokenWei = parseEther(params.tokenAmount);
+    const tokenWei = parseUnits(params.tokenAmount, params.tokenDecimals);
     const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
     const nonce = generatePermit2Nonce();
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800); // 30 min
@@ -363,7 +364,7 @@ export function useCreateBastionPool() {
 
     const isNativeBase = params.baseToken === ZERO_ADDR;
     const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
-    const tokenWei = parseEther(params.tokenAmount);
+    const tokenWei = parseUnits(params.tokenAmount, params.tokenDecimals);
 
     const baseAddr = params.baseToken.toLowerCase();
     const tokenAddr = params.tokenAddress.toLowerCase();
@@ -498,7 +499,7 @@ export function useCreateBastionPool() {
           }
         }
 
-        const tokenWei = parseEther(params.tokenAmount);
+        const tokenWei = parseUnits(params.tokenAmount, params.tokenDecimals);
         const isNativeBase = params.baseToken === ZERO_ADDR;
         const baseWei = parseUnits(params.baseAmount, params.baseDecimals);
 
