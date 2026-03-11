@@ -231,6 +231,9 @@ interface IInsurancePool {
     /// @notice Emitted when the issuer reward bps is updated.
     event IssuerRewardBpsUpdated(uint256 newBps);
 
+    /// @notice Emitted when the Merkle submission deadline is updated.
+    event MerkleSubmissionDeadlineUpdated(uint256 newDeadline);
+
     /// @notice Transfer governance to a new address.
     function transferGovernance(address newGovernance) external;
 
@@ -249,4 +252,7 @@ interface IInsurancePool {
 
     /// @notice Set the issuer reward share in basis points (0–3000).
     function setIssuerRewardBps(uint256 newBps) external;
+
+    /// @notice Set the Merkle submission deadline (6h–72h).
+    function setMerkleSubmissionDeadline(uint40 newDeadline) external;
 }

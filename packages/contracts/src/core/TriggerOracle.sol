@@ -84,6 +84,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     error IsPaused();
     error ZeroAddress();
     error InvalidDuration();
+    error InvalidTriggerConfig();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -337,12 +338,14 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     /// @notice Set the default trigger config for new pools.
     function setDefaultTriggerConfig(TriggerConfig calldata config) external onlyGovernance {
+        _validateTriggerConfig(config);
         defaultTriggerConfig = config;
         emit DefaultTriggerConfigUpdated(config);
     }
 
     /// @notice Update an individual pool's trigger config (governance override).
     function updatePoolTriggerConfig(PoolId poolId, TriggerConfig calldata config) external onlyGovernance {
+        _validateTriggerConfig(config);
         bytes32 key = _key(poolId);
         _poolStates[key].config = config;
         _poolStates[key].configSet = true;
@@ -357,5 +360,19 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     function _computeEscrowId(PoolId poolId, address issuer) internal pure returns (uint256) {
         return uint256(keccak256(abi.encode(poolId, issuer)));
+    }
+
+    /// @dev Validates TriggerConfig fields are within sane ranges.
+    function _validateTriggerConfig(TriggerConfig calldata cfg) internal pure {
+        // BPS thresholds: must be > 0 and <= 10000
+        if (cfg.lpRemovalThreshold == 0 || cfg.lpRemovalThreshold > BPS_BASE) revert InvalidTriggerConfig();
+        if (cfg.dumpThresholdPercent == 0 || cfg.dumpThresholdPercent > BPS_BASE) revert InvalidTriggerConfig();
+        if (cfg.taxDeviationThreshold == 0 || cfg.taxDeviationThreshold > BPS_BASE) revert InvalidTriggerConfig();
+        if (cfg.slowRugCumulativeThreshold == 0 || cfg.slowRugCumulativeThreshold > BPS_BASE) revert InvalidTriggerConfig();
+        if (cfg.weeklyDumpThresholdPercent == 0 || cfg.weeklyDumpThresholdPercent > BPS_BASE) revert InvalidTriggerConfig();
+        // Time windows: must be between 1 hour and 30 days
+        if (cfg.dumpWindowSeconds < 1 hours || cfg.dumpWindowSeconds > 30 days) revert InvalidTriggerConfig();
+        if (cfg.slowRugWindowSeconds < 1 hours || cfg.slowRugWindowSeconds > 30 days) revert InvalidTriggerConfig();
+        if (cfg.weeklyDumpWindowSeconds < 1 days || cfg.weeklyDumpWindowSeconds > 30 days) revert InvalidTriggerConfig();
     }
 }

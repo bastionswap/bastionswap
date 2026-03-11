@@ -26,7 +26,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     uint16 internal constant MAX_FEE_RATE = 500; // 5%
     uint16 internal constant MIN_FEE_RATE = 10; // 0.1%
     uint256 public constant BPS_DENOMINATOR = 10000;
-    uint40 public constant MERKLE_SUBMISSION_DEADLINE = 24 hours;
+    /// @notice Time window for guardian to submit Merkle root after trigger (default 24h)
+    uint40 public merkleSubmissionDeadline;
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -165,6 +166,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         fallbackClaimPeriod = 7 days;
         emergencyTimelock = 2 days;
         issuerRewardBps = 1000; // 10%
+        merkleSubmissionDeadline = 24 hours;
     }
 
     // ─── External Functions ───────────────────────────────────────────
@@ -242,7 +244,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     }
 
     /// @notice Guardian submits a Merkle root within 24h of trigger, entering Merkle mode.
-    /// @dev Must be called within MERKLE_SUBMISSION_DEADLINE of trigger. Once fallback mode
+    /// @dev Must be called within merkleSubmissionDeadline of trigger. Once fallback mode
     ///      is active (24h elapsed without submission), this is permanently blocked.
     /// @param poolId Uniswap V4 pool identifier
     /// @param root Merkle root of (holder, balance) snapshot
@@ -254,7 +256,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (pool.useMerkleProof) revert MerkleAlreadySubmitted();
 
         // Fallback is irreversible: if 24h has passed, merkle submission is permanently blocked
-        if (block.timestamp > pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE) {
+        if (block.timestamp > pool.triggerTimestamp + merkleSubmissionDeadline) {
             revert FallbackAlreadyActive();
         }
 
@@ -310,12 +312,12 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (holderBalance == 0) revert ZeroAmount();
 
         // Must wait for merkle submission deadline to pass (24h)
-        if (block.timestamp <= pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE) {
+        if (block.timestamp <= pool.triggerTimestamp + merkleSubmissionDeadline) {
             revert MerkleSubmissionWindowActive();
         }
 
         // Fallback claim period: 7 days after the 24h deadline
-        if (block.timestamp > pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE + fallbackClaimPeriod) {
+        if (block.timestamp > pool.triggerTimestamp + merkleSubmissionDeadline + fallbackClaimPeriod) {
             revert ClaimPeriodExpired();
         }
 
@@ -413,7 +415,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     function isFallbackMode(PoolId poolId) external view returns (bool) {
         PoolData storage pool = _getPool(poolId);
         return pool.isTriggered && !pool.useMerkleProof
-            && block.timestamp > pool.triggerTimestamp + MERKLE_SUBMISSION_DEADLINE;
+            && block.timestamp > pool.triggerTimestamp + merkleSubmissionDeadline;
     }
 
     /// @notice Check if a pool is in merkle mode
@@ -461,6 +463,13 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (newTimelock < 1 days || newTimelock > 7 days) revert InvalidDuration();
         emergencyTimelock = newTimelock;
         emit EmergencyTimelockUpdated(newTimelock);
+    }
+
+    /// @notice Set the Merkle submission deadline (6h–72h).
+    function setMerkleSubmissionDeadline(uint40 newDeadline) external onlyGovernance {
+        if (newDeadline < 6 hours || newDeadline > 72 hours) revert InvalidDuration();
+        merkleSubmissionDeadline = newDeadline;
+        emit MerkleSubmissionDeadlineUpdated(newDeadline);
     }
 
     /// @notice Set the issuer reward share in basis points (0–3000).

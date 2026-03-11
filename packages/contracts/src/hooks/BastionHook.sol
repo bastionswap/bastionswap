@@ -172,6 +172,8 @@ contract BastionHook is BaseTestHooks {
     error IssuerDumpDetected();
     error SingleLPRemovalExceeded();
     error CumulativeLPRemovalExceeded();
+    error ZeroAddress();
+    error ValueOutOfRange();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -771,7 +773,7 @@ contract BastionHook is BaseTestHooks {
 
     /// @notice Transfer governance to a new address.
     function transferGovernance(address newGovernance) external onlyGovernance {
-        if (newGovernance == address(0)) revert NoAllowedBaseToken(); // reuse existing zero-address style error
+        if (newGovernance == address(0)) revert ZeroAddress();
         address oldGov = GOVERNANCE;
         GOVERNANCE = newGovernance;
         emit GovernanceTransferred(oldGov, newGovernance);
@@ -779,7 +781,7 @@ contract BastionHook is BaseTestHooks {
 
     /// @notice Set the maximum pool TVL (0 = unlimited, max 1000 ether).
     function setMaxPoolTVL(uint256 newMaxTVL) external onlyGovernance {
-        if (newMaxTVL > 1000 ether) revert InvalidDuration();
+        if (newMaxTVL > 1000 ether) revert ValueOutOfRange();
         maxPoolTVL = newMaxTVL;
         emit MaxPoolTVLUpdated(newMaxTVL);
     }
