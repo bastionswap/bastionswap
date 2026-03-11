@@ -74,9 +74,9 @@ interface CommitmentPreset {
 }
 
 const COMMITMENT_PRESETS: Record<Exclude<CommitmentMode, "custom">, CommitmentPreset> = {
-  quick:    { lockDays: 7,  vestingDays: 23,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 3000, slowRug: 8000 },
-  standard: { lockDays: 7,  vestingDays: 83,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 3000, slowRug: 8000 },
-  strict:   { lockDays: 30, vestingDays: 150, dailyWithdrawLimit: 300, maxSellPercent: 200, lpRemoval: 3000, dump: 2000, slowRug: 5000 },
+  quick:    { lockDays: 7,  vestingDays: 23,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 300, slowRug: 8000 },
+  standard: { lockDays: 7,  vestingDays: 83,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 300, slowRug: 8000 },
+  strict:   { lockDays: 30, vestingDays: 150, dailyWithdrawLimit: 300, maxSellPercent: 200, lpRemoval: 3000, dump: 100, slowRug: 5000 },
 };
 
 // Keep backward compatibility alias
@@ -175,7 +175,7 @@ function CreatePoolContent() {
   const [copiedHash, setCopiedHash] = useState(false);
   const [triggerThresholds, setTriggerThresholds] = useState({
     lpRemoval: 5000,
-    dump: 3000,
+    dump: 300,
     slowRug: 8000,
   });
 
@@ -261,7 +261,7 @@ function CreatePoolContent() {
         slowRugWindowSeconds: 86400,
         slowRugCumulativeThreshold: activeTrigger.slowRug,
         weeklyDumpWindowSeconds: 604800,
-        weeklyDumpThresholdPercent: 5000,
+        weeklyDumpThresholdPercent: 1500,
       },
     });
   };
@@ -736,16 +736,16 @@ function CreatePoolContent() {
                       </div>
                       <input
                         type="range"
-                        min={500}
-                        max={3000}
-                        step={100}
+                        min={50}
+                        max={300}
+                        step={10}
                         value={triggerThresholds.dump}
                         onChange={(e) => setTriggerThresholds({ ...triggerThresholds, dump: parseInt(e.target.value) })}
                         className="w-full accent-bastion-600"
                       />
                       <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                        <span className="text-emerald-500">5% (Strict)</span>
-                        <span>30% (Default)</span>
+                        <span className="text-emerald-500">0.5% (Strict)</span>
+                        <span>3% (Default)</span>
                       </div>
                     </div>
                   </div>

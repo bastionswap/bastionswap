@@ -272,13 +272,13 @@ contract E2E_EdgeCases is Test {
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000,
-            dumpThresholdPercent: 3000,
+            dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
     }
 
@@ -440,10 +440,10 @@ contract E2E_EdgeCases is Test {
     // ═══════════════════════════════════════════════════════════════════
 
     function test_SellExactlyAtLimit_Allowed() public {
-        // Default daily sell limit is 3000 bps (30%)
+        // Default daily sell limit is 300 bps (3%)
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        // Sell exactly 30% = at the limit -> should succeed with > comparison
-        uint256 exactLimitAmount = (initialSupply * 3000) / 10_000;
+        // Sell exactly 3% = at the limit -> should succeed with > comparison
+        uint256 exactLimitAmount = (initialSupply * 300) / 10_000;
 
         // Need issuerA to have enough tokens
         uint256 issuerBal = tokenA.balanceOf(issuerA);
@@ -649,7 +649,7 @@ contract E2E_EdgeCases is Test {
     function test_SellWindow_ResetAtEpochBoundary() public {
         // Sell some tokens near the daily limit
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 nearLimit = (initialSupply * 2500) / 10_000; // 25% of 30% limit
+        uint256 nearLimit = (initialSupply * 250) / 10_000; // 2.5% of 3% limit
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (nearLimit > issuerBal / 2) nearLimit = issuerBal / 4;
@@ -690,7 +690,8 @@ contract E2E_EdgeCases is Test {
     function test_SameBlockMultipleSells_Accumulate() public {
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
         // Sell in multiple transactions within the same block
-        uint256 smallSell = (initialSupply * 500) / 10_000; // 5% each
+        // 3% daily limit → each sell 0.9% → 3 sells = 2.7% < 3%
+        uint256 smallSell = (initialSupply * 90) / 10_000; // 0.9% each
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (smallSell * 4 > issuerBal) smallSell = issuerBal / 8;
@@ -709,7 +710,7 @@ contract E2E_EdgeCases is Test {
     function test_WeeklyWindow_SlidingReset() public {
         // Sell near the weekly limit
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 dailySell = (initialSupply * 2000) / 10_000; // 20% (under daily 30%)
+        uint256 dailySell = (initialSupply * 200) / 10_000; // 2% (under daily 3%)
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (dailySell > issuerBal / 4) dailySell = issuerBal / 8;
@@ -827,7 +828,7 @@ contract E2E_EdgeCases is Test {
 
         // But the issuer's own sells are still tracked
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 overLimit = (initialSupply * 3001) / 10_000; // just over 30%
+        uint256 overLimit = (initialSupply * 301) / 10_000; // just over 3%
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (overLimit <= issuerBal) {
@@ -867,34 +868,32 @@ contract E2E_EdgeCases is Test {
 
     function test_SlowDrainAttack_CumulativeTracking() public {
         // Create a pool with tight weekly limits
-        // Give issuer 900K tokens so they retain 800K after 100K pool deposit,
-        // enough to sell 20% of totalSupply (200K) per day × 3 days
         vm.startPrank(deployer);
         TestToken tkSlow = _createFreshToken("SlowDrain", "SLD", 1_000_000e18);
         tkSlow.transfer(issuerB, 900_000e18);
         vm.stopPrank();
 
         ITriggerOracle.TriggerConfig memory cfg = _defaultTriggerConfig();
-        cfg.dumpThresholdPercent = 3000; // 30% daily
-        cfg.weeklyDumpThresholdPercent = 5000; // 50% weekly
+        cfg.dumpThresholdPercent = 300; // 3% daily
+        cfg.weeklyDumpThresholdPercent = 1500; // 15% weekly
 
         (PoolKey memory key, PoolId pid) = _createPoolForIssuer(issuerB, tkSlow, 5 ether, 100_000e18, cfg);
 
         uint256 initialSupply = hook.getInitialTotalSupply(pid);
-        // Sell 20% per day (under daily 30% limit) for 3 days = 60% weekly > 50% weekly limit
-        uint256 dailySell = (initialSupply * 2000) / 10_000;
+        // Sell 2.9% per day (under daily 3% limit) for 5 days = 14.5% < 15%,
+        // then 6th day 2.9% → 17.4% > 15% weekly limit
+        uint256 dailySell = (initialSupply * 290) / 10_000;
 
         vm.startPrank(issuerB);
         tkSlow.approve(address(swapRouter), type(uint256).max);
 
-        // Day 1: 20% sell
-        swapRouter.swapExactInput(key, false, dailySell, 0, block.timestamp + 3600);
+        // Days 1-5: 2.9% sell each (cumulative 14.5% < 15%)
+        for (uint256 i = 0; i < 5; i++) {
+            if (i > 0) vm.warp(block.timestamp + 1 days);
+            swapRouter.swapExactInput(key, false, dailySell, 0, block.timestamp + 3600);
+        }
 
-        // Day 2: 20% sell
-        vm.warp(block.timestamp + 1 days);
-        swapRouter.swapExactInput(key, false, dailySell, 0, block.timestamp + 3600);
-
-        // Day 3: 20% sell — should push weekly cumulative over 50% and revert
+        // Day 6: 2.9% sell — should push weekly cumulative over 15% and revert
         vm.warp(block.timestamp + 1 days);
         vm.expectRevert();
         swapRouter.swapExactInput(key, false, dailySell, 0, block.timestamp + 3600);
@@ -951,7 +950,7 @@ contract E2E_EdgeCases is Test {
         assertEq(initialSupply, supplyAfter, "initial supply unchanged after price manipulation");
 
         // Issuer sell limits still use the original supply
-        uint256 sellAmount = (initialSupply * 2900) / 10_000; // 29% (under 30% limit)
+        uint256 sellAmount = (initialSupply * 290) / 10_000; // 2.9% (under 3% limit)
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (sellAmount <= issuerBal) {

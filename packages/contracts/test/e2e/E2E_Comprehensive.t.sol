@@ -184,13 +184,13 @@ contract E2E_Comprehensive is Test {
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000,
-            dumpThresholdPercent: 3000,
+            dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
     }
 
@@ -324,8 +324,8 @@ contract E2E_Comprehensive is Test {
         assertEq(c.vestingDuration, 83 days, "vesting 83d");
         assertEq(c.maxSingleLpRemovalBps, 5000, "single LP removal 50%");
         assertEq(c.maxCumulativeLpRemovalBps, 8000, "cumulative LP removal 80%");
-        assertEq(c.maxDailySellBps, 3000, "daily sell 30%");
-        assertEq(c.weeklyDumpThresholdBps, 5000, "weekly sell 50%");
+        assertEq(c.maxDailySellBps, 300, "daily sell 3%");
+        assertEq(c.weeklyDumpThresholdBps, 1500, "weekly sell 15%");
 
         // 5. LP/supply ratio (AMM liquidity units / totalSupply, NOT token amounts)
         // May be 0 when AMM liquidity * 10000 < totalSupply (integer truncation)
@@ -776,13 +776,12 @@ contract E2E_Comprehensive is Test {
 
     // Scenario 12: Direct issuer sell limits
     function test_e2e_issuerDirectSell_limits() public {
-        // Issuer A has tokens outside LP. Commitment: maxDailySellBps = 3000 (30%)
-        // Initial supply = 1M. 30% = 300,000 tokens
+        // Issuer A has tokens outside LP. Commitment: maxDailySellBps = 300 (3%)
+        // Initial supply = 1M. 3% = 30,000 tokens
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 maxDaily = (initialSupply * 3000) / 10_000; // 300,000 tokens
 
-        // 12a: 20% sell -> succeeds
-        uint256 sellAmount = (initialSupply * 2000) / 10_000; // 200,000
+        // 12a: 2% sell -> succeeds (under 3% daily limit)
+        uint256 sellAmount = (initialSupply * 200) / 10_000; // 20,000
 
         // Need deep liquidity to allow large sells
         vm.startPrank(generalLP);
@@ -797,7 +796,7 @@ contract E2E_Comprehensive is Test {
         swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, block.timestamp + 3600);
         vm.stopPrank();
 
-        // 12b: Additional 20% -> total 40% > 30% -> revert
+        // 12b: Additional 2% -> total 4% > 3% -> revert
         vm.startPrank(issuerA);
         vm.expectRevert();
         swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, block.timestamp + 3600);
@@ -806,7 +805,7 @@ contract E2E_Comprehensive is Test {
         // 12c: 24h later -> reset -> sell succeeds
         vm.warp(block.timestamp + 1 days + 1);
         vm.startPrank(issuerA);
-        swapRouter.swapExactInput(poolKeyA, false, 10_000e18, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, 1_000e18, 0, block.timestamp + 3600);
         vm.stopPrank();
     }
 
@@ -827,10 +826,10 @@ contract E2E_Comprehensive is Test {
         vm.prank(issuerA);
         tokenA.transfer(attacker, bigAmount);
 
-        // 13c: Small sell (under limit) — succeeds via direct issuer
+        // 13c: Small sell (under 3% daily limit) — succeeds via direct issuer
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
-        uint256 smallSell = (initialSupply * 500) / 10_000; // 5%
+        uint256 smallSell = (initialSupply * 200) / 10_000; // 2%
         swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, block.timestamp + 3600);
         vm.stopPrank();
 
@@ -855,21 +854,20 @@ contract E2E_Comprehensive is Test {
         vm.stopPrank();
 
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        // maxDailySellBps = 3000 (30%), weeklyDumpThresholdBps = 5000 (50%)
-        // Sell 20% each day for 2 days = 40% < 50%, then 20% more -> 60% >= 50%
-        uint256 dailySell = (initialSupply * 2000) / 10_000; // 20%
+        // maxDailySellBps = 300 (3%), weeklyDumpThresholdBps = 1500 (15%)
+        // Sell 2.9% each day across 5 days = 14.5% < 15%, then 2.9% more -> 17.4% > 15%
+        uint256 dailySell = (initialSupply * 290) / 10_000; // 2.9%
 
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
 
-        // Day 1: sell 20%
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        // Days 1-5: sell 2.9% each (under 3% daily limit, cumulative 14.5% < 15% weekly)
+        for (uint256 i = 0; i < 5; i++) {
+            if (i > 0) vm.warp(block.timestamp + 1 days + 1);
+            swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        }
 
-        // Day 2: sell 20% (cumulative 40% < 50%)
-        vm.warp(block.timestamp + 1 days + 1);
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
-
-        // Day 3: try sell 20% more -> cumulative 60% >= 50% weekly limit -> revert
+        // Day 6: try sell 2.9% more -> cumulative 17.4% > 15% weekly limit -> revert
         vm.warp(block.timestamp + 1 days + 1);
         vm.expectRevert();
         swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
@@ -877,9 +875,9 @@ contract E2E_Comprehensive is Test {
         vm.stopPrank();
 
         // 14b: After 7-day window reset -> can sell again
-        vm.warp(block.timestamp + 5 days);
+        vm.warp(block.timestamp + 2 days);
         vm.startPrank(issuerA);
-        swapRouter.swapExactInput(poolKeyA, false, 1000e18, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, 1_000e18, 0, block.timestamp + 3600);
         vm.stopPrank();
     }
 
@@ -1302,7 +1300,7 @@ contract E2E_Comprehensive is Test {
         vm.warp(poolACreatedAt + 90 days);
 
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 overLimit = (initialSupply * 3500) / 10_000; // 35% > 30% daily limit
+        uint256 overLimit = (initialSupply * 400) / 10_000; // 4% > 3% daily limit
 
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
@@ -1431,8 +1429,8 @@ contract E2E_Comprehensive is Test {
         vm.stopPrank();
 
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        // maxDailySellBps = 3000 (30%). Try 35% -> revert
-        uint256 overLimit = (initialSupply * 3500) / 10_000;
+        // maxDailySellBps = 300 (3%). Try 4% -> revert
+        uint256 overLimit = (initialSupply * 400) / 10_000;
 
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
@@ -1452,18 +1450,19 @@ contract E2E_Comprehensive is Test {
         vm.stopPrank();
 
         uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        // weeklyDumpThresholdBps = 5000 (50%), uses >= comparison
-        // Sell 20% each day for 2 days = 40% < 50%, then 20% more -> 60% >= 50%
-        uint256 dailySell = (initialSupply * 2000) / 10_000; // 20%
+        // weeklyDumpThresholdBps = 1500 (15%)
+        // Sell 2.9% each day for 5 days = 14.5% < 15%, then 2.9% more -> 17.4% > 15%
+        uint256 dailySell = (initialSupply * 290) / 10_000; // 2.9%
 
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
 
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
-        vm.warp(block.timestamp + 1 days + 1);
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        for (uint256 i = 0; i < 5; i++) {
+            if (i > 0) vm.warp(block.timestamp + 1 days + 1);
+            swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        }
 
-        // Another sell -> weekly limit exceeded (60% >= 50%)
+        // Day 6: weekly limit exceeded (17.4% > 15%)
         vm.warp(block.timestamp + 1 days + 1);
         vm.expectRevert();
         swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);

@@ -144,13 +144,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000,
-            dumpThresholdPercent: 3000,
+            dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
     }
 
@@ -882,7 +882,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertEq(c.vestingDuration, DEFAULT_VESTING);
         assertEq(c.maxSingleLpRemovalBps, 5000);
         assertEq(c.maxCumulativeLpRemovalBps, 8000);
-        assertEq(c.maxDailySellBps, 3000);
+        assertEq(c.maxDailySellBps, 300);
         assertGt(c.createdAt, 0);
     }
 
@@ -893,7 +893,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // Default triggerConfig matches governance defaults
         assertEq(c.maxSingleLpRemovalBps, 5000);
         assertEq(c.maxCumulativeLpRemovalBps, 8000);
-        assertEq(c.maxDailySellBps, 3000);
+        assertEq(c.maxDailySellBps, 300);
     }
 
     function test_poolCommitment_revertsLpRemovalTooHigh() public {
@@ -904,13 +904,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5001, // > 5000 default
-            dumpThresholdPercent: 3000,
+            dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
 
         bytes memory hookData = abi.encode(
@@ -933,13 +933,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000,
-            dumpThresholdPercent: 3001, // > 3000 default
+            dumpThresholdPercent: 301, // > 300 default
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
 
         bytes memory hookData = abi.encode(
@@ -962,13 +962,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000,
-            dumpThresholdPercent: 3000,
+            dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8001, // > 8000 default
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
 
         bytes memory hookData = abi.encode(
@@ -992,13 +992,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         ITriggerOracle.TriggerConfig memory strictConfig = ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 3000, // < 5000 default
-            dumpThresholdPercent: 2000, // < 3000 default
+            dumpThresholdPercent: 200, // < 300 default
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 5000, // < 8000 default
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
 
         bytes memory hookData = abi.encode(
@@ -1040,7 +1040,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 5000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         }));
 
         // Existing commitment unchanged
@@ -1097,7 +1097,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(poolId);
         assertEq(c.weeklyDumpWindowSeconds, 604800);
-        assertEq(c.weeklyDumpThresholdBps, 5000);
+        assertEq(c.weeklyDumpThresholdBps, 1500);
     }
 
     function test_poolCommitment_revertsWeeklyDumpTooHigh() public {
@@ -1108,13 +1108,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000,
-            dumpThresholdPercent: 3000,
+            dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5001 // > 5000 default
+            weeklyDumpThresholdPercent: 1501 // > 1500 default
         });
 
         bytes memory hookData = abi.encode(
@@ -1135,13 +1135,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_getDefaultTriggerConfig_returnsStruct() public view {
         ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getDefaultTriggerConfig();
         assertEq(cfg.lpRemovalThreshold, 5000);
-        assertEq(cfg.dumpThresholdPercent, 3000);
+        assertEq(cfg.dumpThresholdPercent, 300);
         assertEq(cfg.dumpWindowSeconds, 86400);
         assertEq(cfg.taxDeviationThreshold, 500);
         assertEq(cfg.slowRugWindowSeconds, 86400);
         assertEq(cfg.slowRugCumulativeThreshold, 8000);
         assertEq(cfg.weeklyDumpWindowSeconds, 604800);
-        assertEq(cfg.weeklyDumpThresholdPercent, 5000);
+        assertEq(cfg.weeklyDumpThresholdPercent, 1500);
     }
 
     function test_poolCommitment_stricterWeeklyDump() public {
@@ -1153,13 +1153,13 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         ITriggerOracle.TriggerConfig memory strictConfig = ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000,
-            dumpThresholdPercent: 3000,
+            dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 3000 // stricter than 5000 default
+            weeklyDumpThresholdPercent: 1000 // stricter than 1500 default
         });
 
         bytes memory hookData = abi.encode(
@@ -1175,7 +1175,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertTrue(hook.isCommitmentStricterThanDefault(_poolId));
 
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(_poolId);
-        assertEq(c.weeklyDumpThresholdBps, 3000);
+        assertEq(c.weeklyDumpThresholdBps, 1000);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1229,8 +1229,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithIssuer();
 
         uint256 totalSupply = issuedToken.totalSupply();
-        // Sell 10% of supply — well below 30% daily limit
-        uint256 sellAmount = totalSupply / 10;
+        // Sell 2% of supply — well below 3% daily limit
+        uint256 sellAmount = (totalSupply * 200) / 10_000;
 
         // Should succeed without revert
         _issuerSellIssuedToken(sellAmount);
@@ -1298,8 +1298,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithLargeLiquidity();
 
         uint256 initialSupply = hook.getInitialTotalSupply(poolId);
-        // Sell 31% of initial supply — exceeds 30% daily limit (3000 bps)
-        uint256 sellAmount = (initialSupply * 3100) / 10_000;
+        // Sell 4% of initial supply — exceeds 3% daily limit (300 bps)
+        uint256 sellAmount = (initialSupply * 400) / 10_000;
 
         // Pre-approve so vm.expectRevert catches the swap, not approve
         vm.startPrank(issuerAddr);
@@ -1330,8 +1330,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithLargeLiquidity();
 
         uint256 initialSupply = hook.getInitialTotalSupply(poolId);
-        // Weekly threshold: 5000 bps (50%), Daily threshold: 3000 bps (30%)
-        // Strategy: sell 20% per day for 3 days = 60% > 50% weekly
+        // Weekly threshold: 1500 bps (15%), Daily threshold: 300 bps (3%)
+        // Strategy: sell 2.9% per day for 5 days = 14.5%, then 2% more → 16.5% > 15%
 
         // Pre-approve
         vm.startPrank(issuerAddr);
@@ -1339,21 +1339,20 @@ contract BastionHookIntegrationTest is Test, Deployers {
         baseToken.approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
 
-        // Day 0: sell 20%
-        _issuerSellIssuedToken((initialSupply * 2000) / 10_000);
+        // Days 0-4: sell 2.9% each (cumulative 14.5% < 15%)
+        for (uint256 i = 0; i < 5; i++) {
+            if (i > 0) vm.warp(block.timestamp + 1 days);
+            _issuerSellIssuedToken((initialSupply * 290) / 10_000);
+        }
 
-        // Day 1: sell 20%
-        vm.warp(block.timestamp + 1 days);
-        _issuerSellIssuedToken((initialSupply * 2000) / 10_000);
-
-        // Day 2: sell 11% — weekly cumulative = 51% > 50% weekly threshold
+        // Day 5: sell 2% — weekly cumulative = 16.5% > 15% weekly threshold
         // The beforeSwap 1st layer catches this with IssuerWeeklySellExceeded,
         // wrapped in PoolManager's WrappedError
         vm.warp(block.timestamp + 1 days);
 
         bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
         bool zeroForOne = issuedIsToken0;
-        uint256 sellAmount = (initialSupply * 1100) / 10_000;
+        uint256 sellAmount = (initialSupply * 200) / 10_000;
 
         vm.prank(issuerAddr);
         vm.expectRevert();

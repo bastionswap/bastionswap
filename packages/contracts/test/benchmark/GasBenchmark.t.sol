@@ -135,10 +135,10 @@ contract GasBenchmarkTest is Test, Deployers {
             lockDuration, vestingDuration,
             IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200}),
             ITriggerOracle.TriggerConfig({
-                lpRemovalThreshold: 5000, dumpThresholdPercent: 3000,
+                lpRemovalThreshold: 5000, dumpThresholdPercent: 300,
                 dumpWindowSeconds: 86400, taxDeviationThreshold: 500,
                 slowRugWindowSeconds: 86400, slowRugCumulativeThreshold: 8000,
-                weeklyDumpWindowSeconds: 604800, weeklyDumpThresholdPercent: 5000
+                weeklyDumpWindowSeconds: 604800, weeklyDumpThresholdPercent: 1500
             })
         );
     }

@@ -262,7 +262,7 @@ contract GovernanceParamsTest is Test {
             ,
         ) = oracle.defaultTriggerConfig();
         assertEq(lpRemoval, 5000);
-        assertEq(dumpThreshold, 3000);
+        assertEq(dumpThreshold, 300);
         assertEq(dumpWindow, 86400);
         assertEq(taxDeviation, 500);
         assertEq(slowRugWindow, 86400);
@@ -278,7 +278,7 @@ contract GovernanceParamsTest is Test {
             slowRugWindowSeconds: 172800,
             slowRugCumulativeThreshold: 7000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
         vm.prank(governance);
         oracle.setDefaultTriggerConfig(config);
@@ -296,7 +296,7 @@ contract GovernanceParamsTest is Test {
             slowRugWindowSeconds: 172800,
             slowRugCumulativeThreshold: 7000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
         vm.prank(nonGovernance);
         vm.expectRevert(TriggerOracle.OnlyGovernance.selector);
@@ -318,7 +318,7 @@ contract GovernanceParamsTest is Test {
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 9000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
         vm.prank(governance);
         oracle.updatePoolTriggerConfig(poolId, config);
@@ -338,7 +338,7 @@ contract GovernanceParamsTest is Test {
             slowRugWindowSeconds: 86400,
             slowRugCumulativeThreshold: 9000,
             weeklyDumpWindowSeconds: 604800,
-            weeklyDumpThresholdPercent: 5000
+            weeklyDumpThresholdPercent: 1500
         });
         vm.prank(nonGovernance);
         vm.expectRevert(TriggerOracle.OnlyGovernance.selector);

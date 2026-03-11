@@ -117,13 +117,13 @@ contract TriggerOracleTest is Test {
     function _defaultConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
             lpRemovalThreshold: 5000, // 50%
-            dumpThresholdPercent: 3000, // 30%
+            dumpThresholdPercent: 300, // 3%
             dumpWindowSeconds: 86400, // 24h
             taxDeviationThreshold: 500, // 5%
             slowRugWindowSeconds: 86400, // 24h
             slowRugCumulativeThreshold: 8000, // 80%
             weeklyDumpWindowSeconds: 604800, // 7d
-            weeklyDumpThresholdPercent: 5000 // 50%
+            weeklyDumpThresholdPercent: 1500 // 15%
         });
     }
 
@@ -336,7 +336,7 @@ contract TriggerOracleTest is Test {
     function test_setTriggerConfig_storesCorrectly() public view {
         ITriggerOracle.TriggerConfig memory cfg = oracle.getTriggerConfig(defaultPoolId);
         assertEq(cfg.lpRemovalThreshold, 5000);
-        assertEq(cfg.dumpThresholdPercent, 3000);
+        assertEq(cfg.dumpThresholdPercent, 300);
         assertEq(cfg.dumpWindowSeconds, 86400);
         assertEq(cfg.taxDeviationThreshold, 500);
     }

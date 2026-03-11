@@ -229,7 +229,7 @@ contract BastionHook is BaseTestHooks {
         _owner = _governance;
 
         // Initialize governance parameters
-        maxPoolTVL = 0; // unlimited
+        maxPoolTVL = 2 ether; // soft launch cap
         defaultLockDuration = 7 days;
         defaultVestingDuration = 83 days;
         minLockDuration = 7 days;
