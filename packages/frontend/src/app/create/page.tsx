@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAccount, useChainId, useReadContract } from "wagmi";
+import { useSearchParams } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { formatUnits } from "viem";
 import { Card } from "@/components/ui/Card";
@@ -142,9 +143,18 @@ export default function CreatePoolPage() {
   const chainId = useChainId();
   const contracts = getContracts(chainId);
   const baseTokenOptions = BASE_TOKENS[chainId] ?? BASE_TOKENS[31337];
+  const searchParams = useSearchParams();
 
   const [step, setStep] = useState<Step>(1);
   const [tokenAddress, setTokenAddress] = useState("");
+
+  // Auto-fill token address from query param (e.g. /create?token=0x...)
+  useEffect(() => {
+    const tokenParam = searchParams.get("token");
+    if (tokenParam && /^0x[a-fA-F0-9]{40}$/.test(tokenParam)) {
+      setTokenAddress(tokenParam);
+    }
+  }, [searchParams]);
   const [selectedBaseToken, setSelectedBaseToken] = useState<BaseTokenOption>(baseTokenOptions[0]);
   const [baseAmount, setBaseAmount] = useState("");
   const [tokenAmount, setTokenAmount] = useState("");
