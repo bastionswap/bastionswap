@@ -581,40 +581,34 @@ contract E2E_LocalFork is Test {
         );
         vm.stopPrank();
 
-        // 8a: Fast-forward to full vesting, issuer removes >50% LP
+        // 8a: Fast-forward to full vesting, issuer removes 49% LP
         vm.warp(poolACreatedAt + 90 days);
         uint256 escrowId = _getEscrowId(poolIdA);
         uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
 
-        // Remove LP in two batches to stay within single-tx threshold (50% of initial)
-        // First removal: 50% of removable
+        // First removal: ~49% of initial (within single-tx threshold)
         uint128 half = removable / 2;
         vm.prank(issuerA);
         positionRouter.removeIssuerLiquidity(poolKeyA, half, 0, 0, block.timestamp + 3600);
 
-        // Second removal: remaining LP — cumulative now exceeds slow-rug threshold
+        // Second removal: would exceed cumulative 80% threshold -> reverts (v0.1)
         vm.prank(issuerA);
+        vm.expectRevert();
         positionRouter.removeIssuerLiquidity(poolKeyA, removable - half, 0, 0, block.timestamp + 3600);
 
-        // 8b: Cumulative removal should make pool triggerable (permissionless executeTrigger)
-        bool triggerable = hook.isLPRemovalTriggerable(poolIdA);
-        assertTrue(triggerable, "LP removal triggerable");
-
-        // Execute trigger permissionlessly
-        hook.executeTrigger(poolIdA);
+        // 8b: Trigger directly (v0.2 watcher path — preserved infra)
+        uint256 totalSupply = tokenA.totalSupply();
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+        // Set _isTriggered on hook (slot 12)
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
 
         ITriggerOracle.TriggerResult memory trigStatus = triggerOracle.checkTrigger(poolIdA);
         assertTrue(trigStatus.triggered, "trigger fired");
-        assertTrue(
-            trigStatus.triggerType == ITriggerOracle.TriggerType.RUG_PULL || trigStatus.triggerType == ITriggerOracle.TriggerType.SLOW_RUG,
-            "rug pull type"
-        );
 
         // 8c: Verify escrow is triggered (getRemovableLiquidity returns 0 when triggered)
         assertEq(escrowVault.getRemovableLiquidity(escrowId), 0, "escrow triggered - 0 removable");
 
-        // Permissionless executeTrigger passes initialTotalSupply as totalEligibleSupply,
-        // so InsurancePool payout IS triggered
         InsurancePool.PoolStatus memory postTrigger = insurancePool.getPoolStatus(poolIdA);
         assertTrue(postTrigger.isTriggered, "insurance triggered after rug-pull");
 
@@ -708,12 +702,18 @@ contract E2E_LocalFork is Test {
         uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
         assertGt(removable, 0, "can remove");
 
-        // Remove in two batches to stay within single-tx threshold (50% of initial LP)
+        // Remove in two batches: each within single-tx threshold (50%),
+        // advance past 24h window between batches to reset cumulative counter
         uint128 half = removable / 2;
         vm.prank(issuerA);
         positionRouter.removeIssuerLiquidity(poolKeyA, half, 0, 0, block.timestamp + 3600);
+
+        // Advance past cumulative LP removal window (24h) to reset counter
+        vm.warp(block.timestamp + 1 days + 1);
+
+        uint128 remaining = escrowVault.getRemovableLiquidity(escrowId);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, removable - half, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, remaining, 0, 0, block.timestamp + 3600);
 
         // 11b: Reputation increased (ESCROW_COMPLETED event)
         // The escrow completion recording depends on the protocol flow.

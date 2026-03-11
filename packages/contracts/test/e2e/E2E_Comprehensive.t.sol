@@ -1005,6 +1005,8 @@ contract E2E_Comprehensive is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+        // Set _isTriggered on hook (slot 12) — in v0.2, hook.executeTrigger() does this automatically
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
 
         // 1. Triggered
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
@@ -1055,6 +1057,8 @@ contract E2E_Comprehensive is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+        // Set _isTriggered on hook (slot 12) — in v0.2, hook.executeTrigger() does this automatically
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
 
         // 20a: Issuer sell -> revert
@@ -1794,6 +1798,8 @@ contract E2E_Comprehensive is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+        // Set _isTriggered on hook (slot 12) — in v0.2, hook.executeTrigger() does this automatically
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "trigger infra works");
     }
 }

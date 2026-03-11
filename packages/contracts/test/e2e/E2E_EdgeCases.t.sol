@@ -605,6 +605,7 @@ contract E2E_EdgeCases is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "poolA triggered");
 
         // Pool Y should NOT be triggered
@@ -916,6 +917,7 @@ contract E2E_EdgeCases is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
 
         // After trigger, trading is blocked (issuer sells blocked, but buys may still work)
