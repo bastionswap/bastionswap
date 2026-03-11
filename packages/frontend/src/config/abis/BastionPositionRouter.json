@@ -357,6 +357,51 @@
   },
   {
     "type": "function",
+    "name": "forceCollectFees",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "tuple",
+        "internalType": "struct PoolKey",
+        "components": [
+          {
+            "name": "currency0",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "currency1",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "fee",
+            "type": "uint24",
+            "internalType": "uint24"
+          },
+          {
+            "name": "tickSpacing",
+            "type": "int24",
+            "internalType": "int24"
+          },
+          {
+            "name": "hooks",
+            "type": "address",
+            "internalType": "contract IHooks"
+          }
+        ]
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "forceRemoveLiquidity",
     "inputs": [
       {
@@ -710,6 +755,11 @@
   },
   {
     "type": "error",
+    "name": "FeeOnTransferNotSupported",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "HookAlreadySet",
     "inputs": []
   },
@@ -726,6 +776,11 @@
   {
     "type": "error",
     "name": "OnlyPoolManager",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RebaseTokenNotSupported",
     "inputs": []
   },
   {

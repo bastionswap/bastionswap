@@ -45,6 +45,19 @@
   },
   {
     "type": "function",
+    "name": "BPS_DENOMINATOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "ESCROW_VAULT",
     "inputs": [],
     "outputs": [
@@ -150,6 +163,30 @@
   },
   {
     "type": "function",
+    "name": "claimCompensationFallback",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      },
+      {
+        "name": "holderBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "claimTreasuryFunds",
     "inputs": [
       {
@@ -233,6 +270,19 @@
   },
   {
     "type": "function",
+    "name": "emergencyTimelock",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "executeEmergencyWithdraw",
     "inputs": [
       {
@@ -264,11 +314,6 @@
         "internalType": "uint256"
       },
       {
-        "name": "merkleRoot",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
         "name": "issuedToken",
         "type": "address",
         "internalType": "address"
@@ -282,6 +327,19 @@
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "fallbackClaimPeriod",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -339,6 +397,19 @@
   },
   {
     "type": "function",
+    "name": "guardian",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "hasClaimed",
     "inputs": [
       {
@@ -357,6 +428,83 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isFallbackMode",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isMerkleMode",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "issuerRewardBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "merkleClaimPeriod",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "merkleSubmissionDeadline",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
       }
     ],
     "stateMutability": "view"
@@ -425,6 +573,32 @@
   },
   {
     "type": "function",
+    "name": "setEmergencyTimelock",
+    "inputs": [
+      {
+        "name": "newTimelock",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setFallbackClaimPeriod",
+    "inputs": [
+      {
+        "name": "newPeriod",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setFeeRate",
     "inputs": [
       {
@@ -438,10 +612,93 @@
   },
   {
     "type": "function",
+    "name": "setGuardian",
+    "inputs": [
+      {
+        "name": "newGuardian",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setIssuerRewardBps",
+    "inputs": [
+      {
+        "name": "newBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setMerkleClaimPeriod",
+    "inputs": [
+      {
+        "name": "newPeriod",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setMerkleSubmissionDeadline",
+    "inputs": [
+      {
+        "name": "newDeadline",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setTreasury",
     "inputs": [
       {
         "name": "treasury_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "submitMerkleRoot",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      },
+      {
+        "name": "root",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "transferGovernance",
+    "inputs": [
+      {
+        "name": "newGovernance",
         "type": "address",
         "internalType": "address"
       }
@@ -480,6 +737,19 @@
       },
       {
         "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "EmergencyTimelockUpdated",
+    "inputs": [
+      {
+        "name": "newTimelock",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -589,6 +859,19 @@
   },
   {
     "type": "event",
+    "name": "FallbackClaimPeriodUpdated",
+    "inputs": [
+      {
+        "name": "newPeriod",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "FeeDeposited",
     "inputs": [
       {
@@ -621,6 +904,102 @@
         "type": "uint16",
         "indexed": false,
         "internalType": "uint16"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GovernanceTransferred",
+    "inputs": [
+      {
+        "name": "oldGov",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newGov",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GuardianSet",
+    "inputs": [
+      {
+        "name": "oldGuardian",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newGuardian",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "IssuerRewardBpsUpdated",
+    "inputs": [
+      {
+        "name": "newBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MerkleClaimPeriodUpdated",
+    "inputs": [
+      {
+        "name": "newPeriod",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MerkleRootSubmitted",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "PoolId"
+      },
+      {
+        "name": "root",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MerkleSubmissionDeadlineUpdated",
+    "inputs": [
+      {
+        "name": "newDeadline",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -686,13 +1065,13 @@
         "internalType": "PoolId"
       },
       {
-        "name": "treasury",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
+        "name": "treasuryAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
-        "name": "amount",
+        "name": "issuerReward",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -761,12 +1140,17 @@
   },
   {
     "type": "error",
+    "name": "FallbackAlreadyActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "FeeRateTooHigh",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "GracePeriodNotPassed",
+    "name": "FeeRateTooLow",
     "inputs": []
   },
   {
@@ -781,12 +1165,47 @@
   },
   {
     "type": "error",
+    "name": "InvalidDuration",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidMerkleProof",
     "inputs": []
   },
   {
     "type": "error",
+    "name": "IssuerCannotClaim",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MerkleAlreadySubmitted",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "MerkleRootNotSet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MerkleSubmissionWindowActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MustWaitOneBlock",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotInFallbackMode",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotInMerkleMode",
     "inputs": []
   },
   {
@@ -797,6 +1216,11 @@
   {
     "type": "error",
     "name": "OnlyGovernance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyGuardian",
     "inputs": []
   },
   {

@@ -1,32 +1,32 @@
 {
   "base-sepolia": {
     "BastionHook": {
-      "address": "0x88214539803B55a86f7e924BCE0eECB6B610cac8",
-      "startBlock": 38739388
+      "address": "0x124854b2535239b5644D748089A31f968e50CAC8",
+      "startBlock": 38743608
     },
     "EscrowVault": {
-      "address": "0x0e7A077Bbc902f179Ae136D3a9810b97eB1aEB3b",
-      "startBlock": 38739388
+      "address": "0x1502559d2ee4174697fd713b7E782405B1eeAd0A",
+      "startBlock": 38743608
     },
     "InsurancePool": {
-      "address": "0x9646d06B5d7F914481214e8870C883a4D2B5f858",
-      "startBlock": 38739388
+      "address": "0x04a6BD3f98502934177D756bd04e28D19Fd7C93c",
+      "startBlock": 38743608
     },
     "TriggerOracle": {
-      "address": "0x3909f264a3f92622c05420Fb0af6F219600825B8",
-      "startBlock": 38739388
+      "address": "0x09dD72c65A2c477AD58A158f2E6ABbC227611481",
+      "startBlock": 38743608
     },
     "ReputationEngine": {
-      "address": "0x093D568eCc2620Af3E11Eb2906a5DdC08Defa0d8",
-      "startBlock": 38739388
+      "address": "0x62D09C1DF1980DdC6F427EF0E8368e4fe86bfA2d",
+      "startBlock": 38743608
     },
     "BastionSwapRouter": {
-      "address": "0x8997d846A8bF5E8Ef662aFC620f35aB692dc166C",
-      "startBlock": 38739388
+      "address": "0xC6Fb57dE6DBD8B45864d1a183EB686a007115135",
+      "startBlock": 38743608
     },
     "BastionPositionRouter": {
-      "address": "0x3Ae0B68e0e36A57d8e416CD4e57d89058d0d1A11",
-      "startBlock": 38739388
+      "address": "0x2601FEB47f2BE23fcaF2eEa4562a0D0577C30B2C",
+      "startBlock": 38743608
     }
   },
   "base": {
