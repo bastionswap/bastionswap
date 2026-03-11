@@ -6,7 +6,6 @@ import {InsurancePool} from "../../src/core/InsurancePool.sol";
 import {TriggerOracle} from "../../src/core/TriggerOracle.sol";
 import {ITriggerOracle} from "../../src/interfaces/ITriggerOracle.sol";
 import {IInsurancePool} from "../../src/interfaces/IInsurancePool.sol";
-import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {IReputationEngine} from "../../src/interfaces/IReputationEngine.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 

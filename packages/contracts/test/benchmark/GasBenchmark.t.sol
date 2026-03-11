@@ -4,7 +4,6 @@ pragma solidity ^0.8.26;
 import {Test, console} from "forge-std/Test.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -21,7 +20,6 @@ import {InsurancePool} from "../../src/core/InsurancePool.sol";
 import {TriggerOracle} from "../../src/core/TriggerOracle.sol";
 import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../../src/interfaces/ITriggerOracle.sol";
-import {IReputationEngine} from "../../src/interfaces/IReputationEngine.sol";
 
 contract MockRepEngine {
     function recordEvent(address, uint8, bytes calldata) external {}

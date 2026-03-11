@@ -2,18 +2,12 @@
 pragma solidity ^0.8.26;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 import {BastionHook} from "../src/hooks/BastionHook.sol";
 import {BastionPositionRouter} from "../src/router/BastionPositionRouter.sol";
 import {TestToken} from "../src/test/TestToken.sol";
 import {IEscrowVault} from "../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../src/interfaces/ITriggerOracle.sol";
-import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 
 /// @title SeedTestnet
 /// @notice Deploy test tokens and create pools on Base Sepolia.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.26;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 // ─── Uniswap V4 ─────────────────────────────────────────────
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -9,7 +9,6 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
@@ -26,7 +25,6 @@ import {TestToken} from "../../src/test/TestToken.sol";
 import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {ITriggerOracle} from "../../src/interfaces/ITriggerOracle.sol";
 import {IInsurancePool} from "../../src/interfaces/IInsurancePool.sol";
-import {IReputationEngine} from "../../src/interfaces/IReputationEngine.sol";
 import {BastionDeployer} from "../../script/BastionDeployer.sol";
 import {HookMiner} from "../../script/HookMiner.sol";
 

@@ -10,11 +10,31 @@ optimizer_runs = 200
 fs_permissions = [{ access = "read-write", path = "./" }]
 
 [lint]
-# Suppress false-positive linter warnings:
+# Suppress linter notes that are false-positives or intentional design choices:
 # - unsafe-typecast: V4 API requires int256/uint256/int128/uint128 conversions (safe by design)
 # - divide-before-multiply: tick alignment (MIN_TICK / tickSpacing) * tickSpacing is intentional rounding
 # - erc20-unchecked-transfer: remaining warnings are in test/script files (TestToken always returns true)
-exclude_lints = ["unsafe-typecast", "divide-before-multiply", "erc20-unchecked-transfer"]
+# - mixed-case-variable: GOVERNANCE is intentionally uppercase for visibility (storage, not immutable)
+# - mixed-case-function: forceRemoveIssuerLP, recordLPRemoval etc. use LP/IP domain acronyms
+# - screaming-snake-case-immutable: immutables like `hook`, `poolManager` match V4 conventions
+# - named-struct-fields: positional struct init used where field order is well-known (V4 types)
+# - unwrapped-modifier-logic: modifiers contain simple access control checks, wrapping adds overhead
+# - asm-keccak256: keccak256 in Solidity is clearer for non-assembly contexts
+# - unaliased-plain-import: forge-std Test.sol uses plain import by convention
+# - unsafe-cheatcode: vm.etch/vm.store used in test setup (not production)
+exclude_lints = [
+    "unsafe-typecast",
+    "divide-before-multiply",
+    "erc20-unchecked-transfer",
+    "mixed-case-variable",
+    "mixed-case-function",
+    "screaming-snake-case-immutable",
+    "named-struct-fields",
+    "unwrapped-modifier-logic",
+    "asm-keccak256",
+    "unaliased-plain-import",
+    "unsafe-cheatcode",
+]
 
 [profile.deploy]
 optimizer_runs = 1_000_000

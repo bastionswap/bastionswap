@@ -21,7 +21,6 @@ import {TriggerOracle} from "../../src/core/TriggerOracle.sol";
 import {IEscrowVault} from "../../src/interfaces/IEscrowVault.sol";
 import {IInsurancePool} from "../../src/interfaces/IInsurancePool.sol";
 import {ITriggerOracle} from "../../src/interfaces/ITriggerOracle.sol";
-import {IReputationEngine} from "../../src/interfaces/IReputationEngine.sol";
 
 contract MockReputationEngine {
     function recordEvent(address, uint8, bytes calldata) external {}
