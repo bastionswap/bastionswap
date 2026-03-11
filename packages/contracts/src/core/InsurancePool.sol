@@ -9,6 +9,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 
 /// @title InsurancePool
 /// @notice Per-token isolated insurance pool funded by a portion of buy-side swap fees.
@@ -66,6 +67,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 baseTokenFeePayoutBalance; // snapshot at payout time
         uint256 escrowBaseTokenBalance; // ERC-20 base tokens from force-removed LP
         address escrowBaseToken; // base token address from escrow
+        uint256 triggerBlockNumber; // block number when trigger executed (flash-loan protection)
         mapping(address => bool) claimed;
     }
 
@@ -109,6 +111,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error IssuerCannotClaim();
     error FeeRateTooLow();
     error InvalidDuration();
+    error MustWaitOneBlock();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -204,6 +207,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
         pool.isTriggered = true;
         pool.triggerTimestamp = uint40(block.timestamp);
+        pool.triggerBlockNumber = block.number;
         pool.triggerType = triggerType;
         pool.totalEligibleSupply = totalEligibleSupply;
         pool.payoutBalance = totalPayout;
@@ -238,6 +242,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         } else {
             // Fallback mode: 7-day claim period, verify balanceOf
             if (block.timestamp > pool.triggerTimestamp + fallbackClaimPeriod) revert ClaimPeriodExpired();
+            // Flash-loan protection: must wait at least one block after trigger
+            if (block.number <= pool.triggerBlockNumber) revert MustWaitOneBlock();
             if (ERC20(pool.issuedToken).balanceOf(msg.sender) < holderBalance) {
                 revert InsufficientTokenBalance();
             }
@@ -474,8 +480,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         returns (uint256)
     {
         // pro-rata: (payoutBalance * holderBalance) / totalEligibleSupply
-        // Round down to prevent over-distribution
-        return (pool.payoutBalance * holderBalance) / pool.totalEligibleSupply;
+        // Round down to prevent over-distribution; FullMath prevents overflow
+        return FullMath.mulDiv(pool.payoutBalance, holderBalance, pool.totalEligibleSupply);
     }
 
     function _calculateTokenCompensation(PoolData storage pool, uint256 holderBalance)
@@ -484,7 +490,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         returns (uint256)
     {
         if (pool.tokenPayoutBalance == 0) return 0;
-        return (pool.tokenPayoutBalance * holderBalance) / pool.totalEligibleSupply;
+        return FullMath.mulDiv(pool.tokenPayoutBalance, holderBalance, pool.totalEligibleSupply);
     }
 
     function _calculateBaseTokenCompensation(PoolData storage pool, uint256 holderBalance)
@@ -493,6 +499,6 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         returns (uint256)
     {
         if (pool.baseTokenFeePayoutBalance == 0) return 0;
-        return (pool.baseTokenFeePayoutBalance * holderBalance) / pool.totalEligibleSupply;
+        return FullMath.mulDiv(pool.baseTokenFeePayoutBalance, holderBalance, pool.totalEligibleSupply);
     }
 }

@@ -295,6 +295,9 @@ contract GasBenchmarkTest is Test, Deployers {
         vm.prank(address(triggerOracle));
         insurancePool.executePayout(pid, 1, 1000 ether, bytes32(0), address(claimToken));
 
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
+
         bytes32[] memory proof = new bytes32[](0);
 
         uint256 gasBefore = gasleft();

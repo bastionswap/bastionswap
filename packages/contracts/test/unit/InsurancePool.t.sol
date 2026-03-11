@@ -900,6 +900,9 @@ contract InsurancePoolTest is Test {
         vm.prank(oracle);
         pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
 
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
+
         // Claim using balanceOf
         bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(holder1);
@@ -934,6 +937,9 @@ contract InsurancePoolTest is Test {
 
         vm.prank(oracle);
         pool.executePayout(defaultPoolId, 1, TOTAL_SUPPLY, bytes32(0), address(mockToken));
+
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
 
         bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(holder1);

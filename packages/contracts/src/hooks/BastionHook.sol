@@ -1093,7 +1093,7 @@ contract BastionHook is BaseTestHooks {
             }
             uint256 projected = dailyCum + sellAmount;
             uint256 sellBps = (projected * 10_000) / initialSupply;
-            if (sellBps >= commitment.maxDailySellBps) revert IssuerDailySellExceeded();
+            if (sellBps > commitment.maxDailySellBps) revert IssuerDailySellExceeded();
         }
 
         // Check weekly limit
@@ -1105,7 +1105,7 @@ contract BastionHook is BaseTestHooks {
             }
             uint256 projected = weeklyCum + sellAmount;
             uint256 sellBps = (projected * 10_000) / initialSupply;
-            if (sellBps >= commitment.weeklyDumpThresholdBps) revert IssuerWeeklySellExceeded();
+            if (sellBps > commitment.weeklyDumpThresholdBps) revert IssuerWeeklySellExceeded();
         }
     }
 
@@ -1140,13 +1140,13 @@ contract BastionHook is BaseTestHooks {
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
             uint256 dailyBps = (_dailyCumulative[poolId] * 10_000) / initialSupply;
-            if (dailyBps >= commitment.maxDailySellBps) revert IssuerDumpDetected();
+            if (dailyBps > commitment.maxDailySellBps) revert IssuerDumpDetected();
         }
 
         // Check weekly limit
         if (commitment.weeklyDumpThresholdBps > 0) {
             uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000) / initialSupply;
-            if (weeklyBps >= commitment.weeklyDumpThresholdBps) revert IssuerDumpDetected();
+            if (weeklyBps > commitment.weeklyDumpThresholdBps) revert IssuerDumpDetected();
         }
     }
 

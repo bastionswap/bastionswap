@@ -489,6 +489,9 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario3_claims() internal {
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
+
         uint256 t1Bal = issuedToken.balanceOf(trader1);
         uint256 t2Bal = issuedToken.balanceOf(trader2);
 

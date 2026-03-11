@@ -16,6 +16,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 import {IBastionRouter} from "../interfaces/IBastionRouter.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 /// @title BastionPositionRouter
 /// @notice Pool creation and LP management router for Uniswap V4 pools with BastionHook.
@@ -68,6 +69,8 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     error HookAlreadySet();
     error HookNotSet();
     error SlippageExceeded();
+    error FeeOnTransferNotSupported();
+    error RebaseTokenNotSupported();
 
     event LiquidityChanged(
         PoolId indexed poolId, address indexed user,
@@ -121,6 +124,12 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         bytes calldata hookData
     ) external payable returns (PoolId poolId) {
         if (bastionHook == address(0)) revert HookNotSet();
+
+        // Full token compatibility check (FoT + rebase) — has ERC20 approval context
+        _validateTokenCompatibility(token, true);
+        if (baseToken != address(0)) {
+            _validateTokenCompatibility(baseToken, true);
+        }
 
         uint256 baseAmount = baseToken == address(0)
             ? msg.value
@@ -179,6 +188,12 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         bytes calldata permitData
     ) external payable returns (PoolId poolId) {
         if (bastionHook == address(0)) revert HookNotSet();
+
+        // Rebase-only check — no standard transferFrom available for FoT test
+        _validateTokenCompatibility(token, false);
+        if (baseToken != address(0)) {
+            _validateTokenCompatibility(baseToken, false);
+        }
 
         (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) =
             _buildPoolKey(token, baseToken, fee, tokenAmount, baseAmount);
@@ -806,6 +821,44 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         if (bal > 0) {
             (bool ok,) = msg.sender.call{value: bal}("");
             require(ok, "ETH refund failed");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  TOKEN COMPATIBILITY VALIDATION
+    // ═══════════════════════════════════════════════════════════════
+
+    /// @dev Validate that a token is compatible (not rebase, optionally not FoT).
+    /// @param token The token address to validate.
+    /// @param checkFoT If true, also check for fee-on-transfer behavior.
+    function _validateTokenCompatibility(address token, bool checkFoT) internal {
+        // Skip native ETH
+        if (token == address(0)) return;
+
+        // Rebase check: compare totalSupply before and after a zero-value self-transfer
+        uint256 supplyBefore = ERC20(token).totalSupply();
+        // A zero-value transfer should not change supply
+        // Use low-level call to avoid revert on non-standard tokens
+        (bool ok,) = token.call(abi.encodeWithSelector(IERC20Minimal.transfer.selector, address(this), 0));
+        if (ok) {
+            uint256 supplyAfter = ERC20(token).totalSupply();
+            if (supplyAfter != supplyBefore) revert RebaseTokenNotSupported();
+        }
+
+        // Fee-on-transfer check: transferFrom 1 wei and compare received amount
+        if (checkFoT) {
+            uint256 balBefore = IERC20Minimal(token).balanceOf(address(this));
+            // Attempt transferFrom 1 wei from msg.sender (requires prior approval)
+            (bool success,) = token.call(
+                abi.encodeWithSelector(IERC20Minimal.transferFrom.selector, msg.sender, address(this), 1)
+            );
+            if (success) {
+                uint256 balAfter = IERC20Minimal(token).balanceOf(address(this));
+                uint256 received = balAfter - balBefore;
+                if (received < 1) revert FeeOnTransferNotSupported();
+                // Return the 1 wei back to sender
+                IERC20Minimal(token).transfer(msg.sender, received);
+            }
         }
     }
 

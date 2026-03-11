@@ -1029,6 +1029,9 @@ contract E2E_Comprehensive is Test {
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(poolIdA);
         assertTrue(ps.isTriggered, "insurance triggered");
 
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
+
         // 4. Holder claims
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
@@ -1124,6 +1127,9 @@ contract E2E_Comprehensive is Test {
         IInsurancePool.PoolStatus memory status = insurancePool.getPoolStatus(poolIdA);
         assertTrue(status.isTriggered, "triggered");
 
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
+
         // Holder claims via fallback (no merkle root)
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
@@ -1157,6 +1163,9 @@ contract E2E_Comprehensive is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.ISSUER_DUMP, totalSupply);
+
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
 
         // Holder claims -> succeeds
         uint256 holderEthBefore = holder.balance;

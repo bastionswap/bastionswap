@@ -611,6 +611,9 @@ contract CrossContractFuzzTest is Test {
         vm.prank(oracle);
         pool.executePayout(poolId, 1, totalSupply, bytes32(0), address(claimToken));
 
+        // Advance one block for flash-loan protection
+        vm.roll(block.number + 1);
+
         // Calculate expected compensation
         uint256 expectedAmount = (feeAmount * holderBalance) / totalSupply;
         if (expectedAmount == 0) return;
