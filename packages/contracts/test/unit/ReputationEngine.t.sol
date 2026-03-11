@@ -15,6 +15,12 @@ contract ReputationEngineTest is Test {
     address public issuer;
     address public unauthorized;
 
+    // Default governance parameters (matching BastionHook defaults)
+    uint40 constant MIN_LOCK = 7 days;
+    uint40 constant MIN_VESTING = 7 days;
+    uint16 constant DEFAULT_DAILY_SELL_BPS = 500; // 5%
+    uint16 constant DEFAULT_WEEKLY_SELL_BPS = 1500; // 15%
+
     function setUp() public {
         hook = makeAddr("hook");
         escrowVault = makeAddr("escrowVault");
@@ -41,6 +47,25 @@ contract ReputationEngineTest is Test {
         });
     }
 
+    /// @dev Encodes commitment data in the new 8-value tuple format
+    function _encodeCommitmentData(
+        uint40 lockDuration,
+        uint40 vestingDuration,
+        uint16 maxDailySellBps,
+        uint16 weeklyDumpBps
+    ) internal pure returns (bytes memory) {
+        return abi.encode(
+            lockDuration,
+            vestingDuration,
+            maxDailySellBps,
+            weeklyDumpBps,
+            MIN_LOCK,
+            MIN_VESTING,
+            DEFAULT_DAILY_SELL_BPS,
+            DEFAULT_WEEKLY_SELL_BPS
+        );
+    }
+
     function _recordPoolCreated(address _issuer, address token, uint256 amount, IEscrowVault.IssuerCommitment memory c)
         internal
     {
@@ -64,11 +89,29 @@ contract ReputationEngineTest is Test {
         );
     }
 
-    function _recordCommitmentHonored(address _issuer, IEscrowVault.IssuerCommitment memory c) internal {
-        vm.prank(escrowVault);
+    function _recordCommitmentHonored(
+        address _issuer,
+        uint40 lockDuration,
+        uint40 vestingDuration,
+        uint16 maxDailySellBps,
+        uint16 weeklyDumpBps
+    ) internal {
+        vm.prank(hook);
         engine.recordEvent(
-            _issuer, IReputationEngine.EventType.COMMITMENT_HONORED, abi.encode(c)
+            _issuer,
+            IReputationEngine.EventType.COMMITMENT_HONORED,
+            _encodeCommitmentData(lockDuration, vestingDuration, maxDailySellBps, weeklyDumpBps)
         );
+    }
+
+    /// @dev Convenience overload: default daily/weekly sell params (= governance defaults → 0 bonus)
+    function _recordCommitmentHonoredDefault(address _issuer) internal {
+        _recordCommitmentHonored(_issuer, MIN_LOCK, MIN_VESTING, DEFAULT_DAILY_SELL_BPS, DEFAULT_WEEKLY_SELL_BPS);
+    }
+
+    /// @dev Convenience overload: strict params (long lock/vest, tight sell limits)
+    function _recordCommitmentHonoredStrict(address _issuer) internal {
+        _recordCommitmentHonored(_issuer, 90 days, 365 days, 50, 150);
     }
 
     function _recordCommitmentViolated(address _issuer, uint8 triggerType) internal {
@@ -116,13 +159,13 @@ contract ReputationEngineTest is Test {
     }
 
     function test_spamPoolCreation_dilutesVestingScore() public {
-        // Create 1 pool and complete it → vesting ratio 1/1 = 300
+        // Create 1 pool and complete it → vesting ratio 1/1 = 500
         _recordPoolCreated(issuer, makeAddr("legit"), 100 ether, _strictCommitment());
         _recordEscrowCompleted(issuer, 100 ether, 365);
         vm.warp(block.timestamp + 365 days);
         uint256 scoreWith1Pool = engine.getScore(issuer);
 
-        // Now create 9 spam pools → vesting ratio drops to 1/10 = 30
+        // Now create 9 spam pools → vesting ratio drops to 1/10 = 50
         for (uint256 i = 0; i < 9; i++) {
             _recordPoolCreated(issuer, makeAddr(string(abi.encode("spam", i))), 1 ether, _defaultCommitment());
         }
@@ -162,7 +205,7 @@ contract ReputationEngineTest is Test {
         }
         uint256 scoreBeforeComplete = engine.getScore(issuer);
 
-        // Complete 1 escrow — should still earn SOME score (vesting 1/100 * 300 = 3)
+        // Complete 1 escrow — should still earn SOME score (vesting 1/100 * 500 = 5)
         _recordEscrowCompleted(issuer, 100 ether, 365);
         uint256 scoreAfterComplete = engine.getScore(issuer);
 
@@ -176,7 +219,7 @@ contract ReputationEngineTest is Test {
     function test_triggerFired_decreasesScore() public {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
         _recordEscrowCompleted(issuer, 100 ether, 365);
-        _recordCommitmentHonored(issuer, _strictCommitment());
+        _recordCommitmentHonoredStrict(issuer);
         uint256 scoreBefore = engine.getScore(issuer);
 
         _recordTriggerFired(issuer, 1); // RUG_PULL
@@ -187,7 +230,7 @@ contract ReputationEngineTest is Test {
 
     function test_triggerFired_severePenalty100() public {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
-        _recordCommitmentHonored(issuer, _strictCommitment());
+        _recordCommitmentHonoredStrict(issuer);
         vm.warp(block.timestamp + 365 days);
         uint256 scoreBefore = engine.getScore(issuer);
 
@@ -199,7 +242,7 @@ contract ReputationEngineTest is Test {
 
     function test_triggerFired_nonSeverePenalty50() public {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
-        _recordCommitmentHonored(issuer, _strictCommitment());
+        _recordCommitmentHonoredStrict(issuer);
         vm.warp(block.timestamp + 365 days);
         uint256 scoreBefore = engine.getScore(issuer);
 
@@ -214,7 +257,7 @@ contract ReputationEngineTest is Test {
         for (uint256 i = 1; i <= 5; i++) {
             _recordPoolCreated(issuer, makeAddr(string(abi.encode("t", i))), 100 ether, _strictCommitment());
             _recordEscrowCompleted(issuer, 100 ether, 365);
-            _recordCommitmentHonored(issuer, _strictCommitment());
+            _recordCommitmentHonoredStrict(issuer);
         }
         vm.warp(block.timestamp + 365 days);
 
@@ -246,10 +289,62 @@ contract ReputationEngineTest is Test {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
         uint256 scoreBefore = engine.getScore(issuer);
 
-        _recordCommitmentHonored(issuer, _strictCommitment());
+        _recordCommitmentHonoredStrict(issuer);
         uint256 scoreAfter = engine.getScore(issuer);
 
         assertGt(scoreAfter, scoreBefore, "Honored strict commitment should increase score");
+    }
+
+    function test_commitmentHonored_strictestGivesMaxScore() public {
+        // Max strictness: MAX_LOCK_DURATION, MAX_VESTING_DURATION, 0 daily sell, 0 weekly sell
+        _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
+        _recordCommitmentHonored(issuer, 90 days, 365 days, 0, 0);
+
+        uint256 score = engine.getScore(issuer);
+        // commitment score = 200 (max), + baseline 100 = 300
+        assertGe(score, 300, "Strictest commitment should give ~200 commitment points");
+    }
+
+    function test_commitmentHonored_minimalGivesZero() public {
+        // Minimal strictness: min lock, min vesting, default sell limits
+        _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
+        _recordCommitmentHonored(issuer, MIN_LOCK, MIN_VESTING, DEFAULT_DAILY_SELL_BPS, DEFAULT_WEEKLY_SELL_BPS);
+
+        uint256 score = engine.getScore(issuer);
+        // commitment score = 0, + baseline 100 = 100
+        assertEq(score, 100, "Minimal commitment should give 0 commitment points");
+    }
+
+    function test_commitmentHonored_mixedStrictness() public {
+        // Strict lock + lenient sell: should get partial score
+        _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
+        _recordCommitmentHonored(
+            issuer,
+            90 days, // max lock → full lock bonus
+            MIN_VESTING, // min vesting → 0 vesting bonus
+            DEFAULT_DAILY_SELL_BPS, // default → 0 daily bonus
+            DEFAULT_WEEKLY_SELL_BPS // default → 0 weekly bonus
+        );
+
+        uint256 score = engine.getScore(issuer);
+        // Only 1 of 4 components maxed → ~50 commitment points
+        // baseline 100 + ~50 = ~150
+        assertGt(score, 100, "Mixed strictness should give partial score");
+        assertLt(score, 200, "Mixed strictness should not give max score");
+    }
+
+    function test_commitmentHonored_multipleEscrows_averaged() public {
+        _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _defaultCommitment());
+        _recordPoolCreated(issuer, makeAddr("tokenB"), 100 ether, _defaultCommitment());
+
+        // First escrow: max strictness → 200 points
+        _recordCommitmentHonored(issuer, 90 days, 365 days, 0, 0);
+        // Second escrow: min strictness → 0 points
+        _recordCommitmentHonored(issuer, MIN_LOCK, MIN_VESTING, DEFAULT_DAILY_SELL_BPS, DEFAULT_WEEKLY_SELL_BPS);
+
+        uint256 score = engine.getScore(issuer);
+        // Average of (200, 0) = 100 commitment points + baseline 100 = 200
+        assertEq(score, 200, "Multiple escrows should be averaged");
     }
 
     // ─── 6. Wallet Age ────────────────────────────────────────────────
@@ -287,9 +382,9 @@ contract ReputationEngineTest is Test {
         _recordEscrowCompleted(issuer, 200 ether, 365);
         _recordEscrowCompleted(issuer, 150 ether, 365);
 
-        // Honor commitments
-        _recordCommitmentHonored(issuer, _strictCommitment());
-        _recordCommitmentHonored(issuer, _strictCommitment());
+        // Honor commitments with strict params
+        _recordCommitmentHonoredStrict(issuer);
+        _recordCommitmentHonoredStrict(issuer);
 
         vm.warp(block.timestamp + 200 days);
 
@@ -360,16 +455,11 @@ contract ReputationEngineTest is Test {
     }
 
     function test_edge_scoreClampedAt1000() public {
-        IEscrowVault.IssuerCommitment memory maxStrict = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
-            maxSellPercent: 0
-        });
-
-        // Build maximum score via completions + commitments (no diversity/pool-creation bonus)
+        // Build maximum score via completions + commitments
         for (uint256 i = 1; i <= 5; i++) {
-            _recordPoolCreated(issuer, makeAddr(string(abi.encode("t", i))), 500_000e18, maxStrict);
+            _recordPoolCreated(issuer, makeAddr(string(abi.encode("t", i))), 500_000e18, _strictCommitment());
             _recordEscrowCompleted(issuer, 500_000e18, 365);
-            _recordCommitmentHonored(issuer, maxStrict);
+            _recordCommitmentHonored(issuer, 90 days, 365 days, 0, 0); // max strictness
         }
         vm.warp(block.timestamp + 730 days);
 
@@ -386,7 +476,7 @@ contract ReputationEngineTest is Test {
 
     function test_edge_commitmentViolated_actsLikeTrigger() public {
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
-        _recordCommitmentHonored(issuer, _strictCommitment());
+        _recordCommitmentHonoredStrict(issuer);
         vm.warp(block.timestamp + 365 days);
         uint256 scoreBefore = engine.getScore(issuer);
 
@@ -401,7 +491,7 @@ contract ReputationEngineTest is Test {
         address issuerB = makeAddr("issuerB");
 
         _recordPoolCreated(issuer, makeAddr("tokenA"), 100 ether, _strictCommitment());
-        _recordCommitmentHonored(issuer, _strictCommitment());
+        _recordCommitmentHonoredStrict(issuer);
         _recordTriggerFired(issuerB, 1);
 
         uint256 scoreA = engine.getScore(issuer);

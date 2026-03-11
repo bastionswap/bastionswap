@@ -384,6 +384,28 @@ contract BastionHook is BaseTestHooks {
                     revert ExceedsVestedAmount(liquidityToRemove, removable);
                 }
                 escrowVault.recordLPRemoval(escrowId, liquidityToRemove);
+
+                // Fire COMMITMENT_HONORED when escrow is fully completed (no trigger = honored)
+                if (escrowVault.isFullyVested(poolId)) {
+                    PoolCommitment memory commitment = _poolCommitments[poolId];
+                    ITriggerOracle.TriggerConfig memory defaultCfg = triggerOracle.getDefaultTriggerConfig();
+                    try reputationEngine.recordEvent(
+                        issuer,
+                        IReputationEngine.EventType.COMMITMENT_HONORED,
+                        abi.encode(
+                            commitment.lockDuration,
+                            commitment.vestingDuration,
+                            commitment.maxDailySellBps,
+                            commitment.weeklyDumpThresholdBps,
+                            minLockDuration,
+                            minVestingDuration,
+                            defaultCfg.dumpThresholdPercent,
+                            defaultCfg.weeklyDumpThresholdPercent
+                        )
+                    ) {} catch {
+                        emit ExternalCallFailed("ReputationEngine.COMMITMENT_HONORED", poolId);
+                    }
+                }
             }
             // else: non-issuer using same router → allow freely
         }

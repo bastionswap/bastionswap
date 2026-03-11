@@ -2,7 +2,6 @@
 pragma solidity =0.8.26;
 
 import {IReputationEngine} from "../interfaces/IReputationEngine.sol";
-import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 
 
 /// @title ReputationEngine
@@ -22,6 +21,12 @@ contract ReputationEngine is IReputationEngine {
 
     /// @notice Maximum basis points (100%)
     uint256 private constant MAX_BPS = 10_000;
+
+    /// @notice Max lock duration for normalization (90 days)
+    uint256 public constant MAX_LOCK_DURATION = 90 days;
+
+    /// @notice Max vesting duration for normalization (365 days)
+    uint256 public constant MAX_VESTING_DURATION = 365 days;
 
     // ─── Structs ─────────────────────────────────────────────────────
 
@@ -165,9 +170,21 @@ contract ReputationEngine is IReputationEngine {
     }
 
     function _handleCommitmentHonored(IssuerProfile storage profile, bytes calldata data) internal {
-        IEscrowVault.IssuerCommitment memory commitment = abi.decode(data, (IEscrowVault.IssuerCommitment));
+        (
+            uint40 lockDuration,
+            uint40 vestingDuration,
+            uint16 maxDailySellBps,
+            uint16 weeklyDumpThresholdBps,
+            uint40 _minLockDuration,
+            uint40 _minVestingDuration,
+            uint16 defaultDailySellBps,
+            uint16 defaultWeeklySellBps
+        ) = abi.decode(data, (uint40, uint40, uint16, uint16, uint40, uint40, uint16, uint16));
 
-        profile.commitmentScore += _calcSingleCommitmentStrictness(commitment);
+        profile.commitmentScore += _calcSingleCommitmentStrictness(
+            lockDuration, vestingDuration, maxDailySellBps, weeklyDumpThresholdBps,
+            _minLockDuration, _minVestingDuration, defaultDailySellBps, defaultWeeklySellBps
+        );
         profile.commitmentCount++;
     }
 
@@ -219,13 +236,55 @@ contract ReputationEngine is IReputationEngine {
     }
 
     /// @dev Calculates strictness of a single commitment (0..200 range).
-    ///      Normalizes both components to BPS scale, sums, then divides once to minimize rounding loss.
-    function _calcSingleCommitmentStrictness(IEscrowVault.IssuerCommitment memory c) internal pure returns (uint256) {
-        // Both components normalized to 0..MAX_BPS (10000) scale
-        uint256 withdrawBps = MAX_BPS - uint256(c.dailyWithdrawLimit);
-        uint256 sellBps = MAX_BPS - uint256(c.maxSellPercent);
+    ///      Four components: lock duration, vesting duration, daily sell limit, weekly sell limit.
+    function _calcSingleCommitmentStrictness(
+        uint40 lockDuration,
+        uint40 vestingDuration,
+        uint16 maxDailySellBps,
+        uint16 weeklyDumpThresholdBps,
+        uint40 _minLockDuration,
+        uint40 _minVestingDuration,
+        uint16 defaultDailySellBps,
+        uint16 defaultWeeklySellBps
+    ) internal pure returns (uint256) {
+        uint256 totalBonus = 0;
+        uint256 components = 0;
 
-        // Sum (0..20000) then scale to 0..200 in one division
-        return ((withdrawBps + sellBps) * 200) / (2 * MAX_BPS);
+        // Lock duration bonus: (lockDuration - minLock) / (MAX_LOCK - minLock)
+        if (MAX_LOCK_DURATION > _minLockDuration && lockDuration > _minLockDuration) {
+            uint256 lockBonus = uint256(lockDuration - _minLockDuration) * MAX_BPS
+                / (MAX_LOCK_DURATION - _minLockDuration);
+            if (lockBonus > MAX_BPS) lockBonus = MAX_BPS;
+            totalBonus += lockBonus;
+        }
+        components++;
+
+        // Vesting duration bonus: (vestingDuration - minVesting) / (MAX_VESTING - minVesting)
+        if (MAX_VESTING_DURATION > _minVestingDuration && vestingDuration > _minVestingDuration) {
+            uint256 vestingBonus = uint256(vestingDuration - _minVestingDuration) * MAX_BPS
+                / (MAX_VESTING_DURATION - _minVestingDuration);
+            if (vestingBonus > MAX_BPS) vestingBonus = MAX_BPS;
+            totalBonus += vestingBonus;
+        }
+        components++;
+
+        // Daily sell bonus: (defaultDaily - poolDaily) / defaultDaily
+        if (defaultDailySellBps > 0 && maxDailySellBps < defaultDailySellBps) {
+            uint256 dailyBonus = uint256(defaultDailySellBps - maxDailySellBps) * MAX_BPS
+                / defaultDailySellBps;
+            totalBonus += dailyBonus;
+        }
+        components++;
+
+        // Weekly sell bonus: (defaultWeekly - poolWeekly) / defaultWeekly
+        if (defaultWeeklySellBps > 0 && weeklyDumpThresholdBps < defaultWeeklySellBps) {
+            uint256 weeklyBonus = uint256(defaultWeeklySellBps - weeklyDumpThresholdBps) * MAX_BPS
+                / defaultWeeklySellBps;
+            totalBonus += weeklyBonus;
+        }
+        components++;
+
+        // Scale: totalBonus is 0..4*MAX_BPS, map to 0..200
+        return (totalBonus * 200) / (components * MAX_BPS);
     }
 }
