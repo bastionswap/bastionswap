@@ -78,7 +78,7 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => immutable commitment set at pool creation
     mapping(PoolId => PoolCommitment) internal _poolCommitments;
 
-    /// @dev poolId => initial total supply at pool creation (for sell limit denominator)
+    /// @dev poolId => initial total supply at pool creation (for insurance payout calculation)
     mapping(PoolId => uint256) internal _initialTotalSupply;
 
     /// @dev poolId => cumulative daily sell amount
@@ -540,8 +540,8 @@ contract BastionHook is BaseTestHooks {
                     int128 issuedDelta = issuedIsToken0 ? delta.amount0() : delta.amount1();
                     if (issuedDelta < 0) {
                         uint256 soldAmount = uint256(uint128(-issuedDelta));
-                        uint256 totalSupply = ERC20(issuedToken).totalSupply();
-                        if (totalSupply > 0) {
+                        uint256 currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
+                        if (currentReserve > 0) {
                             // Enforce sell limits (2nd layer — catches all paths, revert only)
                             PoolCommitment memory commitment = _poolCommitments[poolId];
                             if (commitment.isSet) {
@@ -1091,8 +1091,9 @@ contract BastionHook is BaseTestHooks {
         PoolCommitment memory commitment,
         uint256 sellAmount
     ) internal view {
-        uint256 initialSupply = _initialTotalSupply[poolId];
-        if (initialSupply == 0) return;
+        address issuedToken = _issuedTokens[poolId];
+        uint256 currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
+        if (currentReserve == 0) return;
 
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
@@ -1103,7 +1104,7 @@ contract BastionHook is BaseTestHooks {
                 dailyCum = 0;
             }
             uint256 projected = dailyCum + sellAmount;
-            uint256 sellBps = (projected * 10_000 + initialSupply - 1) / initialSupply;
+            uint256 sellBps = (projected * 10_000 + currentReserve - 1) / currentReserve;
             if (sellBps > commitment.maxDailySellBps) revert IssuerDailySellExceeded();
         }
 
@@ -1115,7 +1116,7 @@ contract BastionHook is BaseTestHooks {
                 weeklyCum = 0;
             }
             uint256 projected = weeklyCum + sellAmount;
-            uint256 sellBps = (projected * 10_000 + initialSupply - 1) / initialSupply;
+            uint256 sellBps = (projected * 10_000 + currentReserve - 1) / currentReserve;
             if (sellBps > commitment.weeklyDumpThresholdBps) revert IssuerWeeklySellExceeded();
         }
     }
@@ -1127,8 +1128,9 @@ contract BastionHook is BaseTestHooks {
         PoolCommitment memory commitment,
         uint256 soldAmount
     ) internal {
-        uint256 initialSupply = _initialTotalSupply[poolId];
-        if (initialSupply == 0) return;
+        address issuedToken = _issuedTokens[poolId];
+        uint256 currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
+        if (currentReserve == 0) return;
 
         // Reset daily window if expired
         uint40 dailyStart = _dailyWindowStart[poolId];
@@ -1150,13 +1152,13 @@ contract BastionHook is BaseTestHooks {
 
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
-            uint256 dailyBps = (_dailyCumulative[poolId] * 10_000 + initialSupply - 1) / initialSupply;
+            uint256 dailyBps = (_dailyCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
             if (dailyBps > commitment.maxDailySellBps) revert IssuerDumpDetected();
         }
 
         // Check weekly limit
         if (commitment.weeklyDumpThresholdBps > 0) {
-            uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000 + initialSupply - 1) / initialSupply;
+            uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
             if (weeklyBps > commitment.weeklyDumpThresholdBps) revert IssuerDumpDetected();
         }
     }

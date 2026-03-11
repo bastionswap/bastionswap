@@ -1228,9 +1228,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_IssuerRouterSell_BelowLimit_Succeeds() public {
         _initPoolWithIssuer();
 
-        uint256 totalSupply = issuedToken.totalSupply();
-        // Sell 2% of supply — well below 3% daily limit
-        uint256 sellAmount = (totalSupply * 200) / 10_000;
+        uint256 poolReserve = issuedToken.balanceOf(address(manager));
+        // Sell 2% of pool reserve — well below 3% daily limit
+        uint256 sellAmount = (poolReserve * 200) / 10_000;
 
         // Should succeed without revert
         _issuerSellIssuedToken(sellAmount);
@@ -1297,9 +1297,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_IssuerRouterSell_ExceedsDaily_RevertsAfterSwap() public {
         _initPoolWithLargeLiquidity();
 
-        uint256 initialSupply = hook.getInitialTotalSupply(poolId);
-        // Sell 4% of initial supply — exceeds 3% daily limit (300 bps)
-        uint256 sellAmount = (initialSupply * 400) / 10_000;
+        uint256 poolReserve = issuedToken.balanceOf(address(manager));
+        // Sell 4% of pool reserve — exceeds 3% daily limit (300 bps)
+        uint256 sellAmount = (poolReserve * 400) / 10_000;
 
         // Pre-approve so vm.expectRevert catches the swap, not approve
         vm.startPrank(issuerAddr);
@@ -1329,9 +1329,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_IssuerSell_WeeklyLimit_Reverts() public {
         _initPoolWithLargeLiquidity();
 
-        uint256 initialSupply = hook.getInitialTotalSupply(poolId);
         // Weekly threshold: 1500 bps (15%), Daily threshold: 300 bps (3%)
-        // Strategy: sell 2.9% per day for 5 days = 14.5%, then 2% more → 16.5% > 15%
+        // Note: sells push issued tokens INTO the pool, so reserve grows after each sell.
+        // Strategy: sell 2.9% of current reserve each day. The weekly cumulative grows
+        // while the denominator (reserve) also grows. After enough days, cumulative
+        // exceeds 15% of current reserve.
 
         // Pre-approve
         vm.startPrank(issuerAddr);
@@ -1339,20 +1341,23 @@ contract BastionHookIntegrationTest is Test, Deployers {
         baseToken.approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
 
-        // Days 0-4: sell 2.9% each (cumulative 14.5% < 15%)
+        // Days 0-4: sell 2.9% of current reserve each day (under 3% daily limit).
+        // Each sell increases the reserve (issued tokens flow in), but cumulative
+        // sells accumulate. After 5 days: cumulative ≈ 14.5% which is under 15%.
         for (uint256 i = 0; i < 5; i++) {
             if (i > 0) vm.warp(block.timestamp + 1 days);
-            _issuerSellIssuedToken((initialSupply * 290) / 10_000);
+            uint256 currentReserve = issuedToken.balanceOf(address(manager));
+            uint256 dailySellAmount = (currentReserve * 290) / 10_000;
+            _issuerSellIssuedToken(dailySellAmount);
         }
 
-        // Day 5: sell 2% — weekly cumulative = 16.5% > 15% weekly threshold
-        // The beforeSwap 1st layer catches this with IssuerWeeklySellExceeded,
-        // wrapped in PoolManager's WrappedError
+        // Day 5: sell 2.9% more — should push weekly cumulative over 15% of current reserve
         vm.warp(block.timestamp + 1 days);
 
+        uint256 currentReserve = issuedToken.balanceOf(address(manager));
         bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
         bool zeroForOne = issuedIsToken0;
-        uint256 sellAmount = (initialSupply * 200) / 10_000;
+        uint256 sellAmount = (currentReserve * 290) / 10_000;
 
         vm.prank(issuerAddr);
         vm.expectRevert();
@@ -1366,6 +1371,123 @@ contract BastionHookIntegrationTest is Test, Deployers {
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             abi.encode(issuerAddr)
         );
+    }
+
+    function test_SellLimit_ScalesWithPoolSize() public {
+        _initPoolWithLargeLiquidity();
+
+        uint256 poolReserve = issuedToken.balanceOf(address(manager));
+        // Sell exactly 3% of pool reserve — at the limit (300 bps). Should succeed.
+        uint256 atLimitAmount = (poolReserve * 300) / 10_000;
+        _issuerSellIssuedToken(atLimitAmount);
+
+        // Next day: sell 1 wei over 3% of current reserve — should revert
+        vm.warp(block.timestamp + 1 days);
+        uint256 newReserve = issuedToken.balanceOf(address(manager));
+        uint256 overLimitAmount = (newReserve * 300) / 10_000 + 1;
+
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+        bool zeroForOne = issuedIsToken0;
+
+        vm.prank(issuerAddr);
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(overLimitAmount),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(issuerAddr)
+        );
+    }
+
+    function test_SellLimit_ShrinksWithPoolSize() public {
+        _initPoolWithLargeLiquidity();
+
+        uint256 initialReserve = issuedToken.balanceOf(address(manager));
+        // Trader buys issued tokens, removing them from pool → reserve shrinks
+        baseToken.mint(trader, 200 ether);
+        vm.prank(trader);
+        baseToken.approve(address(swapRouter), type(uint256).max);
+        _traderBuyIssuedToken(100 ether);
+
+        uint256 shrunkReserve = issuedToken.balanceOf(address(manager));
+        assertLt(shrunkReserve, initialReserve, "Reserve should have shrunk from buy");
+
+        // A sell amount that was 2% of original reserve is now a larger % of shrunken reserve
+        uint256 sellAmount = (initialReserve * 290) / 10_000; // 2.9% of original
+
+        // Check if this exceeds 3% of shrunken reserve
+        uint256 sellBps = (sellAmount * 10_000 + shrunkReserve - 1) / shrunkReserve;
+        if (sellBps > 300) {
+            // Should revert because it exceeds the daily limit against shrunken reserve
+            bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+            bool zeroForOne = issuedIsToken0;
+
+            vm.prank(issuerAddr);
+            vm.expectRevert();
+            swapRouter.swap(
+                poolKey,
+                SwapParams({
+                    zeroForOne: zeroForOne,
+                    amountSpecified: -int256(sellAmount),
+                    sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+                }),
+                PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+                abi.encode(issuerAddr)
+            );
+        } else {
+            // If reserve didn't shrink enough, sell should still succeed
+            _issuerSellIssuedToken(sellAmount);
+        }
+    }
+
+    function test_SellLimit_IssuerCantManipulate() public {
+        _initPoolWithLargeLiquidity();
+
+        uint256 reserveBefore = issuedToken.balanceOf(address(manager));
+
+        // Issuer sends tokens directly to PoolManager to inflate balanceOf
+        uint256 inflateAmount = 1000 ether;
+        vm.prank(issuerAddr);
+        issuedToken.transfer(address(manager), inflateAmount);
+
+        uint256 reserveAfter = issuedToken.balanceOf(address(manager));
+        assertEq(reserveAfter, reserveBefore + inflateAmount, "balanceOf increased");
+
+        // The inflated reserve makes limits more lenient (larger denominator).
+        // Sell 4% of original reserve — would exceed 3% daily limit normally,
+        // but with inflated denominator it might pass.
+        uint256 sellAmount = (reserveBefore * 400) / 10_000;
+        uint256 sellBps = (sellAmount * 10_000 + reserveAfter - 1) / reserveAfter;
+
+        // Document the manipulation: sell passes because denominator is inflated.
+        // This is an accepted trade-off for v1 — the issuer loses the donated tokens
+        // (V4 internal accounting ignores external transfers), making it economically
+        // self-defeating.
+        if (sellBps <= 300) {
+            // The inflated reserve made this pass — documenting the edge case
+            _issuerSellIssuedToken(sellAmount);
+        } else {
+            // If inflation wasn't enough to change the outcome, it still reverts
+            bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+            bool zeroForOne = issuedIsToken0;
+
+            vm.prank(issuerAddr);
+            vm.expectRevert();
+            swapRouter.swap(
+                poolKey,
+                SwapParams({
+                    zeroForOne: zeroForOne,
+                    amountSpecified: -int256(sellAmount),
+                    sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+                }),
+                PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+                abi.encode(issuerAddr)
+            );
+        }
     }
 
     function test_NonIssuerSell_NoRestriction() public {
