@@ -17,6 +17,8 @@ import { parseErrorMessage } from "@/utils/errorMessages";
 import { getContracts } from "@/config/contracts";
 import { VestingChart } from "@/components/ui/VestingChart";
 import { usePoolByToken } from "@/hooks/usePools";
+import { useTokenInfo, useTokenBalance as useTokenBalanceInfo } from "@/hooks/useTokenInfo";
+import { useTokenBalance } from "@/hooks/useSwap";
 import BastionHookAbi from "@/config/abis/BastionHook.json";
 import Link from "next/link";
 
@@ -189,6 +191,17 @@ export default function CreatePoolPage() {
     ? formatUnits(minBaseAmountRaw as bigint, selectedBaseToken.decimals)
     : undefined;
 
+  // Token info & balances
+  const isValidToken = /^0x[a-fA-F0-9]{40}$/.test(tokenAddress);
+  const tokenAddr = isValidToken ? (tokenAddress as `0x${string}`) : undefined;
+  const { name: tokenName, symbol: tokenSymbol, decimals: tokenDecimals, isLoading: tokenInfoLoading } = useTokenInfo(tokenAddr);
+  const { balance: tokenBalanceRaw } = useTokenBalanceInfo(tokenAddr, address);
+  const { balance: baseBalanceRaw } = useTokenBalance(
+    selectedBaseToken.address,
+    address,
+  );
+  const effectiveTokenDecimals = tokenDecimals ?? 18;
+
   const {
     step: poolStep,
     error,
@@ -344,9 +357,28 @@ export default function CreatePoolPage() {
             placeholder="0x..."
             className="input-base font-mono text-sm"
           />
+          {isValidToken && (
+            <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+              {tokenInfoLoading ? (
+                <p className="text-sm text-gray-400">Loading token info...</p>
+              ) : tokenSymbol ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{tokenName}</p>
+                    <p className="text-xs text-gray-500">{tokenSymbol} &middot; {tokenDecimals} decimals</p>
+                  </div>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-bastion-50">
+                    <span className="text-xs font-bold text-bastion-600">{tokenSymbol?.slice(0, 2)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-red-500">No ERC-20 contract found at this address.</p>
+              )}
+            </div>
+          )}
           <button
             onClick={() => setStep(2)}
-            disabled={!/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)}
+            disabled={!isValidToken || (!tokenInfoLoading && !tokenSymbol)}
             className="btn-primary mt-5 w-full py-3.5 text-base"
           >
             Continue
@@ -372,7 +404,18 @@ export default function CreatePoolPage() {
           </div>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">Token Amount</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm font-medium text-gray-700">Token Amount</label>
+                {tokenBalanceRaw != null && (
+                  <button
+                    type="button"
+                    onClick={() => setTokenAmount(formatUnits(tokenBalanceRaw, effectiveTokenDecimals))}
+                    className="text-xs text-gray-400 hover:text-bastion-600 transition-colors"
+                  >
+                    Balance: {formatCompact(Number(formatUnits(tokenBalanceRaw, effectiveTokenDecimals)))}
+                  </button>
+                )}
+              </div>
               <input
                 type="number"
                 value={tokenAmount}
@@ -409,9 +452,20 @@ export default function CreatePoolPage() {
             </div>
 
             <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                {selectedBaseToken.symbol} Amount
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm font-medium text-gray-700">
+                  {selectedBaseToken.symbol} Amount
+                </label>
+                {baseBalanceRaw != null && (
+                  <button
+                    type="button"
+                    onClick={() => setBaseAmount(formatUnits(baseBalanceRaw, selectedBaseToken.decimals))}
+                    className="text-xs text-gray-400 hover:text-bastion-600 transition-colors"
+                  >
+                    Balance: {formatCompact(Number(formatUnits(baseBalanceRaw, selectedBaseToken.decimals)))}
+                  </button>
+                )}
+              </div>
               <input
                 type="number"
                 value={baseAmount}
