@@ -161,6 +161,9 @@ contract E2E_LocalFork is Test {
         (bool ok,) = address(hook).call{value: 1 ether}("");
         require(ok, "hook fund");
 
+        // ── Raise TVL cap for E2E tests ──
+        hook.setMaxPoolTVL(0); // unlimited
+
         vm.stopPrank();
 
         // ── Create TokenA/ETH pool (Issuer A) ──

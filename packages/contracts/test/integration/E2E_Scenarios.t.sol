@@ -329,7 +329,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("  Escrow locked down (LP removal permanently blocked)");
     }
 
-    function _scenario1_insuranceClaims() internal {
+    function _scenario1_insuranceClaims() internal view {
         // RUG_PULL trigger passes totalEligibleSupply from _initialTotalSupply,
         // so InsurancePool.executePayout IS called automatically by TriggerOracle.
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);

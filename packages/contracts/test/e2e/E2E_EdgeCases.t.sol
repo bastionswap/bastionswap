@@ -259,6 +259,9 @@ contract E2E_EdgeCases is Test {
         // ── Set treasury ──
         insurancePool.setTreasury(deployer);
 
+        // ── Raise TVL cap for E2E tests ──
+        hook.setMaxPoolTVL(0); // unlimited
+
         vm.stopPrank();
 
         // ── Create default TokenA/ETH pool ──
@@ -441,9 +444,9 @@ contract E2E_EdgeCases is Test {
 
     function test_SellExactlyAtLimit_Allowed() public {
         // Default daily sell limit is 300 bps (3%)
-        uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        // Sell exactly 3% = at the limit -> should succeed with > comparison
-        uint256 exactLimitAmount = (initialSupply * 300) / 10_000;
+        uint256 poolReserve = tokenA.balanceOf(address(pm));
+        // Sell exactly 3% of pool reserve = at the limit -> should succeed with > comparison
+        uint256 exactLimitAmount = (poolReserve * 300) / 10_000;
 
         // Need issuerA to have enough tokens
         uint256 issuerBal = tokenA.balanceOf(issuerA);
@@ -460,20 +463,20 @@ contract E2E_EdgeCases is Test {
     }
 
     function test_SellOneAboveLimit_Reverts() public {
-        // Create a pool with tight limits for precise testing
+        // Create a pool with default limits (300 bps = 3% daily) for precise testing
         vm.startPrank(deployer);
         TestToken tkLimit = _createFreshToken("Limit", "LMT", 1_000_000e18);
         tkLimit.transfer(issuerB, 500_000e18);
         vm.stopPrank();
 
         ITriggerOracle.TriggerConfig memory cfg = _defaultTriggerConfig();
-        cfg.dumpThresholdPercent = 1000; // 10% daily sell limit
+        // dumpThresholdPercent = 300 (3%) by default — must be ≤ governance default
 
-        (PoolKey memory key, PoolId pid) = _createPoolForIssuer(issuerB, tkLimit, 5 ether, 100_000e18, cfg);
+        (PoolKey memory key,) = _createPoolForIssuer(issuerB, tkLimit, 5 ether, 100_000e18, cfg);
 
-        uint256 initialSupply = hook.getInitialTotalSupply(pid);
+        uint256 poolReserve = tkLimit.balanceOf(address(pm));
         // Sell exactly at limit (should succeed)
-        uint256 atLimit = (initialSupply * 1000) / 10_000;
+        uint256 atLimit = (poolReserve * 300) / 10_000;
 
         vm.startPrank(issuerB);
         tkLimit.approve(address(swapRouter), type(uint256).max);
@@ -482,10 +485,12 @@ contract E2E_EdgeCases is Test {
         swapRouter.swapExactInput(key, false, atLimit, 0, block.timestamp + 3600);
 
         // Next day: sell 1 BPS above the limit -> should revert
-        // Note: +1 wei isn't enough due to integer division truncation in BPS calc.
-        // We need at least 1 full BPS worth of tokens to exceed the threshold.
+        // We need at least 1 full BPS worth of tokens to exceed the threshold
+        // (due to ceil division rounding).
+        // Re-read pool reserve (grows after sell since issued tokens flow into pool)
         vm.warp(block.timestamp + 1 days);
-        uint256 overLimit = (initialSupply * (1000 + 1)) / 10_000; // 1001 bps = 10.01%
+        uint256 newReserve = tkLimit.balanceOf(address(pm));
+        uint256 overLimit = (newReserve * (300 + 1)) / 10_000; // 301 bps = 3.01%
         vm.expectRevert();
         swapRouter.swapExactInput(key, false, overLimit, 0, block.timestamp + 3600);
         vm.stopPrank();
@@ -553,7 +558,7 @@ contract E2E_EdgeCases is Test {
 
         vm.startPrank(issuerA);
         tkX.approve(address(positionRouter), type(uint256).max);
-        PoolId pidX = positionRouter.createPool{value: 5 ether}(
+        positionRouter.createPool{value: 5 ether}(
             address(tkX), address(0), 3000, 100_000e18, SQRT_PRICE_1_1,
             _buildHookDataDefault(issuerA, address(tkX))
         );
@@ -567,13 +572,17 @@ contract E2E_EdgeCases is Test {
             hooks: IHooks(address(hook))
         });
 
-        // Sell in pool A
-        _sellTokenA(issuerA, 10_000e18);
+        // Sell in pool A — use 2% of pool reserve (under 3% daily limit)
+        uint256 reserveA = tokenA.balanceOf(address(pm));
+        uint256 sellA = (reserveA * 200) / 10_000;
+        _sellTokenA(issuerA, sellA);
 
-        // Sell in pool X — should succeed independently
+        // Sell in pool X — 2% of pool X reserve, should succeed independently
+        uint256 reserveX = tkX.balanceOf(address(pm));
+        uint256 sellX = (reserveX * 200) / 10_000;
         vm.startPrank(issuerA);
-        tkX.approve(address(swapRouter), 10_000e18);
-        swapRouter.swapExactInput(keyX, false, 10_000e18, 0, block.timestamp + 3600);
+        tkX.approve(address(swapRouter), sellX);
+        swapRouter.swapExactInput(keyX, false, sellX, 0, block.timestamp + 3600);
         vm.stopPrank();
 
         // Both pools should have independent sell tracking
@@ -648,8 +657,8 @@ contract E2E_EdgeCases is Test {
 
     function test_SellWindow_ResetAtEpochBoundary() public {
         // Sell some tokens near the daily limit
-        uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 nearLimit = (initialSupply * 250) / 10_000; // 2.5% of 3% limit
+        uint256 poolReserve = tokenA.balanceOf(address(pm));
+        uint256 nearLimit = (poolReserve * 250) / 10_000; // 2.5% of pool reserve (under 3% limit)
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (nearLimit > issuerBal / 2) nearLimit = issuerBal / 4;
@@ -688,10 +697,10 @@ contract E2E_EdgeCases is Test {
     }
 
     function test_SameBlockMultipleSells_Accumulate() public {
-        uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
+        uint256 poolReserve = tokenA.balanceOf(address(pm));
         // Sell in multiple transactions within the same block
         // 3% daily limit → each sell 0.9% → 3 sells = 2.7% < 3%
-        uint256 smallSell = (initialSupply * 90) / 10_000; // 0.9% each
+        uint256 smallSell = (poolReserve * 90) / 10_000; // 0.9% of pool reserve each
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (smallSell * 4 > issuerBal) smallSell = issuerBal / 8;
@@ -709,8 +718,8 @@ contract E2E_EdgeCases is Test {
 
     function test_WeeklyWindow_SlidingReset() public {
         // Sell near the weekly limit
-        uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 dailySell = (initialSupply * 200) / 10_000; // 2% (under daily 3%)
+        uint256 poolReserve = tokenA.balanceOf(address(pm));
+        uint256 dailySell = (poolReserve * 200) / 10_000; // 2% of pool reserve (under daily 3%)
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (dailySell > issuerBal / 4) dailySell = issuerBal / 8;
@@ -827,8 +836,8 @@ contract E2E_EdgeCases is Test {
         vm.stopPrank();
 
         // But the issuer's own sells are still tracked
-        uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        uint256 overLimit = (initialSupply * 301) / 10_000; // just over 3%
+        uint256 poolReserve = tokenA.balanceOf(address(pm));
+        uint256 overLimit = (poolReserve * 301) / 10_000; // just over 3% of pool reserve
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (overLimit <= issuerBal) {
@@ -877,24 +886,27 @@ contract E2E_EdgeCases is Test {
         cfg.dumpThresholdPercent = 300; // 3% daily
         cfg.weeklyDumpThresholdPercent = 1500; // 15% weekly
 
-        (PoolKey memory key, PoolId pid) = _createPoolForIssuer(issuerB, tkSlow, 5 ether, 100_000e18, cfg);
+        (PoolKey memory key,) = _createPoolForIssuer(issuerB, tkSlow, 5 ether, 100_000e18, cfg);
 
-        uint256 initialSupply = hook.getInitialTotalSupply(pid);
-        // Sell 2.9% per day (under daily 3% limit) for 5 days = 14.5% < 15%,
-        // then 6th day 2.9% → 17.4% > 15% weekly limit
-        uint256 dailySell = (initialSupply * 290) / 10_000;
-
+        // Sell 2.9% of current reserve per day (under daily 3% limit).
+        // Sells push tokens INTO pool, growing reserve. But weekly cumulative
+        // grows faster than the denominator. After enough days, cumulative
+        // exceeds 15% of current reserve.
         vm.startPrank(issuerB);
         tkSlow.approve(address(swapRouter), type(uint256).max);
 
-        // Days 1-5: 2.9% sell each (cumulative 14.5% < 15%)
+        // Days 1-5: 2.9% of current reserve each day
         for (uint256 i = 0; i < 5; i++) {
             if (i > 0) vm.warp(block.timestamp + 1 days);
-            swapRouter.swapExactInput(key, false, dailySell, 0, block.timestamp + 3600);
+            uint256 r = tkSlow.balanceOf(address(pm));
+            uint256 ds = (r * 290) / 10_000;
+            swapRouter.swapExactInput(key, false, ds, 0, block.timestamp + 3600);
         }
 
-        // Day 6: 2.9% sell — should push weekly cumulative over 15% and revert
+        // Day 6: 2.9% of current reserve — should push weekly cumulative over 15% and revert
         vm.warp(block.timestamp + 1 days);
+        uint256 reserve = tkSlow.balanceOf(address(pm));
+        uint256 dailySell = (reserve * 290) / 10_000;
         vm.expectRevert();
         swapRouter.swapExactInput(key, false, dailySell, 0, block.timestamp + 3600);
         vm.stopPrank();
@@ -905,7 +917,6 @@ contract E2E_EdgeCases is Test {
         _buyTokenA(trader, 2 ether);
 
         // Attacker tries to frontrun trigger by buying tokens to claim compensation
-        uint256 attackerEthBefore = attacker.balance;
         _buyTokenA(attacker, 1 ether);
 
         // Trigger directly (v2 watcher path — preserved infra)
@@ -926,8 +937,6 @@ contract E2E_EdgeCases is Test {
         vm.roll(block.number + 1);
 
         if (attackerBal > 0) {
-            vm.prank(attacker);
-            bytes32[] memory proof = new bytes32[](0);
             uint256 comp = insurancePool.calculateCompensation(poolIdA, attackerBal);
             // Compensation should be proportional, not outsized
             // The pool's payoutBalance is capped, attacker can't drain more
@@ -936,27 +945,26 @@ contract E2E_EdgeCases is Test {
     }
 
     function test_ManipulatedPrice_SellBpsCalculation() public {
-        // Sell BPS is based on initialTotalSupply, not current price
-        // Even if pool price is manipulated, the sell limit uses initial supply as denominator
+        // Sell BPS is based on current pool reserve (balanceOf(poolManager)).
+        // Buys remove issued tokens from pool, shrinking reserve and tightening limits.
 
-        uint256 initialSupply = hook.getInitialTotalSupply(poolIdA);
-        assertGt(initialSupply, 0, "initial supply recorded");
+        uint256 reserveBefore = tokenA.balanceOf(address(pm));
+        assertGt(reserveBefore, 0, "pool reserve exists");
 
-        // Do a large buy to move price
+        // Do a large buy to shrink pool reserve (issued tokens leave pool)
         _buyTokenA(trader, 5 ether);
 
-        // Initial supply shouldn't change after buys
-        uint256 supplyAfter = hook.getInitialTotalSupply(poolIdA);
-        assertEq(initialSupply, supplyAfter, "initial supply unchanged after price manipulation");
+        uint256 reserveAfter = tokenA.balanceOf(address(pm));
+        assertLt(reserveAfter, reserveBefore, "reserve shrunk after buy");
 
-        // Issuer sell limits still use the original supply
-        uint256 sellAmount = (initialSupply * 290) / 10_000; // 2.9% (under 3% limit)
+        // Sell 2.9% of current (shrunken) reserve — should still succeed
+        uint256 sellAmount = (reserveAfter * 290) / 10_000;
 
         uint256 issuerBal = tokenA.balanceOf(issuerA);
         if (sellAmount <= issuerBal) {
             vm.startPrank(issuerA);
             tokenA.approve(address(swapRouter), sellAmount);
-            // Should succeed — BPS calculated against initial supply, not current
+            // Should succeed — 2.9% of current reserve is under 3% limit
             swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, block.timestamp + 3600);
             vm.stopPrank();
         }

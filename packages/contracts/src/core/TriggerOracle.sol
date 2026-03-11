@@ -149,7 +149,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
     /// @dev BastionHook calls this after verifying cumulative LP removal threshold is met.
     function executeTrigger(
         PoolId poolId,
-        PoolKey calldata key,
+        PoolKey calldata, /* key */
         TriggerType triggerType,
         uint256 totalEligibleSupply
     ) external onlyHook whenNotPaused {

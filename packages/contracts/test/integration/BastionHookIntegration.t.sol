@@ -1490,6 +1490,122 @@ contract BastionHookIntegrationTest is Test, Deployers {
         }
     }
 
+    function test_BpsCeilDivision_ExactBoundary() public {
+        _initPoolWithLargeLiquidity();
+
+        uint256 poolReserve = issuedToken.balanceOf(address(manager));
+        // Daily limit = 300 bps (3%). Compute the exact threshold amount.
+        // Ceil division: (amount * 10_000 + reserve - 1) / reserve > 300
+        // At exact limit: amount = (reserve * 300) / 10_000 → floor division.
+        // With ceil BPS: ceil(amount * 10_000 / reserve) may equal 300 or 301.
+        uint256 exactAmount = (poolReserve * 300) / 10_000;
+
+        // Verify: ceil BPS of exactAmount should be <= 300 (at the boundary)
+        uint256 ceilBps = (exactAmount * 10_000 + poolReserve - 1) / poolReserve;
+        assertLe(ceilBps, 300, "ceil BPS at exact amount should be <= 300");
+
+        // This sell should succeed (at or below limit)
+        _issuerSellIssuedToken(exactAmount);
+    }
+
+    function test_BpsCeilDivision_OneWeiOverBoundary() public {
+        _initPoolWithLargeLiquidity();
+
+        uint256 poolReserve = issuedToken.balanceOf(address(manager));
+        // Compute the smallest amount that would make ceil BPS = 301 (exceeding 300 limit).
+        // ceil(amount * 10_000 / reserve) > 300
+        // ⇔ amount * 10_000 > 300 * reserve (strict, since ceil rounds up)
+        // ⇔ amount > 300 * reserve / 10_000
+        // The smallest such integer is floor(300 * reserve / 10_000) + 1
+        uint256 smallestOver = (poolReserve * 300) / 10_000 + 1;
+
+        uint256 ceilBps = (smallestOver * 10_000 + poolReserve - 1) / poolReserve;
+        assertGt(ceilBps, 300, "ceil BPS should exceed 300 for smallestOver");
+
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+        bool zeroForOne = issuedIsToken0;
+
+        vm.prank(issuerAddr);
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(smallestOver),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(issuerAddr)
+        );
+    }
+
+    function test_BpsCeilDivision_SmallReserve() public {
+        // Test with a small pool reserve where rounding matters more.
+        // Deploy a token with small supply, create pool with minimal liquidity.
+        MockERC20 smallToken = new MockERC20("SmallToken", "SMT", 18);
+        smallToken.mint(issuerAddr, 100 ether);
+        smallToken.mint(address(this), 100 ether);
+
+        (Currency c0, Currency c1) = SortTokens.sort(smallToken, baseToken);
+        PoolKey memory _key = PoolKey(c0, c1, 3000, 60, IHooks(address(hook)));
+        PoolId _poolId = _key.toId();
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        vm.startPrank(issuerAddr);
+        smallToken.approve(address(modifyLiquidityRouter), type(uint256).max);
+        baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
+        vm.stopPrank();
+        smallToken.approve(address(modifyLiquidityRouter), type(uint256).max);
+
+        // Add small liquidity — pool reserve will be ~10 tokens
+        bytes memory hd = abi.encode(
+            issuerAddr, address(smallToken), DEFAULT_LOCK, DEFAULT_VESTING,
+            _defaultCommitment(), _defaultTriggerConfig()
+        );
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(
+            _key,
+            ModifyLiquidityParams({tickLower: -887220, tickUpper: 887220, liquidityDelta: 10e18, salt: 0}),
+            hd
+        );
+
+        poolKey = _key;
+        poolId = _poolId;
+        issuedToken = smallToken;
+        currency0 = c0;
+        currency1 = c1;
+
+        uint256 poolReserve = smallToken.balanceOf(address(manager));
+        assertGt(poolReserve, 0, "small pool has reserve");
+
+        // Sell exactly at limit
+        uint256 atLimit = (poolReserve * 300) / 10_000;
+        if (atLimit > 0) {
+            _issuerSellIssuedToken(atLimit);
+        }
+
+        // Next day: sell 1 wei more than limit
+        vm.warp(block.timestamp + 1 days);
+        uint256 newReserve = smallToken.balanceOf(address(manager));
+        uint256 overLimit = (newReserve * 300) / 10_000 + 1;
+
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(smallToken);
+        bool zeroForOne = issuedIsToken0;
+
+        vm.prank(issuerAddr);
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(overLimit),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(issuerAddr)
+        );
+    }
+
     function test_NonIssuerSell_NoRestriction() public {
         _initPoolWithIssuer();
 
