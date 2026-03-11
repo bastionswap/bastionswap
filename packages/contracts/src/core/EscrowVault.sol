@@ -18,10 +18,6 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     uint256 public constant MIN_LOCK_DURATION = 7 days;
     uint256 public constant MIN_VESTING_DURATION = 7 days;
 
-    // Default vesting parameters for comparison
-    uint40 private constant DEFAULT_LOCK_DURATION = 7 days;
-    uint40 private constant DEFAULT_VESTING_DURATION = 83 days;
-    uint40 private constant DEFAULT_TOTAL_DURATION = 90 days; // 7 + 83
 
     // ─── Immutables ───────────────────────────────────────────────────
 
@@ -372,31 +368,36 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @dev Returns 2 = stricter, 1 = same as default, 0 = looser
-    ///      Stricter means total duration >= default AND lock >= default lock
+    ///      Reads governance defaults from BastionHook dynamically.
     function _getStrictnessLevel(Escrow storage escrow) internal view returns (uint8) {
+        uint40 defLock = IBastionHook(BASTION_HOOK).defaultLockDuration();
+        uint40 defVesting = IBastionHook(BASTION_HOOK).defaultVestingDuration();
+        uint40 defTotal = defLock + defVesting;
         uint40 totalDuration = escrow.lockDuration + escrow.vestingDuration;
 
-        if (totalDuration < DEFAULT_TOTAL_DURATION) return 0;
+        if (totalDuration < defTotal) return 0;
 
-        if (escrow.lockDuration == DEFAULT_LOCK_DURATION && escrow.vestingDuration == DEFAULT_VESTING_DURATION) {
+        if (escrow.lockDuration == defLock && escrow.vestingDuration == defVesting) {
             return 1; // same as default
         }
 
-        if (totalDuration > DEFAULT_TOTAL_DURATION) return 2; // stricter
-        // totalDuration == DEFAULT_TOTAL_DURATION but different split
-        if (escrow.lockDuration >= DEFAULT_LOCK_DURATION) return 1; // at least same
+        if (totalDuration > defTotal) return 2; // stricter
+        // totalDuration == defTotal but different split
+        if (escrow.lockDuration >= defLock) return 1; // at least same
         return 0; // shorter lock with same total = looser
     }
 
     /// @dev Proportional strictness score (0..200).
-    ///      Based on how much the total duration exceeds the default.
+    ///      Based on how much the total duration exceeds the governance default.
     function _getStrictnessScore(Escrow storage escrow) internal view returns (uint256) {
+        uint40 defTotal = IBastionHook(BASTION_HOOK).defaultLockDuration()
+            + IBastionHook(BASTION_HOOK).defaultVestingDuration();
         uint40 totalDuration = escrow.lockDuration + escrow.vestingDuration;
-        if (totalDuration <= DEFAULT_TOTAL_DURATION) return 0;
+        if (totalDuration <= defTotal) return 0;
 
         // Extra duration ratio capped at 200
-        uint256 extraDuration = uint256(totalDuration) - uint256(DEFAULT_TOTAL_DURATION);
-        uint256 score = (extraDuration * 200) / uint256(DEFAULT_TOTAL_DURATION);
+        uint256 extraDuration = uint256(totalDuration) - uint256(defTotal);
+        uint256 score = (extraDuration * 200) / uint256(defTotal);
         if (score > 200) score = 200;
         return score;
     }

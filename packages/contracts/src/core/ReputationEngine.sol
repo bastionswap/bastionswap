@@ -22,12 +22,6 @@ contract ReputationEngine is IReputationEngine {
     /// @notice Maximum basis points (100%)
     uint256 private constant MAX_BPS = 10_000;
 
-    /// @notice Max lock duration for normalization (90 days)
-    uint256 public constant MAX_LOCK_DURATION = 90 days;
-
-    /// @notice Max vesting duration for normalization (365 days)
-    uint256 public constant MAX_VESTING_DURATION = 365 days;
-
     // ─── Structs ─────────────────────────────────────────────────────
 
     struct IssuerProfile {
@@ -175,15 +169,15 @@ contract ReputationEngine is IReputationEngine {
             uint40 vestingDuration,
             uint16 maxDailySellBps,
             uint16 weeklyDumpThresholdBps,
-            uint40 _minLockDuration,
-            uint40 _minVestingDuration,
+            uint40 _defaultLockDuration,
+            uint40 _defaultVestingDuration,
             uint16 defaultDailySellBps,
             uint16 defaultWeeklySellBps
         ) = abi.decode(data, (uint40, uint40, uint16, uint16, uint40, uint40, uint16, uint16));
 
         profile.commitmentScore += _calcSingleCommitmentStrictness(
             lockDuration, vestingDuration, maxDailySellBps, weeklyDumpThresholdBps,
-            _minLockDuration, _minVestingDuration, defaultDailySellBps, defaultWeeklySellBps
+            _defaultLockDuration, _defaultVestingDuration, defaultDailySellBps, defaultWeeklySellBps
         );
         profile.commitmentCount++;
     }
@@ -236,53 +230,50 @@ contract ReputationEngine is IReputationEngine {
     }
 
     /// @dev Calculates strictness of a single commitment (0..200 range).
-    ///      Four components: lock duration, vesting duration, daily sell limit, weekly sell limit.
+    ///      Four components scored relative to governance defaults (no hardcoded caps):
+    ///      - Lock/vesting: bonus = (duration - default) / default, capped at 1.0 (2x default = full bonus)
+    ///      - Sell limits: bonus = (default - pool) / default (stricter sell = higher bonus)
     function _calcSingleCommitmentStrictness(
         uint40 lockDuration,
         uint40 vestingDuration,
         uint16 maxDailySellBps,
         uint16 weeklyDumpThresholdBps,
-        uint40 _minLockDuration,
-        uint40 _minVestingDuration,
+        uint40 _defaultLockDuration,
+        uint40 _defaultVestingDuration,
         uint16 defaultDailySellBps,
         uint16 defaultWeeklySellBps
     ) internal pure returns (uint256) {
         uint256 totalBonus = 0;
-        uint256 components = 0;
+        uint256 components = 4;
 
-        // Lock duration bonus: (lockDuration - minLock) / (MAX_LOCK - minLock)
-        if (MAX_LOCK_DURATION > _minLockDuration && lockDuration > _minLockDuration) {
-            uint256 lockBonus = uint256(lockDuration - _minLockDuration) * MAX_BPS
-                / (MAX_LOCK_DURATION - _minLockDuration);
+        // Lock duration bonus: (lockDuration - default) / default
+        // 0 at default, MAX_BPS at 2x default, capped at MAX_BPS
+        if (_defaultLockDuration > 0 && lockDuration > _defaultLockDuration) {
+            uint256 lockBonus = uint256(lockDuration - _defaultLockDuration) * MAX_BPS
+                / _defaultLockDuration;
             if (lockBonus > MAX_BPS) lockBonus = MAX_BPS;
             totalBonus += lockBonus;
         }
-        components++;
 
-        // Vesting duration bonus: (vestingDuration - minVesting) / (MAX_VESTING - minVesting)
-        if (MAX_VESTING_DURATION > _minVestingDuration && vestingDuration > _minVestingDuration) {
-            uint256 vestingBonus = uint256(vestingDuration - _minVestingDuration) * MAX_BPS
-                / (MAX_VESTING_DURATION - _minVestingDuration);
+        // Vesting duration bonus: (vestingDuration - default) / default
+        if (_defaultVestingDuration > 0 && vestingDuration > _defaultVestingDuration) {
+            uint256 vestingBonus = uint256(vestingDuration - _defaultVestingDuration) * MAX_BPS
+                / _defaultVestingDuration;
             if (vestingBonus > MAX_BPS) vestingBonus = MAX_BPS;
             totalBonus += vestingBonus;
         }
-        components++;
 
         // Daily sell bonus: (defaultDaily - poolDaily) / defaultDaily
         if (defaultDailySellBps > 0 && maxDailySellBps < defaultDailySellBps) {
-            uint256 dailyBonus = uint256(defaultDailySellBps - maxDailySellBps) * MAX_BPS
+            totalBonus += uint256(defaultDailySellBps - maxDailySellBps) * MAX_BPS
                 / defaultDailySellBps;
-            totalBonus += dailyBonus;
         }
-        components++;
 
         // Weekly sell bonus: (defaultWeekly - poolWeekly) / defaultWeekly
         if (defaultWeeklySellBps > 0 && weeklyDumpThresholdBps < defaultWeeklySellBps) {
-            uint256 weeklyBonus = uint256(defaultWeeklySellBps - weeklyDumpThresholdBps) * MAX_BPS
+            totalBonus += uint256(defaultWeeklySellBps - weeklyDumpThresholdBps) * MAX_BPS
                 / defaultWeeklySellBps;
-            totalBonus += weeklyBonus;
         }
-        components++;
 
         // Scale: totalBonus is 0..4*MAX_BPS, map to 0..200
         return (totalBonus * 200) / (components * MAX_BPS);

@@ -20,6 +20,9 @@ contract MockBastionHook {
     PoolId public lastPoolId;
     bool public shouldRevert;
 
+    uint40 public defaultLockDuration = 7 days;
+    uint40 public defaultVestingDuration = 83 days;
+
     function forceRemoveIssuerLP(PoolId poolId) external {
         if (shouldRevert) revert("MockHook: forced revert");
         forceRemoveCalled = true;
@@ -28,6 +31,11 @@ contract MockBastionHook {
 
     function setShouldRevert(bool _shouldRevert) external {
         shouldRevert = _shouldRevert;
+    }
+
+    function setDefaults(uint40 _lock, uint40 _vesting) external {
+        defaultLockDuration = _lock;
+        defaultVestingDuration = _vesting;
     }
 }
 

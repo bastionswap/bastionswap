@@ -19,6 +19,12 @@ interface IBastionHook {
         bool isSet;
     }
 
+    /// @notice Returns the current governance default lock duration.
+    function defaultLockDuration() external view returns (uint40);
+
+    /// @notice Returns the current governance default vesting duration.
+    function defaultVestingDuration() external view returns (uint40);
+
     /// @notice Force-removes issuer's remaining LP from the pool and sends assets to InsurancePool.
     /// @dev Called by EscrowVault during triggerForceRemoval.
     /// @param poolId Uniswap V4 pool identifier

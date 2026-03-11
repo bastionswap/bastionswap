@@ -397,8 +397,8 @@ contract BastionHook is BaseTestHooks {
                             commitment.vestingDuration,
                             commitment.maxDailySellBps,
                             commitment.weeklyDumpThresholdBps,
-                            minLockDuration,
-                            minVestingDuration,
+                            defaultLockDuration,
+                            defaultVestingDuration,
                             defaultCfg.dumpThresholdPercent,
                             defaultCfg.weeklyDumpThresholdPercent
                         )
