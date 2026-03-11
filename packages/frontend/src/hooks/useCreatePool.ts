@@ -61,13 +61,13 @@ export interface CreatePoolInput {
 
 export const DEFAULT_TRIGGER_CONFIG = {
   lpRemovalThreshold: 5000,
-  dumpThresholdPercent: 3000,
+  dumpThresholdPercent: 300,
   dumpWindowSeconds: 86400,
   taxDeviationThreshold: 500,
   slowRugWindowSeconds: 86400,
   slowRugCumulativeThreshold: 8000,
   weeklyDumpWindowSeconds: 604800,
-  weeklyDumpThresholdPercent: 5000,
+  weeklyDumpThresholdPercent: 1500,
 };
 
 function computeSqrtPriceX96(amount0: bigint, amount1: bigint): bigint {

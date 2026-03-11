@@ -902,7 +902,7 @@ function CreatePoolContent() {
               <button
                 onClick={() => {
                   setCommitment(DEFAULT_COMMITMENT);
-                  setTriggerThresholds({ lpRemoval: 5000, dump: 3000, slowRug: 8000 });
+                  setTriggerThresholds({ lpRemoval: 5000, dump: 300, slowRug: 8000 });
                 }}
                 className="text-xs text-bastion-600 hover:text-bastion-700 hover:underline transition-colors"
               >
@@ -911,7 +911,7 @@ function CreatePoolContent() {
               <button
                 onClick={() => {
                   setCommitment(DEFAULT_COMMITMENT);
-                  setTriggerThresholds({ lpRemoval: 5000, dump: 3000, slowRug: 8000 });
+                  setTriggerThresholds({ lpRemoval: 5000, dump: 300, slowRug: 8000 });
                   setVestingMode("standard");
                   setStep(4);
                 }}
