@@ -590,22 +590,15 @@ contract E2E_LocalFork is Test {
         vm.prank(issuerA);
         positionRouter.removeIssuerLiquidity(poolKeyA, removable, 0, 0, block.timestamp + 3600);
 
-        // 8b: Check trigger is pending
-        (bool exists, ITriggerOracle.TriggerType tType,) =
-            triggerOracle.getPendingTrigger(poolIdA);
-        assertTrue(exists, "trigger pending");
+        // 8b: Check trigger fired immediately
+        ITriggerOracle.TriggerResult memory trigStatus = triggerOracle.checkTrigger(poolIdA);
+        assertTrue(trigStatus.triggered, "trigger fired");
         assertTrue(
-            tType == ITriggerOracle.TriggerType.RUG_PULL || tType == ITriggerOracle.TriggerType.SLOW_RUG,
+            trigStatus.triggerType == ITriggerOracle.TriggerType.RUG_PULL || trigStatus.triggerType == ITriggerOracle.TriggerType.SLOW_RUG,
             "rug pull type"
         );
 
-        // 8c: Wait past grace period (1h) + guardian deadline (24h) for fallback
-        vm.warp(block.timestamp + 25 hours);
-
-        // 8d: Execute trigger (permissionless)
-        triggerOracle.executeTrigger(poolIdA);
-
-        // 8e: Verify escrow is triggered (getRemovableLiquidity returns 0 when triggered)
+        // 8c: Verify escrow is triggered (getRemovableLiquidity returns 0 when triggered)
         assertEq(escrowVault.getRemovableLiquidity(escrowId), 0, "escrow triggered - 0 removable");
 
         // RUG_PULL has totalEligibleSupply=0, so InsurancePool payout is NOT triggered
@@ -638,26 +631,16 @@ contract E2E_LocalFork is Test {
         vm.prank(trader);
         tokenA.transfer(holder, 50_000e18);
 
-        // Simulate issuer dump detection via TriggerOracle
-        // (afterSwap balance detection doesn't work for router-based swaps because
-        //  token transfers happen after afterSwap in V4's unlock flow)
+        // Simulate trigger via executeTrigger (from hook context)
         uint256 totalSupply = tokenA.totalSupply();
-        uint256 dumpAmount = totalSupply * 40 / 100; // 40% sale
 
-        // Report sale from hook (simulates what afterSwap SHOULD do)
         vm.prank(address(hook));
-        triggerOracle.reportIssuerSale(poolIdA, issuerA, dumpAmount, totalSupply);
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.ISSUER_DUMP, totalSupply);
 
-        // Check trigger is pending
-        (bool exists,,) = triggerOracle.getPendingTrigger(poolIdA);
-        assertTrue(exists, "dump trigger pending");
+        // Check trigger fired
+        assertTrue(triggerOracle.checkTrigger(poolIdA).triggered, "dump trigger fired");
 
-        // Wait past grace period + guardian deadline for fallback execution
-        vm.warp(block.timestamp + 25 hours);
-
-        // Execute trigger — ISSUER_DUMP has totalEligibleSupply, so InsurancePool is triggered
-        triggerOracle.executeTrigger(poolIdA);
-
+        // ISSUER_DUMP has totalEligibleSupply, so InsurancePool is triggered
         InsurancePool.PoolStatus memory postTrigger = insurancePool.getPoolStatus(poolIdA);
         assertTrue(postTrigger.isTriggered, "insurance triggered for dump");
 
@@ -688,10 +671,10 @@ contract E2E_LocalFork is Test {
         vm.prank(address(hook));
         triggerOracle.reportCommitmentBreach(poolIdA);
 
-        // Should trigger commitment breach
-        (bool exists, ITriggerOracle.TriggerType tType,) = triggerOracle.getPendingTrigger(poolIdA);
-        assertTrue(exists, "trigger pending from commitment breach");
-        assertEq(uint8(tType), uint8(ITriggerOracle.TriggerType.COMMITMENT_BREACH), "type is commitment breach");
+        // Should trigger commitment breach immediately
+        ITriggerOracle.TriggerResult memory trigStatus = triggerOracle.checkTrigger(poolIdA);
+        assertTrue(trigStatus.triggered, "trigger fired from commitment breach");
+        assertEq(uint8(trigStatus.triggerType), uint8(ITriggerOracle.TriggerType.COMMITMENT_BREACH), "type is commitment breach");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -758,9 +741,8 @@ contract E2E_LocalFork is Test {
         positionRouter.removeLiquidityV2(poolKeyA, 0, 0, glpLiq, 0, 0, block.timestamp + 3600);
         vm.stopPrank();
 
-        // No trigger pending
-        (bool exists,,) = triggerOracle.getPendingTrigger(poolIdA);
-        assertFalse(exists, "no trigger from general LP removal");
+        // No trigger fired
+        assertFalse(triggerOracle.checkTrigger(poolIdA).triggered, "no trigger from general LP removal");
 
         // 12b: Non-issuer large sell → no trigger
         // Add deep liquidity first
@@ -773,8 +755,7 @@ contract E2E_LocalFork is Test {
 
         _sellTokenA(trader, 100_000e18);
 
-        (exists,,) = triggerOracle.getPendingTrigger(poolIdA);
-        assertFalse(exists, "no trigger from non-issuer sell");
+        assertFalse(triggerOracle.checkTrigger(poolIdA).triggered, "no trigger from non-issuer sell");
 
         // 12c: Reputation spam prevention
         uint256 scoreBefore = reputationEngine.getScore(issuerB);
@@ -803,18 +784,12 @@ contract E2E_LocalFork is Test {
         vm.prank(trader);
         tokenA.transfer(holder, 50_000e18);
 
-        // Simulate issuer dump via triggerOracle (see issuerDump test for rationale)
+        // Simulate trigger via executeTrigger (from hook context)
         uint256 totalSupply = tokenA.totalSupply();
-        uint256 dumpAmount = totalSupply * 40 / 100;
         vm.prank(address(hook));
-        triggerOracle.reportIssuerSale(poolIdA, issuerA, dumpAmount, totalSupply);
+        triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.ISSUER_DUMP, totalSupply);
 
-        // Guardian does NOT submit merkle root — wait 25h (1h grace + 24h deadline)
-        vm.warp(block.timestamp + 25 hours);
-
-        // Execute trigger (fallback mode — no merkle root)
-        triggerOracle.executeTrigger(poolIdA);
-
+        // Trigger fires — verify triggered state
         InsurancePool.PoolStatus memory status = insurancePool.getPoolStatus(poolIdA);
         assertTrue(status.isTriggered, "triggered");
 

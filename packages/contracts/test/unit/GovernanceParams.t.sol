@@ -194,34 +194,6 @@ contract GovernanceParamsTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  TRIGGER ORACLE — gracePeriod
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_oracle_gracePeriod_default() public view {
-        assertEq(oracle.gracePeriod(), 1 hours);
-    }
-
-    function test_oracle_setGracePeriod_success() public {
-        vm.prank(governance);
-        vm.expectEmit(false, false, false, true);
-        emit ITriggerOracle.GracePeriodUpdated(2 hours);
-        oracle.setGracePeriod(2 hours);
-        assertEq(oracle.gracePeriod(), 2 hours);
-    }
-
-    function test_oracle_setGracePeriod_revertsTooLow() public {
-        vm.prank(governance);
-        vm.expectRevert(TriggerOracle.InvalidDuration.selector);
-        oracle.setGracePeriod(14 minutes);
-    }
-
-    function test_oracle_setGracePeriod_revertsTooHigh() public {
-        vm.prank(governance);
-        vm.expectRevert(TriggerOracle.InvalidDuration.selector);
-        oracle.setGracePeriod(25 hours);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
     //  TRIGGER ORACLE — maxPauseDuration
     // ═══════════════════════════════════════════════════════════════════
 
@@ -249,61 +221,7 @@ contract GovernanceParamsTest is Test {
         oracle.setMaxPauseDuration(15 days);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  TRIGGER ORACLE — stableLpMinAge
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_oracle_stableLpMinAge_default() public view {
-        assertEq(oracle.stableLpMinAge(), 1 hours);
-    }
-
-    function test_oracle_setStableLpMinAge_success() public {
-        vm.prank(governance);
-        vm.expectEmit(false, false, false, true);
-        emit ITriggerOracle.StableLpMinAgeUpdated(3 hours);
-        oracle.setStableLpMinAge(3 hours);
-        assertEq(oracle.stableLpMinAge(), 3 hours);
-    }
-
-    function test_oracle_setStableLpMinAge_revertsTooLow() public {
-        vm.prank(governance);
-        vm.expectRevert(TriggerOracle.InvalidDuration.selector);
-        oracle.setStableLpMinAge(29 minutes);
-    }
-
-    function test_oracle_setStableLpMinAge_revertsTooHigh() public {
-        vm.prank(governance);
-        vm.expectRevert(TriggerOracle.InvalidDuration.selector);
-        oracle.setStableLpMinAge(7 hours);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  TRIGGER ORACLE — guardianSubmissionDeadline
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_oracle_guardianSubmissionDeadline_default() public view {
-        assertEq(oracle.guardianSubmissionDeadline(), 24 hours);
-    }
-
-    function test_oracle_setGuardianSubmissionDeadline_success() public {
-        vm.prank(governance);
-        vm.expectEmit(false, false, false, true);
-        emit ITriggerOracle.GuardianSubmissionDeadlineUpdated(48 hours);
-        oracle.setGuardianSubmissionDeadline(48 hours);
-        assertEq(oracle.guardianSubmissionDeadline(), 48 hours);
-    }
-
-    function test_oracle_setGuardianSubmissionDeadline_revertsTooLow() public {
-        vm.prank(governance);
-        vm.expectRevert(TriggerOracle.InvalidDuration.selector);
-        oracle.setGuardianSubmissionDeadline(5 hours);
-    }
-
-    function test_oracle_setGuardianSubmissionDeadline_revertsTooHigh() public {
-        vm.prank(governance);
-        vm.expectRevert(TriggerOracle.InvalidDuration.selector);
-        oracle.setGuardianSubmissionDeadline(73 hours);
-    }
+    // stableLpMinAge tests removed (stableLpMinAge removed from TriggerOracle)
 
     // ═══════════════════════════════════════════════════════════════════
     //  TRIGGER ORACLE — guardian

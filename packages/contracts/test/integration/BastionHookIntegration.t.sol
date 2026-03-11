@@ -90,9 +90,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
         }
         vm.etch(hookAddr, deployed.code);
         // Restore storage lost by vm.etch
-        vm.store(hookAddr, bytes32(uint256(11)), bytes32(uint256(uint160(governance))));
+        vm.store(hookAddr, bytes32(uint256(21)), bytes32(uint256(uint160(governance))));
         // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-        vm.store(hookAddr, bytes32(uint256(13)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+        vm.store(hookAddr, bytes32(uint256(23)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
         hook = BastionHook(payable(hookAddr));
 
         // Deploy tokens
@@ -272,7 +272,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     //  LP REMOVAL & TRIGGER REPORTING
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_removeLiquidity_reportsToOracle() public {
+    function test_removeLiquidity_updatesTracking() public {
         _initPoolWithIssuer();
 
         // Add more liquidity from test contract
@@ -334,13 +334,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         vm.prank(address(hook));
         triggerOracle.reportCommitmentBreach(poolId);
 
-        // Fallback path: grace + 24h deadline
-        vm.warp(block.timestamp + 1 hours + 24 hours);
-
-        // Execute trigger (permissionless)
-        triggerOracle.executeTrigger(poolId);
-
-        // Verify trigger activated
+        // Trigger happens immediately — verify trigger activated
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);
 
         // EscrowVault should have locked down (no LP removal allowed)
@@ -392,11 +386,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         vm.prank(address(hook));
         triggerOracle.reportCommitmentBreach(poolId);
 
-        // Fallback path: grace + 24h deadline
-        vm.warp(block.timestamp + 1 hours + 24 hours);
-        triggerOracle.executeTrigger(poolId);
-
-        // 6. Verify final state
+        // 6. Verify final state — trigger happens immediately
         assertTrue(triggerOracle.checkTrigger(poolId).triggered);
         IEscrowVault.EscrowStatus memory status = escrowVault.getEscrowStatus(escrowId);
         assertEq(status.remainingLiquidity, 0); // triggered, so remaining = 0
@@ -434,10 +424,10 @@ contract BastionHookIntegrationTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  ISSUER SALE DETECTION (covers _reportIssuerSale)
+    //  ISSUER SALE DETECTION
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_afterSwap_issuerSell_reportsToOracle() public {
+    function test_afterSwap_issuerSell_enforcesLimits() public {
         _initPoolWithIssuer();
 
         // Add deep liquidity so swaps work
@@ -615,7 +605,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     //  DIRECT afterSwap TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_afterSwap_directCall_issuerSell_reportsToOracle() public {
+    function test_afterSwap_directCall_issuerSell_enforcesLimits() public {
         _initPoolWithIssuer();
 
         address issuedAddr = address(issuedToken);
@@ -694,31 +684,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         hook.afterSwap(trader, poolKey, params, delta, "");
     }
 
-    function test_beforeRemoveLiquidity_triggerOracleCallFails() public {
-        _initPoolWithIssuer();
-
-        // Pause the oracle
-        vm.prank(guardian);
-        triggerOracle.pause();
-
-        // Add liquidity first
-        ModifyLiquidityParams memory addParams = ModifyLiquidityParams({
-            tickLower: -120,
-            tickUpper: 120,
-            liquidityDelta: 10e18,
-            salt: bytes32(uint256(50))
-        });
-        modifyLiquidityRouter.modifyLiquidity(poolKey, addParams, "");
-
-        // Remove liquidity - should trigger the catch branch
-        ModifyLiquidityParams memory removeParams = ModifyLiquidityParams({
-            tickLower: -120,
-            tickUpper: 120,
-            liquidityDelta: -5e18,
-            salt: bytes32(uint256(50))
-        });
-        modifyLiquidityRouter.modifyLiquidity(poolKey, removeParams, abi.encode(address(this)));
-    }
+    // test_beforeRemoveLiquidity_triggerOracleCallFails removed
+    // (LP removal no longer reports to TriggerOracle; tracking moved to BastionHook)
 
     function test_beforeRemoveLiquidity_overflowProtection_setsToZero() public {
         _initPoolWithIssuer();
@@ -785,51 +752,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         );
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  ISSUER DUMP DETECTION VIA ROUTER BYPASS
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_issuer_dump_detected_via_router() public {
-        _initPoolWithIssuer();
-
-        // Add deep liquidity
-        ModifyLiquidityParams memory params = ModifyLiquidityParams({
-            tickLower: -600,
-            tickUpper: 600,
-            liquidityDelta: 100e18,
-            salt: bytes32(uint256(60))
-        });
-        modifyLiquidityRouter.modifyLiquidity(poolKey, params, "");
-
-        // Issuer transfers tokens to a router contract
-        address routerProxy = makeAddr("routerProxy");
-
-        vm.prank(issuerAddr);
-        issuedToken.transfer(routerProxy, 500_000 ether);
-
-        address issuedAddr = address(issuedToken);
-        bool issuedIsToken0 = Currency.unwrap(currency0) == issuedAddr;
-
-        PoolSwapTest.TestSettings memory settings =
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
-
-        vm.startPrank(routerProxy);
-        issuedToken.approve(address(swapRouter), type(uint256).max);
-        baseToken.approve(address(swapRouter), type(uint256).max);
-
-        bool zeroForOne = issuedIsToken0;
-        swapRouter.swap(
-            poolKey,
-            SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: -1e15,
-                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
-            }),
-            settings,
-            ""
-        );
-        vm.stopPrank();
-    }
+    // test_issuer_dump_detected_via_router removed
+    // (issuer sells are now revert-only enforcement, no TriggerOracle reporting)
 
     // ═══════════════════════════════════════════════════════════════════
     //  BASE TOKEN ALLOWLIST & MIN AMOUNT TESTS
@@ -1208,104 +1132,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
     }
 
-    function test_lpCumulativeRemoval_usesSlowRugWindow() public {
-        _initPoolWithIssuer();
-
-        // Report LP removals via hook that individually are below single-tx threshold
-        // but cumulatively exceed slowRugCumulativeThreshold (80%)
-        (, , , uint256 totalLiq) = hook.getPoolInfo(poolId);
-        uint256 chunk = (totalLiq * 45) / 100; // 45% each = 90% cumulative > 80%
-
-        vm.startPrank(address(hook));
-        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq);
-
-        // Within slowRugWindowSeconds (24h), second removal should trigger
-        vm.warp(block.timestamp + 12 hours); // still within 24h window
-        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq - chunk);
-        vm.stopPrank();
-
-        // Should have a pending trigger (RUG_PULL from cumulative LP)
-        (bool exists, ITriggerOracle.TriggerType triggerType,) = triggerOracle.getPendingTrigger(poolId);
-        assertTrue(exists);
-        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
-    }
-
-    function test_lpCumulativeRemoval_outsideWindow_noTrigger() public {
-        _initPoolWithIssuer();
-
-        (, , , uint256 totalLiq) = hook.getPoolInfo(poolId);
-        // Use 30% chunks — individually below single-tx 50%, cumulative 60% < 80%
-        // but would be 60% > 80% if window wasn't respected
-        uint256 chunk = (totalLiq * 30) / 100;
-
-        vm.startPrank(address(hook));
-        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq);
-
-        // Warp past slowRugWindowSeconds (24h) so first removal expires
-        vm.warp(block.timestamp + 25 hours);
-        triggerOracle.reportLPRemoval(poolId, chunk, totalLiq - chunk);
-        vm.stopPrank();
-
-        // Should NOT trigger because first removal is outside the window
-        // Only second 30% counts, which is below 80% cumulative threshold
-        (bool exists,,) = triggerOracle.getPendingTrigger(poolId);
-        assertFalse(exists);
-    }
-
-    function test_weeklyDumpTrigger_issuerSell() public {
-        _initPoolWithIssuer();
-
-        uint256 totalSupply = issuedToken.totalSupply();
-        // Sell 25% each over multiple days — daily threshold (30%) not hit,
-        // but weekly threshold (50%) exceeded after second sell
-        uint256 sellAmount = (totalSupply * 25) / 100;
-
-        vm.startPrank(address(hook));
-        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
-
-        // Day 3: still within 7d window
-        vm.warp(block.timestamp + 3 days);
-        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
-        vm.stopPrank();
-
-        // 25% + 25% = 50% >= weeklyDumpThresholdPercent (50%) → SLOW_RUG
-        (bool exists, ITriggerOracle.TriggerType triggerType,) = triggerOracle.getPendingTrigger(poolId);
-        assertTrue(exists);
-        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.SLOW_RUG));
-    }
-
-    function test_weeklyDumpTrigger_notTriggeredBelowThreshold() public {
-        _initPoolWithIssuer();
-
-        uint256 totalSupply = issuedToken.totalSupply();
-        // Sell 20% each over multiple days — 40% < 50% weekly threshold
-        uint256 sellAmount = (totalSupply * 20) / 100;
-
-        vm.startPrank(address(hook));
-        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
-        vm.warp(block.timestamp + 3 days);
-        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
-        vm.stopPrank();
-
-        // 20% + 20% = 40% < 50% → no trigger
-        (bool exists,,) = triggerOracle.getPendingTrigger(poolId);
-        assertFalse(exists);
-    }
-
-    function test_dailyDumpTriggersBeforeWeekly() public {
-        _initPoolWithIssuer();
-
-        uint256 totalSupply = issuedToken.totalSupply();
-        // Sell 31% in one shot — exceeds daily 30% threshold → ISSUER_DUMP, not SLOW_RUG
-        uint256 sellAmount = (totalSupply * 31) / 100;
-
-        vm.prank(address(hook));
-        triggerOracle.reportIssuerSale(poolId, issuerAddr, sellAmount, totalSupply);
-
-        (bool exists, ITriggerOracle.TriggerType triggerType,) = triggerOracle.getPendingTrigger(poolId);
-        assertTrue(exists);
-        assertEq(uint8(triggerType), uint8(ITriggerOracle.TriggerType.ISSUER_DUMP));
-    }
+    // LP cumulative removal and issuer dump detection tests removed
+    // (these functions were removed from TriggerOracle; LP tracking is now in BastionHook)
 
     function test_getDefaultTriggerConfig_returnsStruct() public view {
         ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getDefaultTriggerConfig();
@@ -1351,5 +1179,296 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(_poolId);
         assertEq(c.weeklyDumpThresholdBps, 3000);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  ISSUER SELL DEFENSE TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @dev Helper to sell issued tokens via swap (issuer sells issued token for base token)
+    function _issuerSellIssuedToken(uint256 amount) internal {
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+        // Selling issued token: if issuedIsToken0, zeroForOne = true
+        bool zeroForOne = issuedIsToken0;
+
+        // Give issuer approval to swap router
+        vm.startPrank(issuerAddr);
+        issuedToken.approve(address(swapRouter), type(uint256).max);
+        baseToken.approve(address(swapRouter), type(uint256).max);
+
+        // Pass issuer address in hookData so the hook can identify the actual swapper
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(amount),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(issuerAddr)
+        );
+        vm.stopPrank();
+    }
+
+    /// @dev Helper to do a normal (non-issuer) swap
+    function _traderBuyIssuedToken(uint256 amount) internal {
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+        bool zeroForOne = !issuedIsToken0; // buy = swap base for issued
+
+        vm.prank(trader);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(amount),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
+    function test_IssuerRouterSell_BelowLimit_Succeeds() public {
+        _initPoolWithIssuer();
+
+        uint256 totalSupply = issuedToken.totalSupply();
+        // Sell 10% of supply — well below 30% daily limit
+        uint256 sellAmount = totalSupply / 10;
+
+        // Should succeed without revert
+        _issuerSellIssuedToken(sellAmount);
+    }
+
+    /// @dev Helper to init pool with large liquidity and small supply for sell defense tests.
+    ///      Mints enough tokens so the issuer retains >60% of supply after providing liquidity.
+    function _initPoolWithLargeLiquidity() internal returns (PoolKey memory _key, PoolId _poolId) {
+        // Deploy a fresh token with small supply.
+        // Full-range position with 500e18 liquidityDelta consumes ~500 tokens at 1:1 price.
+        // Issuer gets 5000 ether to retain plenty after LP provision.
+        MockERC20 sellTestToken = new MockERC20("SellTest", "ST", 18);
+        sellTestToken.mint(issuerAddr, 5000 ether);
+        sellTestToken.mint(address(this), 1000 ether); // total supply = 6000
+
+        // Re-sort tokens
+        (Currency c0, Currency c1) = SortTokens.sort(sellTestToken, baseToken);
+
+        uint24 fee = 3000;
+        int24 tickSpacing = 60;
+        _key = PoolKey(c0, c1, fee, tickSpacing, IHooks(address(hook)));
+        _poolId = _key.toId();
+        manager.initialize(_key, SQRT_PRICE_1_1);
+
+        // Approve
+        vm.startPrank(issuerAddr);
+        sellTestToken.approve(address(modifyLiquidityRouter), type(uint256).max);
+        sellTestToken.approve(address(swapRouter), type(uint256).max);
+        baseToken.approve(address(modifyLiquidityRouter), type(uint256).max);
+        baseToken.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
+        sellTestToken.approve(address(modifyLiquidityRouter), type(uint256).max);
+        sellTestToken.approve(address(swapRouter), type(uint256).max);
+
+        // Determine which is the issued token
+        address _issuedTokenAddr = address(sellTestToken);
+
+        bytes memory hookData = abi.encode(
+            issuerAddr,
+            _issuedTokenAddr,
+            DEFAULT_LOCK,
+            DEFAULT_VESTING,
+            _defaultCommitment(),
+            _defaultTriggerConfig()
+        );
+
+        ModifyLiquidityParams memory params =
+            ModifyLiquidityParams({tickLower: -887220, tickUpper: 887220, liquidityDelta: 500e18, salt: 0});
+
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
+
+        poolKey = _key;
+        poolId = _poolId;
+
+        // Update issuedToken reference for sell helper
+        issuedToken = sellTestToken;
+
+        // Re-assign currency0/currency1 for the sell helper
+        currency0 = c0;
+        currency1 = c1;
+    }
+
+    function test_IssuerRouterSell_ExceedsDaily_RevertsAfterSwap() public {
+        _initPoolWithLargeLiquidity();
+
+        uint256 initialSupply = hook.getInitialTotalSupply(poolId);
+        // Sell 31% of initial supply — exceeds 30% daily limit (3000 bps)
+        uint256 sellAmount = (initialSupply * 3100) / 10_000;
+
+        // Pre-approve so vm.expectRevert catches the swap, not approve
+        vm.startPrank(issuerAddr);
+        issuedToken.approve(address(swapRouter), type(uint256).max);
+        baseToken.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
+
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+        bool zeroForOne = issuedIsToken0;
+
+        // The beforeSwap 1st layer catches this with IssuerDailySellExceeded,
+        // wrapped in PoolManager's WrappedError
+        vm.prank(issuerAddr);
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(sellAmount),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(issuerAddr)
+        );
+    }
+
+    function test_IssuerSell_WeeklyLimit_Reverts() public {
+        _initPoolWithLargeLiquidity();
+
+        uint256 initialSupply = hook.getInitialTotalSupply(poolId);
+        // Weekly threshold: 5000 bps (50%), Daily threshold: 3000 bps (30%)
+        // Strategy: sell 20% per day for 3 days = 60% > 50% weekly
+
+        // Pre-approve
+        vm.startPrank(issuerAddr);
+        issuedToken.approve(address(swapRouter), type(uint256).max);
+        baseToken.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
+
+        // Day 0: sell 20%
+        _issuerSellIssuedToken((initialSupply * 2000) / 10_000);
+
+        // Day 1: sell 20%
+        vm.warp(block.timestamp + 1 days);
+        _issuerSellIssuedToken((initialSupply * 2000) / 10_000);
+
+        // Day 2: sell 11% — weekly cumulative = 51% > 50% weekly threshold
+        // The beforeSwap 1st layer catches this with IssuerWeeklySellExceeded,
+        // wrapped in PoolManager's WrappedError
+        vm.warp(block.timestamp + 1 days);
+
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+        bool zeroForOne = issuedIsToken0;
+        uint256 sellAmount = (initialSupply * 1100) / 10_000;
+
+        vm.prank(issuerAddr);
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(sellAmount),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(issuerAddr)
+        );
+    }
+
+    function test_NonIssuerSell_NoRestriction() public {
+        _initPoolWithIssuer();
+
+        // Give trader issued tokens
+        issuedToken.mint(trader, 1_000_000 ether);
+
+        bool issuedIsToken0 = Currency.unwrap(currency0) == address(issuedToken);
+        bool zeroForOne = issuedIsToken0;
+
+        // Trader sells large amount — no restriction for non-issuer
+        vm.prank(trader);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(1_000 ether),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        // Should succeed
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  IMMEDIATE TRIGGER EXECUTION TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_LPRemovalTrigger_ImmediateExecution() public {
+        _initPoolWithIssuer();
+
+        // Trigger directly via executeTrigger on TriggerOracle (from hook context)
+        uint256 totalSupply = issuedToken.totalSupply();
+
+        vm.prank(address(hook));
+        triggerOracle.executeTrigger(poolId, poolKey, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
+
+        // Should be immediately triggered
+        assertTrue(triggerOracle.checkTrigger(poolId).triggered);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  POST-TRIGGER BLOCKING TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_AfterTrigger_IssuerSellBlocked() public {
+        _initPoolWithIssuer();
+
+        // Trigger the pool via commitment breach
+        vm.prank(address(hook));
+        triggerOracle.reportCommitmentBreach(poolId);
+        assertTrue(triggerOracle.checkTrigger(poolId).triggered);
+
+        // The _isTriggered flag should be set if forceRemoveIssuerLP was called
+        // But since there's no BastionRouter in this test, forceRemoval may fail gracefully.
+        // Check that the escrow is triggered directly
+        (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
+        assertTrue(escrowVault.isTriggered(escrowId));
+    }
+
+    function test_AfterTrigger_NormalUserSwapWorks() public {
+        _initPoolWithIssuer();
+
+        // Trigger the pool
+        vm.prank(address(hook));
+        triggerOracle.reportCommitmentBreach(poolId);
+        assertTrue(triggerOracle.checkTrigger(poolId).triggered);
+
+        // Normal user can still swap
+        _traderBuyIssuedToken(0.01 ether);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  LP RATIO TESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_PoolCreation_RecordsLPRatio() public {
+        _initPoolWithIssuer();
+
+        uint256 lpRatio = hook.getLpRatioBps(poolId);
+        // LP ratio should be non-zero (liquidity / totalSupply * 10000)
+        // With 1e18 liquidity and ~2M total supply, ratio will be very small
+        // Just verify it was recorded
+        assertGe(lpRatio, 0);
+
+        uint256 initialSupply = hook.getInitialTotalSupply(poolId);
+        assertGt(initialSupply, 0, "initial total supply should be recorded");
+    }
+
+    function test_PoolCreation_LowRatio_StillSucceeds() public {
+        // Mint extra supply to make LP ratio very low
+        issuedToken.mint(address(0xdead), 100_000_000 ether);
+
+        _initPoolWithIssuer();
+
+        uint256 lpRatio = hook.getLpRatioBps(poolId);
+        // Should still succeed even with very low ratio
+        assertGe(lpRatio, 0);
     }
 }

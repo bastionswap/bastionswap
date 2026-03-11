@@ -78,6 +78,36 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => immutable commitment set at pool creation
     mapping(PoolId => PoolCommitment) internal _poolCommitments;
 
+    /// @dev poolId => initial total supply at pool creation (for sell limit denominator)
+    mapping(PoolId => uint256) internal _initialTotalSupply;
+
+    /// @dev poolId => cumulative daily sell amount
+    mapping(PoolId => uint256) internal _dailyCumulative;
+
+    /// @dev poolId => cumulative weekly sell amount
+    mapping(PoolId => uint256) internal _weeklyCumulative;
+
+    /// @dev poolId => daily window start timestamp
+    mapping(PoolId => uint40) internal _dailyWindowStart;
+
+    /// @dev poolId => weekly window start timestamp
+    mapping(PoolId => uint40) internal _weeklyWindowStart;
+
+    /// @dev poolId => whether the pool has been triggered (local flag for fast access)
+    mapping(PoolId => bool) internal _isTriggered;
+
+    /// @dev poolId => LP ratio in bps (liquidity * 10000 / totalSupply) at pool creation
+    mapping(PoolId => uint256) internal _lpRatioBps;
+
+    /// @dev poolId => cumulative LP removed in current window (for permissionless executeTrigger)
+    mapping(PoolId => uint256) internal _lpCumulativeRemoved;
+
+    /// @dev poolId => LP removal window start timestamp
+    mapping(PoolId => uint40) internal _lpRemovalWindowStart;
+
+    /// @dev poolId => initial liquidity at pool creation (denominator for LP removal threshold)
+    mapping(PoolId => uint256) internal _initialLiquidity;
+
     /// @dev BastionRouter address (set via one-time setter, deployed after hook due to CREATE2)
     address public bastionRouter;
 
@@ -135,6 +165,11 @@ contract BastionHook is BaseTestHooks {
     error VestingDurationTooShort();
     error InvalidDuration();
     error CommitmentTooLenient();
+    error IssuerDailySellExceeded();
+    error IssuerWeeklySellExceeded();
+    error PoolTriggered();
+    error IssuerDumpDetected();
+    error SingleLPRemovalExceeded();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -156,6 +191,7 @@ contract BastionHook is BaseTestHooks {
     event MinLockDurationUpdated(uint256 newDuration);
     event MinVestingDurationUpdated(uint256 newDuration);
     event PoolCommitmentSet(PoolId indexed poolId, address indexed issuer, PoolCommitment commitment);
+    event PoolLiquidityRatio(PoolId indexed poolId, uint256 lpRatioBps);
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -277,13 +313,6 @@ contract BastionHook is BaseTestHooks {
         // Track total liquidity
         if (liquidity > 0) {
             _totalLiquidity[poolId] += liquidity;
-
-            // RISK-4: Report LP addition for flash-loan inflation tracking
-            if (_issuers[poolId] != address(0)) {
-                try triggerOracle.reportLPAddition(poolId, liquidity) {} catch {
-                    emit ExternalCallFailed("TriggerOracle.reportLPAddition", poolId);
-                }
-            }
         }
 
         return IHooks.beforeAddLiquidity.selector;
@@ -343,6 +372,9 @@ contract BastionHook is BaseTestHooks {
             if (hookData.length == 0) revert MustIdentifyUser();
             address user = abi.decode(hookData, (address));
             if (user == issuer) {
+                // Block issuer LP removal after trigger
+                if (_isTriggered[poolId]) revert PoolTriggered();
+
                 isIssuerRemoval = true;
                 // Enforce vesting
                 uint256 escrowId = _escrowIds[poolId];
@@ -366,14 +398,21 @@ contract BastionHook is BaseTestHooks {
             _totalLiquidity[poolId] = 0;
         }
 
-        // Report LP removal to TriggerOracle ONLY for issuer removals
-        // Skip reporting if vesting period has fully elapsed (legitimate withdrawal)
-        if (isIssuerRemoval && totalLP > 0) {
-            uint256 vestingEnd = escrowVault.getVestingEndTime(poolId);
-            if (vestingEnd == 0 || block.timestamp < vestingEnd) {
-                try triggerOracle.reportLPRemoval(poolId, removeAmount, totalLP) {} catch {
-                    emit ExternalCallFailed("TriggerOracle.reportLPRemoval", poolId);
+        // Track cumulative LP removal for issuer (for permissionless executeTrigger)
+        if (isIssuerRemoval) {
+            PoolCommitment memory commitment = _poolCommitments[poolId];
+            if (commitment.isSet) {
+                // Single-tx LP removal threshold check (against initial liquidity)
+                uint256 initLiq = _initialLiquidity[poolId];
+                if (initLiq > 0) {
+                    uint256 removalBps = (removeAmount * 10_000) / initLiq;
+                    if (removalBps > commitment.maxSingleLpRemovalBps) revert SingleLPRemovalExceeded();
                 }
+
+                // Update cumulative tracking window
+                ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getTriggerConfig(poolId);
+                _updateLpWindow(poolId, cfg);
+                _lpCumulativeRemoved[poolId] += removeAmount;
             }
         }
 
@@ -382,24 +421,48 @@ contract BastionHook is BaseTestHooks {
         return IHooks.beforeRemoveLiquidity.selector;
     }
 
-    /// @notice Called before a swap. Snapshots issuer balance for router bypass detection (RISK-3).
-    ///         Uses EIP-1153 transient storage to pass data to afterSwap within the same tx.
+    /// @notice Called before a swap. Enforces post-trigger issuer sell block and
+    ///         direct sell defense (1st layer). Caches swap context for afterSwap (RISK-3).
+    /// @dev    Cooperating routers (e.g. BastionSwapRouter) pass `abi.encode(actualSwapper)` as
+    ///         hookData so the hook can identify the end-user. For non-cooperating routers the
+    ///         `sender` parameter (= the router contract) is used as fallback.
     function beforeSwap(
-        address,
+        address sender,
         PoolKey calldata key,
         SwapParams calldata params,
-        bytes calldata
+        bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4, BeforeSwapDelta, uint24) {
         PoolId poolId = key.toId();
         address issuedToken = _issuedTokens[poolId];
         address poolIssuer = _issuers[poolId];
 
-        // Cache issuedToken and issuer in transient storage for afterSwap
+        // Resolve actual swapper: cooperating routers pass abi.encode(swapper) in hookData
+        address actualSwapper = (hookData.length == 32) ? abi.decode(hookData, (address)) : sender;
+
+        // Cache issuedToken, issuer, and actual swapper in transient storage for afterSwap
         _tstore(_issuedTokenSlot(poolId), uint256(uint160(issuedToken)));
         _tstore(_issuerSlot(poolId), uint256(uint160(poolIssuer)));
+        _tstore(_actualSwapperSlot(poolId), uint256(uint160(actualSwapper)));
 
         if (issuedToken != address(0) && poolIssuer != address(0)) {
-            _tstore(_preSwapBalanceSlot(poolId), ERC20(issuedToken).balanceOf(poolIssuer));
+            // Determine if this is an issuer sell (issuer selling issued token)
+            bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
+            bool isSell = issuedIsToken0 ? params.zeroForOne : !params.zeroForOne;
+
+            if (isSell && actualSwapper == poolIssuer) {
+                // Post-trigger block: issuer cannot sell after trigger
+                if (_isTriggered[poolId]) revert PoolTriggered();
+
+                // Direct sell defense (1st layer): check commitment limits
+                PoolCommitment memory commitment = _poolCommitments[poolId];
+                if (commitment.isSet) {
+                    uint256 sellAmount = params.amountSpecified < 0
+                        ? uint256(uint128(int128(-params.amountSpecified)))
+                        : uint256(int256(params.amountSpecified));
+
+                    _checkSellLimits(poolId, commitment, sellAmount);
+                }
+            }
         }
 
         // Collect insurance fee on exactInput buy swaps
@@ -414,32 +477,45 @@ contract BastionHook is BaseTestHooks {
         return (IHooks.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
     }
 
-    /// @notice Called after a swap. Deposits insurance fee on buys and
-    ///         reports issuer sales to TriggerOracle.
+    /// @notice Called after a swap. Enforces issuer sell limits (2nd layer) via BalanceDelta
+    ///         and reports sales to TriggerOracle.
+    /// @dev    Uses the actual swapper address cached in transient storage by beforeSwap.
+    ///         In Uniswap V4, token settlement is deferred (happens after hooks), so balance-based
+    ///         detection doesn't work. Instead we use the BalanceDelta from the AMM to compute
+    ///         the sell amount and the hookData-resolved swapper identity.
     function afterSwap(
         address,
         PoolKey calldata key,
-        SwapParams calldata,
-        BalanceDelta,
+        SwapParams calldata params,
+        BalanceDelta delta,
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, int128) {
         PoolId poolId = key.toId();
         address issuedToken = address(uint160(_tload(_issuedTokenSlot(poolId))));
 
         if (issuedToken != address(0)) {
-            // RISK-3: Check if issuer balance decreased (detects router bypass)
             address poolIssuer = address(uint160(_tload(_issuerSlot(poolId))));
-            if (poolIssuer != address(0)) {
-                uint256 preBalance = _tload(_preSwapBalanceSlot(poolId));
-                uint256 postBalance = ERC20(issuedToken).balanceOf(poolIssuer);
-                if (postBalance < preBalance) {
-                    uint256 soldAmount = preBalance - postBalance;
-                    uint256 totalSupply = ERC20(issuedToken).totalSupply();
-                    if (totalSupply > 0) {
-                        try triggerOracle.reportIssuerSale(poolId, poolIssuer, soldAmount, totalSupply) {} catch {
-                            emit ExternalCallFailed("TriggerOracle.reportIssuerSale", poolId);
+            address actualSwapper = address(uint160(_tload(_actualSwapperSlot(poolId))));
+
+            if (poolIssuer != address(0) && actualSwapper == poolIssuer) {
+                // Determine sell direction and compute sold amount from BalanceDelta
+                bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
+                bool isSell = issuedIsToken0 ? params.zeroForOne : !params.zeroForOne;
+
+                if (isSell) {
+                    // User sent issued tokens: negative delta = user owes tokens to pool
+                    int128 issuedDelta = issuedIsToken0 ? delta.amount0() : delta.amount1();
+                    if (issuedDelta < 0) {
+                        uint256 soldAmount = uint256(uint128(-issuedDelta));
+                        uint256 totalSupply = ERC20(issuedToken).totalSupply();
+                        if (totalSupply > 0) {
+                            // Enforce sell limits (2nd layer — catches all paths, revert only)
+                            PoolCommitment memory commitment = _poolCommitments[poolId];
+                            if (commitment.isSet) {
+                                _enforceAfterSwapSellLimits(poolId, commitment, soldAmount);
+                            }
+                            emit IssuerSaleReported(poolId, poolIssuer, soldAmount);
                         }
-                        emit IssuerSaleReported(poolId, poolIssuer, soldAmount);
                     }
                 }
             }
@@ -468,6 +544,9 @@ contract BastionHook is BaseTestHooks {
     function forceRemoveIssuerLP(PoolId poolId) external {
         if (msg.sender != address(escrowVault)) revert OnlyEscrowVault();
         if (bastionRouter == address(0)) revert RouterNotSet();
+
+        // Set local triggered flag to block future issuer sells
+        _isTriggered[poolId] = true;
 
         PoolKey memory key = _poolKeys[poolId];
         uint256 liquidity = _totalLiquidity[poolId];
@@ -573,6 +652,52 @@ contract BastionHook is BaseTestHooks {
         escrowId = _escrowIds[poolId];
         issuedToken = _issuedTokens[poolId];
         totalLiquidity = _totalLiquidity[poolId];
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PERMISSIONLESS TRIGGER EXECUTION
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @notice Permissionless: anyone can execute trigger if cumulative LP removal threshold is met.
+    function executeTrigger(PoolId poolId) external {
+        PoolCommitment memory commitment = _poolCommitments[poolId];
+        require(commitment.isSet, "Pool not registered");
+        require(!_isTriggered[poolId], "Already triggered");
+
+        // Check cumulative LP removal threshold
+        ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getTriggerConfig(poolId);
+        _updateLpWindow(poolId, cfg);
+
+        uint256 initLiq = _initialLiquidity[poolId];
+        require(initLiq > 0, "No initial liquidity");
+
+        uint256 cumulativeBps = (_lpCumulativeRemoved[poolId] * 10_000) / initLiq;
+        require(cumulativeBps >= cfg.slowRugCumulativeThreshold, "Threshold not met");
+
+        _isTriggered[poolId] = true;
+
+        // Delegate to TriggerOracle for execution (escrow, insurance, reputation)
+        PoolKey memory key = _poolKeys[poolId];
+        uint256 totalEligibleSupply = _initialTotalSupply[poolId];
+        triggerOracle.executeTrigger(poolId, key, ITriggerOracle.TriggerType.RUG_PULL, totalEligibleSupply);
+    }
+
+    /// @notice View: check if cumulative LP removal threshold is currently met.
+    function isLPRemovalTriggerable(PoolId poolId) external view returns (bool) {
+        ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getTriggerConfig(poolId);
+        uint256 cumRemoved = _lpCumulativeRemoved[poolId];
+        uint40 windowStart = _lpRemovalWindowStart[poolId];
+
+        // Check if window expired (reset would happen)
+        if (cfg.slowRugWindowSeconds > 0 && block.timestamp >= windowStart + cfg.slowRugWindowSeconds) {
+            return false; // window would reset
+        }
+
+        uint256 initLiq = _initialLiquidity[poolId];
+        if (initLiq == 0) return false;
+
+        uint256 cumulativeBps = (cumRemoved * 10_000) / initLiq;
+        return cumulativeBps >= cfg.slowRugCumulativeThreshold;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -703,9 +828,8 @@ contract BastionHook is BaseTestHooks {
         );
         _escrowIds[poolId] = escrowId;
 
-        // Register issuer and config in TriggerOracle (RISK-5: pass totalSupply snapshot)
-        triggerOracle.registerIssuer(poolId, issuer, ERC20(token).totalSupply(), token);
-        triggerOracle.setTriggerConfig(poolId, triggerConfig);
+        // Initialize sell tracking & register with TriggerOracle (extracted to reduce stack depth)
+        _initSellTrackingAndOracle(poolId, token, liquidity, issuer, triggerConfig);
 
         // Record pool creation in reputation engine
         try reputationEngine.recordEvent(
@@ -718,6 +842,36 @@ contract BastionHook is BaseTestHooks {
 
         emit IssuerRegistered(poolId, issuer, token);
         emit EscrowCreated(poolId, escrowId, issuer);
+    }
+
+    /// @dev Initializes sell tracking state and registers with TriggerOracle.
+    ///      Extracted to reduce stack depth in _registerIssuerAndCreateEscrow.
+    function _initSellTrackingAndOracle(
+        PoolId poolId,
+        address token,
+        uint128 liquidity,
+        address issuer,
+        ITriggerOracle.TriggerConfig memory triggerConfig
+    ) internal {
+        uint256 totalSupply = ERC20(token).totalSupply();
+        _initialTotalSupply[poolId] = totalSupply;
+        _initialLiquidity[poolId] = uint256(liquidity);
+
+        // Record LP/supply ratio for transparency
+        uint256 lpRatio = (liquidity > 0 && totalSupply > 0)
+            ? (uint256(liquidity) * 10_000 / totalSupply)
+            : 0;
+        _lpRatioBps[poolId] = lpRatio;
+        emit PoolLiquidityRatio(poolId, lpRatio);
+
+        // Initialize tracking window starts
+        _dailyWindowStart[poolId] = uint40(block.timestamp);
+        _weeklyWindowStart[poolId] = uint40(block.timestamp);
+        _lpRemovalWindowStart[poolId] = uint40(block.timestamp);
+
+        // Register issuer and config in TriggerOracle
+        triggerOracle.registerIssuer(poolId, issuer, totalSupply, token);
+        triggerOracle.setTriggerConfig(poolId, triggerConfig);
     }
 
     /// @dev Validates base token allowlist and minimum amount for initial liquidity.
@@ -885,6 +1039,112 @@ contract BastionHook is BaseTestHooks {
         emit PoolCommitmentSet(poolId, issuer, c);
     }
 
+    // ─── LP Removal Window Helper ──────────────────────────────────
+
+    /// @dev Resets LP cumulative removal counter if window has expired.
+    function _updateLpWindow(PoolId poolId, ITriggerOracle.TriggerConfig memory cfg) internal {
+        if (cfg.slowRugWindowSeconds > 0 && block.timestamp >= _lpRemovalWindowStart[poolId] + cfg.slowRugWindowSeconds) {
+            _lpCumulativeRemoved[poolId] = 0;
+            _lpRemovalWindowStart[poolId] = uint40(block.timestamp);
+        }
+    }
+
+    // ─── Issuer Sell Defense Helpers ──────────────────────────────────
+
+    /// @dev Check sell limits before swap (1st layer, direct issuer sells only).
+    ///      Reverts if projected sell would exceed daily or weekly commitment thresholds.
+    function _checkSellLimits(
+        PoolId poolId,
+        PoolCommitment memory commitment,
+        uint256 sellAmount
+    ) internal view {
+        uint256 initialSupply = _initialTotalSupply[poolId];
+        if (initialSupply == 0) return;
+
+        // Check daily limit
+        if (commitment.maxDailySellBps > 0) {
+            uint256 dailyCum = _dailyCumulative[poolId];
+            uint40 windowStart = _dailyWindowStart[poolId];
+            // Reset window if expired (view-only projection)
+            if (block.timestamp >= windowStart + 86400) {
+                dailyCum = 0;
+            }
+            uint256 projected = dailyCum + sellAmount;
+            uint256 sellBps = (projected * 10_000) / initialSupply;
+            if (sellBps >= commitment.maxDailySellBps) revert IssuerDailySellExceeded();
+        }
+
+        // Check weekly limit
+        if (commitment.weeklyDumpThresholdBps > 0 && commitment.weeklyDumpWindowSeconds > 0) {
+            uint256 weeklyCum = _weeklyCumulative[poolId];
+            uint40 windowStart = _weeklyWindowStart[poolId];
+            if (block.timestamp >= windowStart + commitment.weeklyDumpWindowSeconds) {
+                weeklyCum = 0;
+            }
+            uint256 projected = weeklyCum + sellAmount;
+            uint256 sellBps = (projected * 10_000) / initialSupply;
+            if (sellBps >= commitment.weeklyDumpThresholdBps) revert IssuerWeeklySellExceeded();
+        }
+    }
+
+    /// @dev Enforce sell limits after swap (2nd layer, catches all paths).
+    ///      Updates cumulative counters and reverts if limits exceeded.
+    function _enforceAfterSwapSellLimits(
+        PoolId poolId,
+        PoolCommitment memory commitment,
+        uint256 soldAmount
+    ) internal {
+        uint256 initialSupply = _initialTotalSupply[poolId];
+        if (initialSupply == 0) return;
+
+        // Reset daily window if expired
+        uint40 dailyStart = _dailyWindowStart[poolId];
+        if (block.timestamp >= dailyStart + 86400) {
+            _dailyCumulative[poolId] = 0;
+            _dailyWindowStart[poolId] = uint40(block.timestamp);
+        }
+
+        // Reset weekly window if expired
+        uint40 weeklyStart = _weeklyWindowStart[poolId];
+        if (commitment.weeklyDumpWindowSeconds > 0 && block.timestamp >= weeklyStart + commitment.weeklyDumpWindowSeconds) {
+            _weeklyCumulative[poolId] = 0;
+            _weeklyWindowStart[poolId] = uint40(block.timestamp);
+        }
+
+        // Update cumulative counters
+        _dailyCumulative[poolId] += soldAmount;
+        _weeklyCumulative[poolId] += soldAmount;
+
+        // Check daily limit
+        if (commitment.maxDailySellBps > 0) {
+            uint256 dailyBps = (_dailyCumulative[poolId] * 10_000) / initialSupply;
+            if (dailyBps >= commitment.maxDailySellBps) revert IssuerDumpDetected();
+        }
+
+        // Check weekly limit
+        if (commitment.weeklyDumpThresholdBps > 0) {
+            uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000) / initialSupply;
+            if (weeklyBps >= commitment.weeklyDumpThresholdBps) revert IssuerDumpDetected();
+        }
+    }
+
+    // ─── View: Issuer Sell Defense ──────────────────────────────────
+
+    /// @notice Get the initial total supply recorded at pool creation.
+    function getInitialTotalSupply(PoolId poolId) external view returns (uint256) {
+        return _initialTotalSupply[poolId];
+    }
+
+    /// @notice Get the LP/supply ratio in bps recorded at pool creation.
+    function getLpRatioBps(PoolId poolId) external view returns (uint256) {
+        return _lpRatioBps[poolId];
+    }
+
+    /// @notice Check if a pool has been triggered (local flag).
+    function isPoolTriggered(PoolId poolId) external view returns (bool) {
+        return _isTriggered[poolId];
+    }
+
     // ─── Transient Storage Helpers (EIP-1153) ──────────────────────────
 
     function _tstore(bytes32 slot, uint256 value) internal {
@@ -895,16 +1155,16 @@ contract BastionHook is BaseTestHooks {
         assembly { value := tload(slot) }
     }
 
-    function _preSwapBalanceSlot(PoolId poolId) internal pure returns (bytes32) {
-        return keccak256(abi.encode(poolId, "preSwapBalance"));
-    }
-
     function _issuedTokenSlot(PoolId poolId) internal pure returns (bytes32) {
         return keccak256(abi.encode(poolId, "issuedToken"));
     }
 
     function _issuerSlot(PoolId poolId) internal pure returns (bytes32) {
         return keccak256(abi.encode(poolId, "issuer"));
+    }
+
+    function _actualSwapperSlot(PoolId poolId) internal pure returns (bytes32) {
+        return keccak256(abi.encode(poolId, "actualSwapper"));
     }
 
     /// @dev Allow receiving ETH for insurance fee deposits

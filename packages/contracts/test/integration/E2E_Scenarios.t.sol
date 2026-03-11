@@ -98,9 +98,9 @@ contract E2E_ScenariosTest is Test, Deployers {
             }
             vm.etch(hookAddr, deployed.code);
             // Restore storage lost by vm.etch
-            vm.store(hookAddr, bytes32(uint256(11)), bytes32(uint256(uint160(governance))));
+            vm.store(hookAddr, bytes32(uint256(21)), bytes32(uint256(uint160(governance))));
             // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-            vm.store(hookAddr, bytes32(uint256(13)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+            vm.store(hookAddr, bytes32(uint256(23)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
         }
         hook = BastionHook(payable(hookAddr));
 
@@ -147,16 +147,6 @@ contract E2E_ScenariosTest is Test, Deployers {
             baseToken.approve(address(swapRouter), type(uint256).max);
             vm.stopPrank();
         }
-    }
-
-    // ─── Merkle Helpers ────────────────────────────────────────────────
-
-    function _computeLeaf(address account, uint256 balance) internal pure returns (bytes32) {
-        return keccak256(bytes.concat(keccak256(abi.encode(account, balance))));
-    }
-
-    function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
-        return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
@@ -249,7 +239,6 @@ contract E2E_ScenariosTest is Test, Deployers {
         _scenario1_tradersBuy();
         _scenario1_vestingBlocked();
         _scenario1_rugPullTrigger();
-        _scenario1_executeTrigger();
         _scenario1_insuranceClaims();
 
         console.log("=== SCENARIO 1 COMPLETE ===");
@@ -288,92 +277,69 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _scenario1_rugPullTrigger() internal {
-        // Warp into mid-vesting so issuer has removable LP but vesting period is not yet complete.
-        // (Post-vesting LP removal is considered legitimate and skips trigger reporting.)
+        // Warp into mid-vesting so issuer has removable LP.
         // Lock=7d, Vesting=83d. Already at day 6. Warp +74d = day 80 (73d into 83d vesting).
         vm.warp(block.timestamp + 74 days);
 
-        uint256 totalLP = _getTotalLP();
         uint128 removable = escrowVault.getRemovableLiquidity(_escrowId);
-        assertGt(removable, 0, "issuer should have removable LP after full vesting");
+        assertGt(removable, 0, "issuer should have removable LP after vesting progress");
 
-        vm.expectEmit(true, false, false, false, address(hook));
-        emit BastionHook.LPRemovalReported(_poolId, removable, totalLP);
+        // Issuer removes LP in multiple transactions within the slowRugWindow (24h)
+        // cumulatively exceeding the slowRugCumulativeThreshold (80% of initialTotalSupply).
+        // Each removal is below maxSingleLpRemovalBps (50%) individually.
+        uint128 firstChunk = removable / 2;
+        uint128 secondChunk = removable - firstChunk;
 
-        // Issuer removes their fully-vested LP — this triggers the rug-pull detection
+        // First LP removal
         vm.prank(issuerAddr);
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
-            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(removable)), salt: 0}),
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(firstChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
 
-        (bool exists, ITriggerOracle.TriggerType tt,) = triggerOracle.getPendingTrigger(_poolId);
-        assertTrue(exists, "trigger should be pending");
-        assertEq(uint8(tt), uint8(ITriggerOracle.TriggerType.RUG_PULL));
-        console.log("  RUG_PULL trigger pending");
-    }
+        // Not yet triggerable (cumulative below threshold)
+        assertFalse(hook.isLPRemovalTriggerable(_poolId), "should not be triggerable after first removal");
 
-    function _scenario1_executeTrigger() internal {
-        // Cannot execute before grace period
-        vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
-        triggerOracle.executeTrigger(_poolId);
+        // Second LP removal (still within 24h window)
+        vm.warp(block.timestamp + 6 hours);
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(
+            _poolKey,
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
+            abi.encode(issuerAddr)
+        );
 
-        (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
-        vm.warp(executeAfter + 24 hours);
+        // Now cumulative LP removal should exceed threshold
+        // Anyone can call executeTrigger
+        hook.executeTrigger(_poolId);
 
-        // ForceRemoval may fail gracefully (no router in test) — ForceRemovalFailed emitted instead
-        triggerOracle.executeTrigger(_poolId);
+        // Trigger fires
+        ITriggerOracle.TriggerResult memory result = triggerOracle.checkTrigger(_poolId);
+        assertTrue(result.triggered, "trigger should have fired");
+        assertEq(uint8(result.triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
+        console.log("  RUG_PULL trigger fired via permissionless executeTrigger");
 
-        // Verify trigger state
-        assertTrue(triggerOracle.checkTrigger(_poolId).triggered);
-
-        // Escrow locked down — no further LP removal possible
+        // Escrow locked down
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
         assertEq(s.remainingLiquidity, 0, "escrow remaining should be 0 after lockdown");
-        // Issuer removed all vested LP before lockdown was executed
-        assertEq(s.removedLiquidity, s.totalLiquidity, "issuer removed all LP before lockdown");
         assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0, "removable should be 0 after lockdown");
 
         console.log("  Escrow locked down (LP removal permanently blocked)");
     }
 
     function _scenario1_insuranceClaims() internal {
-        uint256 totalSupply = issuedToken.totalSupply();
-        uint256 t1Bal = issuedToken.balanceOf(trader1);
-
-        bytes32 leaf1 = _computeLeaf(trader1, t1Bal);
-        bytes32 leaf2 = _computeLeaf(address(0xdead), 0);
-        bytes32 merkleRoot = _hashPair(leaf1, leaf2);
-
-        vm.prank(address(triggerOracle));
-        insurancePool.executePayout(_poolId, uint8(ITriggerOracle.TriggerType.RUG_PULL), totalSupply, merkleRoot, address(0));
-
+        // RUG_PULL trigger passes totalEligibleSupply from _initialTotalSupply,
+        // so InsurancePool.executePayout IS called automatically by TriggerOracle.
         IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
-        assertTrue(ps.isTriggered);
-        // ERC-20 base pool: fees are in base token, not ETH
+        assertTrue(ps.isTriggered, "RUG_PULL trigger should auto-execute insurance payout");
+
+        // ERC-20 base pool: fees are in base token
         uint256 insuranceFees = baseToken.balanceOf(address(insurancePool));
         assertGt(insuranceFees, 0, "no insurance base token fees");
-        console.log("  Insurance base token for claims:", insuranceFees);
+        console.log("  Insurance base token accumulated:", insuranceFees);
 
-        // Trader1 claims with Merkle proof — receives base token compensation
-        uint256 baseTokenBefore = baseToken.balanceOf(trader1);
-
-        bytes32[] memory proof = new bytes32[](1);
-        proof[0] = leaf2;
-
-        vm.prank(trader1);
-        insurancePool.claimCompensation(_poolId, t1Bal, proof);
-
-        uint256 baseTokenReceived = baseToken.balanceOf(trader1) - baseTokenBefore;
-        assertGt(baseTokenReceived, 0, "trader should receive base token compensation");
-        assertTrue(insurancePool.hasClaimed(_poolId, trader1));
-        console.log("  Trader1 base token claimed:", baseTokenReceived);
-
-        // Duplicate claim blocked
-        vm.prank(trader1);
-        vm.expectRevert(abi.encodeWithSelector(InsurancePool.AlreadyClaimed.selector));
-        insurancePool.claimCompensation(_poolId, t1Bal, proof);
+        console.log("  Escrow lockdown verified - RUG_PULL scenario complete");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -434,11 +400,11 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SCENARIO 3: Issuer Dump -> Trigger + Lockdown + Compensation
+    //  SCENARIO 3: Cumulative LP Removal -> Trigger + Lockdown + Compensation
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_scenario3_issuerDump_triggerAndCompensate() public {
-        console.log("=== SCENARIO 3: Issuer Dump (LP Permission Model) ===");
+    function test_scenario3_lpRemovalTrigger_andCompensate() public {
+        console.log("=== SCENARIO 3: Cumulative LP Removal Trigger (LP Permission Model) ===");
 
         IEscrowVault.IssuerCommitment memory commitment =
             IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
@@ -446,8 +412,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         _initPool(commitment);
 
         _scenario3_tradersBuy();
-        _scenario3_issuerDump();
-        _scenario3_executeTrigger();
+        _scenario3_cumulativeLPRemovalTrigger();
         _scenario3_claims();
         _scenario3_claimExpiry();
 
@@ -463,96 +428,76 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("  Insurance base token fees:", insuranceFees);
     }
 
-    function _scenario3_issuerDump() internal {
-        uint256 totalSupply = issuedToken.totalSupply();
-        uint256 saleAmount = (totalSupply * 3001) / 10000; // 30.01%
-        console.log("  Total supply:", totalSupply);
-        console.log("  Sale amount (30.01%%):", saleAmount);
+    function _scenario3_cumulativeLPRemovalTrigger() internal {
+        // Warp past lock + well into vesting so issuer has removable LP
+        vm.warp(block.timestamp + 80 days);
 
-        uint256 firstSale = saleAmount / 2;
-        uint256 secondSale = saleAmount - firstSale;
-
-        vm.prank(address(hook));
-        triggerOracle.reportIssuerSale(_poolId, issuerAddr, firstSale, totalSupply);
-
-        (bool pending,,) = triggerOracle.getPendingTrigger(_poolId);
-        assertFalse(pending, "first sale alone should not trigger");
-
-        vm.warp(block.timestamp + 12 hours);
-
-        vm.prank(address(hook));
-        triggerOracle.reportIssuerSale(_poolId, issuerAddr, secondSale, totalSupply);
-
-        (bool exists, ITriggerOracle.TriggerType tt,) = triggerOracle.getPendingTrigger(_poolId);
-        assertTrue(exists);
-        assertEq(uint8(tt), uint8(ITriggerOracle.TriggerType.ISSUER_DUMP));
-        console.log("  ISSUER_DUMP pending");
-    }
-
-    function _scenario3_executeTrigger() internal {
-        vm.expectRevert(abi.encodeWithSelector(TriggerOracle.GracePeriodNotElapsed.selector));
-        triggerOracle.executeTrigger(_poolId);
-
-        (,, uint40 executeAfter) = triggerOracle.getPendingTrigger(_poolId);
-        vm.warp(executeAfter);
+        uint128 removable = escrowVault.getRemovableLiquidity(_escrowId);
+        assertGt(removable, 0, "issuer should have removable LP");
+        console.log("  Removable LP:", uint256(removable));
 
         uint256 insuranceBaseTokenBefore = baseToken.balanceOf(address(insurancePool));
 
-        // Build Merkle tree for trader1 and trader2 balances
-        uint256 t1Bal = issuedToken.balanceOf(trader1);
-        uint256 t2Bal = issuedToken.balanceOf(trader2);
-        bytes32 leaf1 = _computeLeaf(trader1, t1Bal);
-        bytes32 leaf2 = _computeLeaf(trader2, t2Bal);
-        _scenario3MerkleRoot = _hashPair(leaf1, leaf2);
-        _scenario3Leaf1 = leaf1;
-        _scenario3Leaf2 = leaf2;
-        _scenario3T1Bal = t1Bal;
-        _scenario3T2Bal = t2Bal;
+        // Issuer removes LP in two chunks within the slowRug window (24h)
+        // cumulatively exceeding slowRugCumulativeThreshold (80%)
+        uint128 firstChunk = removable / 2;
+        uint128 secondChunk = removable - firstChunk;
 
-        vm.prank(guardian);
-        triggerOracle.submitMerkleRoot(_poolId, _scenario3MerkleRoot);
-
-        vm.warp(block.timestamp + 1 hours);
-
-        // ForceRemoval may fail gracefully (no router in test) — ForceRemovalFailed emitted instead
-        // ERC-20 base pool: ETH payout is 0, base token fees are in baseTokenFeePayoutBalance
-        vm.expectEmit(true, false, false, true, address(insurancePool));
-        emit IInsurancePool.PayoutExecuted(
-            _poolId, uint8(ITriggerOracle.TriggerType.ISSUER_DUMP), 0
+        // First removal
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(
+            _poolKey,
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(firstChunk)), salt: 0}),
+            abi.encode(issuerAddr)
         );
 
-        triggerOracle.executeTrigger(_poolId);
+        assertFalse(hook.isPoolTriggered(_poolId), "should not be triggered yet");
 
-        // Verify trigger state
-        assertTrue(triggerOracle.checkTrigger(_poolId).triggered);
+        // Second removal (still within window)
+        vm.warp(block.timestamp + 6 hours);
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(
+            _poolKey,
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
+            abi.encode(issuerAddr)
+        );
 
-        // Escrow locked down (no token redistribution — LP permission model)
+        // Permissionless trigger execution by anyone (e.g., a bot)
+        address anyBot = makeAddr("bot");
+        vm.prank(anyBot);
+        hook.executeTrigger(_poolId);
+
+        // Verify trigger fired
+        ITriggerOracle.TriggerResult memory result = triggerOracle.checkTrigger(_poolId);
+        assertTrue(result.triggered, "RUG_PULL trigger should have fired");
+        assertEq(uint8(result.triggerType), uint8(ITriggerOracle.TriggerType.RUG_PULL));
+        console.log("  RUG_PULL trigger fired via permissionless executeTrigger");
+
+        // Escrow locked down
         IEscrowVault.EscrowStatus memory s = escrowVault.getEscrowStatus(_escrowId);
-        assertEq(s.remainingLiquidity, 0);
-        assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0);
+        assertEq(s.remainingLiquidity, 0, "escrow remaining should be 0 after lockdown");
+        assertEq(escrowVault.getRemovableLiquidity(_escrowId), 0, "removable should be 0 after lockdown");
         console.log("  Escrow locked down");
 
-        // Insurance payout: base token fees snapshotted for claims
+        // InsurancePool.executePayout was called automatically with bytes32(0) merkle root
+        IInsurancePool.PoolStatus memory ps = insurancePool.getPoolStatus(_poolId);
+        assertTrue(ps.isTriggered, "insurance pool should be triggered");
+        assertTrue(ps.totalEligibleSupply > 0, "eligible supply should be set");
+
         assertGt(insuranceBaseTokenBefore, 0, "should have base token fees before payout");
         console.log("  Insurance base token for claims:", insuranceBaseTokenBefore);
     }
 
-    // Scenario 3 merkle state
-    bytes32 internal _scenario3MerkleRoot;
-    bytes32 internal _scenario3Leaf1;
-    bytes32 internal _scenario3Leaf2;
-    uint256 internal _scenario3T1Bal;
-    uint256 internal _scenario3T2Bal;
-
     function _scenario3_claims() internal {
-        // ERC-20 base pool: compensation is in base tokens, not ETH
+        uint256 t1Bal = issuedToken.balanceOf(trader1);
+        uint256 t2Bal = issuedToken.balanceOf(trader2);
+
+        bytes32[] memory emptyProof = new bytes32[](0);
+
+        // Trader1 claims
         uint256 baseBefore1 = baseToken.balanceOf(trader1);
-
-        bytes32[] memory proof1 = new bytes32[](1);
-        proof1[0] = _scenario3Leaf2;
-
         vm.prank(trader1);
-        insurancePool.claimCompensation(_poolId, _scenario3T1Bal, proof1);
+        insurancePool.claimCompensation(_poolId, t1Bal, emptyProof);
 
         uint256 baseReceived1 = baseToken.balanceOf(trader1) - baseBefore1;
         assertGt(baseReceived1, 0, "trader1 should receive base token compensation");
@@ -560,11 +505,8 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         // Trader2 claims
         uint256 baseBefore2 = baseToken.balanceOf(trader2);
-        bytes32[] memory proof2 = new bytes32[](1);
-        proof2[0] = _scenario3Leaf1;
-
         vm.prank(trader2);
-        insurancePool.claimCompensation(_poolId, _scenario3T2Bal, proof2);
+        insurancePool.claimCompensation(_poolId, t2Bal, emptyProof);
 
         uint256 baseReceived2 = baseToken.balanceOf(trader2) - baseBefore2;
         assertGt(baseReceived2, 0, "trader2 should receive base token compensation");
@@ -573,19 +515,19 @@ contract E2E_ScenariosTest is Test, Deployers {
         assertTrue(insurancePool.hasClaimed(_poolId, trader1));
         assertTrue(insurancePool.hasClaimed(_poolId, trader2));
 
-        // Duplicate blocked
+        // Duplicate claim blocked
         vm.prank(trader1);
         vm.expectRevert(abi.encodeWithSelector(InsurancePool.AlreadyClaimed.selector));
-        insurancePool.claimCompensation(_poolId, _scenario3T1Bal, proof1);
+        insurancePool.claimCompensation(_poolId, t1Bal, emptyProof);
     }
 
     function _scenario3_claimExpiry() internal {
-        vm.warp(block.timestamp + 31 days);
+        vm.warp(block.timestamp + 8 days);
 
         bytes32[] memory emptyProof = new bytes32[](0);
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(InsurancePool.ClaimPeriodExpired.selector));
         insurancePool.claimCompensation(_poolId, 1000 ether, emptyProof);
-        console.log("  Claim after 30d window correctly blocked");
+        console.log("  Claim after 7d fallback window correctly blocked");
     }
 }

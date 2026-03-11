@@ -307,7 +307,7 @@ contract BastionSwapRouter is IUnlockCallback {
         (, address sender, PoolKey memory key, SwapParams memory params) =
             abi.decode(data, (uint8, address, PoolKey, SwapParams));
 
-        BalanceDelta delta = poolManager.swap(key, params, "");
+        BalanceDelta delta = poolManager.swap(key, params, abi.encode(sender));
 
         _settle(key.currency0, sender, delta.amount0());
         _settle(key.currency1, sender, delta.amount1());
@@ -326,7 +326,7 @@ contract BastionSwapRouter is IUnlockCallback {
             ISignatureTransfer.PermitTransferFrom, bytes
         ));
 
-        BalanceDelta delta = poolManager.swap(key, params, "");
+        BalanceDelta delta = poolManager.swap(key, params, abi.encode(sender));
 
         int128 amount0 = delta.amount0();
         int128 amount1 = delta.amount1();
@@ -367,7 +367,7 @@ contract BastionSwapRouter is IUnlockCallback {
                     : TickMath.MAX_SQRT_PRICE - 1
             });
 
-            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
+            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, abi.encode(sender));
             _emitSwap(steps[i].poolKey, sender, delta);
 
             currentAmount = steps[i].zeroForOne
@@ -400,7 +400,7 @@ contract BastionSwapRouter is IUnlockCallback {
                     : TickMath.MAX_SQRT_PRICE - 1
             });
 
-            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, "");
+            BalanceDelta delta = poolManager.swap(steps[i].poolKey, params, abi.encode(sender));
             _emitSwap(steps[i].poolKey, sender, delta);
 
             currentAmount = steps[i].zeroForOne
