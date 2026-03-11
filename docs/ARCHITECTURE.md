@@ -37,8 +37,7 @@ graph LR
 
     BH -->|createEscrow| EV
     BH -->|depositFee| IP
-    BH -->|reportLPRemoval| TO
-    BH -->|enforce sell limits via revert| BH
+    BH -->|enforce all violations via revert| BH
     BH -->|recordEvent: POOL_CREATED| RE
 
     TO -->|executeTrigger: permissionless, immediate| EV
@@ -146,30 +145,37 @@ Escrow Creation          Lock-up Period              Linear Vesting
 - **Lock Duration**: No LP removal until `lockDuration` seconds pass after escrow creation (default: 7 days, min: 7 days)
 - **Linear Vesting**: After lock expires, LP unlocks linearly over `vestingDuration` (default: 83 days, min: 7 days)
 - **Single-tx LP Removal Limit**: Max LP removable in one transaction (default: 50% of total LP, per PoolCommitment)
-- **Cumulative LP Removal Limit**: Cumulative removals within 24h window (default: 80%, triggers LP seizure if exceeded)
+- **Cumulative LP Removal Limit**: Cumulative removals within 24h window (default: 80%, reverts if exceeded in v0.1)
 - **Immutable Commitments**: Per-pool parameters set at creation, cannot be changed afterward
 
-### 4. Trigger Detection & Execution Flow
+### 4. Violation Enforcement (v0.1)
 
-BastionSwap uses two distinct defense layers:
+BastionSwap v0.1 uses **revert-only enforcement** for all issuer violations. Every violation — sell limits, single-tx LP removal, and cumulative LP removal — is blocked by reverting the transaction in BastionHook. No trigger is fired.
 
-**Layer 1 — Hard Enforcement (revert)**: Issuer sell limits and single-tx LP removal limits are enforced by reverting the transaction. No trigger is fired.
+```
+Issuer attempts violation
+    │
+    ├── Sell exceeds daily/weekly limit → afterSwap REVERT
+    ├── Single-tx LP removal > threshold → beforeRemoveLiquidity REVERT
+    └── Cumulative LP removal > threshold → beforeRemoveLiquidity REVERT
+```
 
-**Layer 2 — Trigger-based (LP seizure)**: Cumulative LP removal threshold breaches trigger immediate LP seizure via `executeTrigger()`.
+### 4b. Trigger Infrastructure (Preserved for v0.2)
+
+The trigger-based LP seizure flow is preserved for v0.2 watcher network integration. The `executeTrigger()` interface, TriggerOracle, and InsurancePool compensation mechanisms remain functional.
 
 ```mermaid
 sequenceDiagram
-    participant Anyone
+    participant Watcher as Watcher Network (v0.2)
     participant BastionHook
     participant TriggerOracle
     participant EscrowVault
     participant InsurancePool
     participant ReputationEngine
 
-    Note over BastionHook: LP removal tracked cumulatively
-    Note over BastionHook: Threshold breached (>80% in 24h window)
+    Note over Watcher: v0.2: Detects honeypot/hidden-tax
 
-    Anyone->>BastionHook: executeTrigger(poolId) [permissionless]
+    Watcher->>BastionHook: executeTrigger(poolId)
     BastionHook->>TriggerOracle: executeTrigger(poolId) [onlyHook]
 
     rect rgb(255, 230, 230)
@@ -213,40 +219,36 @@ sequenceDiagram
 
 **Normal completion** (no trigger, vesting fully elapsed): 10% of insurance pool to issuer as vesting reward, 90% to protocol treasury.
 
-## Protection Mechanism Detail
+## Protection Mechanism Detail (v0.1)
 
-### Hard Enforcement (Transaction Revert)
+### Revert-Only Enforcement
 
-These protections block violations by reverting the transaction. No trigger is fired — the issuer simply cannot complete the action.
+All violations are blocked by reverting the transaction. No trigger is fired — the issuer simply cannot complete the action.
 
-| Protection | Hook | Default Limit |
-|-----------|------|---------------|
-| **Single-tx LP removal** | `beforeRemoveLiquidity` revert | >50% of total LP |
-| **Daily sell limit** | `afterSwap` revert | >3% of initial supply per 24h |
-| **Weekly sell limit** | `afterSwap` revert | >15% of initial supply per 7d |
-| **Vesting enforcement** | `beforeRemoveLiquidity` revert | Based on lock-up + linear vesting |
-| **Token compatibility** | Pool creation revert | Fee-on-transfer / rebase tokens rejected |
+| Protection | Hook | Default Limit | Error |
+|-----------|------|---------------|-------|
+| **Single-tx LP removal** | `beforeRemoveLiquidity` revert | >50% of total LP | `SingleLPRemovalExceeded` |
+| **Cumulative LP removal** | `beforeRemoveLiquidity` revert | >80% of total LP in 24h window | `CumulativeLPRemovalExceeded` |
+| **Daily sell limit** | `afterSwap` revert | >3% of initial supply per 24h | `IssuerDailySellExceeded` |
+| **Weekly sell limit** | `afterSwap` revert | >15% of initial supply per 7d | `IssuerWeeklySellExceeded` |
+| **Vesting enforcement** | `beforeRemoveLiquidity` revert | Based on lock-up + linear vesting | — |
+| **Token compatibility** | Pool creation revert | Fee-on-transfer / rebase tokens rejected | — |
 
 **Issuer sell detection**: The hook identifies issuers via `hookData` — cooperating routers (BastionSwapRouter) encode `abi.encode(actualSwapper)`. The hook uses V4 `BalanceDelta` (negative = user sends tokens) to detect sell direction. Epoch-based daily/weekly sliding windows track cumulative sales.
 
-### Trigger-based (LP Seizure)
-
-| Trigger | Detection | Default Threshold |
-|---------|-----------|-------------------|
-| **Cumulative LP removal** | On-chain: cumulative within 24h window | >80% of total LP |
-
-**Execution flow**: When cumulative LP removals exceed the threshold, `hook.executeTrigger(poolId)` becomes callable by anyone (permissionless). It delegates to `triggerOracle.executeTrigger()` which executes immediately with no grace period. The `_isTriggered[poolId]` flag is set, blocking all further issuer sells and LP removal.
-
 ### LP Removal Tracking
 
-LP removals are tracked using `_lpCumulativeRemoved` and `_lpRemovalWindowStart` mappings per pool. The denominator for BPS calculations is `_initialLiquidity` (not total supply). Views: `isLPRemovalTriggerable(poolId)` checks if the threshold is currently exceeded.
+LP removals are tracked using `_lpCumulativeRemoved` and `_lpRemovalWindowStart` mappings per pool. The denominator for BPS calculations is `_initialLiquidity` (not total supply). Both single-tx and cumulative checks are enforced in `beforeRemoveLiquidity` — if either threshold is breached, the transaction reverts and the state change rolls back. Views: `isLPRemovalTriggerable(poolId)` checks if the cumulative threshold is currently exceeded.
 
-### Planned (v0.2)
+### Planned (v0.2 — Trigger-based LP Seizure)
+
+The trigger infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`, InsurancePool compensation) is preserved for v0.2. When a decentralized watcher network is deployed, cumulative LP removal enforcement will upgrade from revert-only to trigger-based LP seizure + compensation.
 
 | Trigger | Detection | Notes |
 |---------|-----------|-------|
 | **Honeypot** | Decentralized watcher network: transfer() revert detection | Requires off-chain infrastructure |
 | **Hidden Tax** | Decentralized watcher network: swap output deviation >5% | Requires off-chain infrastructure |
+| **Cumulative LP removal** | Watcher network confirms on-chain threshold breach | Upgrades from revert to LP seizure + compensation |
 
 ### Protocol Constants & Governance Defaults
 
@@ -257,6 +259,7 @@ LP removals are tracked using `_lpCumulativeRemoved` and `_lpRemovalWindowStart`
 | InsurancePool | `fallbackClaimPeriod` | 7 days | Fallback balanceOf claim window |
 | InsurancePool | `emergencyTimelock` | 2 days | Emergency withdrawal delay |
 | InsurancePool | `issuerRewardBps` | 1000 (10%) | Issuer vesting completion reward |
+| InsurancePool | `merkleSubmissionDeadline` | 24 hours (6h–72h) | Guardian deadline for Merkle root |
 | InsurancePool | Fee range | 10–500 BPS (0.1%–5%) | Governance-adjustable fee bounds |
 | InsurancePool | Default `feeRate` | 100 BPS (1%) | Default insurance fee |
 | BastionHook | `defaultLockDuration` | 7 days | Default escrow lock-up |
@@ -333,9 +336,11 @@ Cross-contract references are **immutable** — set at deployment and cannot be 
 - Manage base token whitelist and minimum liquidity requirements
 - Set default/minimum lock-up and vesting durations
 - Set default LP removal and sell limit thresholds
+- Set TriggerOracle config with range validation (BPS 1–10000, time windows bounded)
 - Emergency withdrawal from InsurancePool (with 2-day timelock)
 - Set TVL cap, treasury address, guardian address, claim periods
 - Set issuer vesting reward percentage
+- Set Merkle submission deadline (6h–72h)
 
 **Guardian capabilities** (TriggerOracle):
 - Pause/unpause trigger detection (max 7-day duration)

@@ -7,7 +7,7 @@
 
 BastionSwap is a **Uniswap V4 Hook-based** decentralized exchange protocol that protects traders from rug-pulls and token exploits through **mandatory escrow vesting**, **on-chain trigger detection**, and **per-token insurance pools**.
 
-When a token issuer creates a liquidity pool, their LP is automatically locked with a vesting schedule (lock-up + linear vesting). Issuer sell limits are enforced on-chain — exceeding daily or weekly limits reverts the entire swap transaction, blocking sales via any path including routers and aggregators. If LP removal thresholds are breached, remaining issuer LP is immediately seized and combined with the insurance pool for pro-rata compensation to non-issuer token holders.
+When a token issuer creates a liquidity pool, their LP is automatically locked with a vesting schedule (lock-up + linear vesting). All issuer violations are enforced on-chain via **transaction revert** — exceeding sell limits, single-tx LP removal limits, or cumulative LP removal limits reverts the entire transaction, blocking the action via any path including routers and aggregators. Trigger-based LP seizure infrastructure is preserved for v0.2 watcher network integration.
 
 ## Live Demo (Base Sepolia)
 
@@ -82,8 +82,7 @@ graph TB
 
     BH -->|createEscrow| EV
     BH -->|depositFee| IP
-    BH -->|reportLPRemoval| TO
-    BH -->|enforce sell limits (revert)| BH
+    BH -->|enforce all violations (revert)| BH
     BH -->|recordEvent| RE
 
     TO -->|executeTrigger (permissionless, no grace period)| EV
@@ -120,46 +119,38 @@ graph TB
 
 | Contract | Role |
 |----------|------|
-| **BastionHook** | V4 Hook entry point. Intercepts `beforeAddLiquidity`, `beforeRemoveLiquidity`, `beforeSwap`, and `afterSwap` to orchestrate escrow locking, insurance fee collection, and rug-pull monitoring. Enforces issuer daily and weekly sell limits by reverting swap transactions in afterSwap when limits are exceeded — blocks sales via any path including routers and aggregators. Validates token compatibility (rejects fee-on-transfer and rebase tokens from Bastion Protected pools). Records LP/supply ratio at pool creation for dashboard transparency. |
+| **BastionHook** | V4 Hook entry point. Intercepts `beforeAddLiquidity`, `beforeRemoveLiquidity`, `beforeSwap`, and `afterSwap` to orchestrate escrow locking, insurance fee collection, and issuer violation enforcement. All violations (sell limits, single-tx LP removal, cumulative LP removal) are enforced via transaction revert — blocks actions via any path including routers and aggregators. Validates token compatibility (rejects fee-on-transfer and rebase tokens from Bastion Protected pools). Records LP/supply ratio at pool creation for dashboard transparency. |
 | **BastionSwapRouter** | Swap-only router handling exact-input, exact-output, and multi-hop swaps via PoolManager unlock callbacks. Emits `SwapExecuted` with actual user address. |
 | **BastionPositionRouter** | LP management router for pool creation, liquidity add/remove, and fee collection. Emits `LiquidityChanged` for subgraph indexing. |
 | **EscrowVault** | Manages issuer LP removal rights with lock-up + linear vesting. Does not custody assets — controls removal permissions only. Per-pool commitment parameters (immutable) set by issuer at creation. Coordinates forced LP removal on trigger events. |
 | **InsurancePool** | Collects 1% fee from buy-side swaps as per-token insurance premiums. On trigger: distributes insurance pool + seized issuer LP to non-issuer holders (Merkle proof, 30-day window). On normal completion: 10% to issuer as vesting reward, 90% to protocol treasury. Issuer address excluded from all claims. |
-| **TriggerOracle** | Monitors LP removal patterns and enforces cumulative thresholds. LP removal triggers use permissionless executeTrigger with immediate execution (no grace period). Issuer sell limits are enforced separately via BastionHook afterSwap revert. |
+| **TriggerOracle** | Trigger infrastructure for LP seizure and compensation. In v0.1, all violations are enforced via revert in BastionHook. `executeTrigger()` interface is preserved for v0.2 watcher network integration (honeypot/hidden-tax detection). |
 | **ReputationEngine** | Computes informational reputation scores (0-1000) for token issuers based on on-chain history. Non-blocking. |
 
-### Protection Mechanisms
+### Protection Mechanisms (v0.1)
 
-BastionSwap uses two defense mechanisms:
-**Hard Enforcement (revert)** — Invalidates the transaction on violation.
-**Trigger-based (LP seizure)** — Seizes issuer LP when cumulative thresholds are breached.
+BastionSwap v0.1 uses **revert-only enforcement** — all issuer violations are blocked by reverting the transaction. The issuer cannot extract assets. Trigger-based LP seizure infrastructure is preserved for v0.2.
 
 #### Hard Enforcement (Transaction Revert)
-
-These mechanisms block violations before or after execution. The transaction reverts, so the issuer cannot extract assets. Does not fire a trigger (no LP seizure).
 
 | Protection | How | When | Default Limit |
 |-----------|-----|------|---------------|
 | Single-tx LP removal | `beforeRemoveLiquidity` revert | Issuer attempts to remove LP exceeding single-tx limit | >50% of total LP |
+| Cumulative LP removal | `beforeRemoveLiquidity` revert | Cumulative LP removals within 24h window exceed threshold | >80% of total LP |
 | Daily sell limit | `afterSwap` revert (rollback) | Issuer's token balance decreases beyond daily cumulative limit. Detects sales via any path (direct, router, aggregator) by comparing issuer balance before/after swap | >3% of initial supply per 24h |
 | Weekly sell limit | `afterSwap` revert (rollback) | Same mechanism, 7-day rolling window | >15% of initial supply per 7d |
 | Vesting enforcement | `beforeRemoveLiquidity` revert | Issuer tries to remove more LP than currently vested | Based on lock-up + linear vesting schedule |
 | Token compatibility | `createPool` revert (in router) | Fee-on-transfer or rebase token detected via transfer test | Exact amount must be received |
 
-#### Trigger-based (LP Seizure + Compensation)
+#### Planned (v0.2 — Trigger-based LP Seizure + Watcher Network)
 
-When cumulative violations reach the threshold, issuer LP is forcibly seized and redistributed to holders. `executeTrigger()` is permissionless — anyone can call it. Immediate execution with no grace period.
-
-| Trigger | Detection | Default Threshold | Response |
-|---------|-----------|-------------------|----------|
-| Cumulative LP removal | On-chain: cumulative LP removals within 24h window | >80% of total LP | Immediate LP seizure. Seized assets + insurance pool → non-issuer holders via Merkle proof (30d) or fallback balanceOf (7d) |
-
-#### Planned (v0.2 — Requires Decentralized Watcher Network)
+`executeTrigger()` interface and TriggerOracle/InsurancePool compensation infrastructure are preserved for v0.2.
 
 | Trigger | Detection | Response |
 |---------|-----------|----------|
 | Honeypot | Watcher network: transfer() revert detection | LP seizure + compensation |
 | Hidden Tax | Watcher network: swap output deviation >5% | LP seizure + compensation |
+| Cumulative LP removal (upgrade) | Watcher network: on-chain cumulative tracking confirmation | LP seizure + compensation (replaces revert-only) |
 
 ### Two-Layer Parameter System
 
@@ -172,6 +163,8 @@ Controlled by governance (initially deployer EOA, later DAO). Changes only affec
 - LP removal and sell limit default thresholds
 - TVL cap, treasury/guardian addresses, claim periods
 - Issuer vesting reward percentage (default: 10%)
+- Merkle submission deadline (default: 24h, range: 6h–72h)
+- TriggerOracle config validation (BPS fields 1–10000, time windows bounded)
 
 **Issuer Layer** (per-pool commitments):
 Set by issuer at pool creation. Immutable once set. Must be equal to or stricter than governance minimums.
@@ -190,8 +183,8 @@ Two mutually exclusive claim modes. Once a mode is determined, it cannot be swit
 
 | Mode | Condition | Claim Method | Period |
 |------|-----------|--------------|--------|
-| Merkle | Guardian submits Merkle root within 24h | Holder submits Merkle proof for trigger-time balance | 30 days |
-| Fallback | Guardian does not respond within 24h | Holder claims via balanceOf (must have held tokens at trigger block) | 7 days |
+| Merkle | Guardian submits Merkle root within deadline (default: 24h, configurable 6h–72h) | Holder submits Merkle proof for trigger-time balance | 30 days |
+| Fallback | Guardian does not respond within deadline | Holder claims via balanceOf (must have held tokens at trigger block) | 7 days |
 
 - Issuer address excluded from all compensation claims
 - Fallback mode is irreversible — Merkle root submission blocked after activation
@@ -218,7 +211,7 @@ pnpm install
 ```bash
 cd packages/contracts
 forge build
-forge test -vvv                          # 395 tests passing
+forge test -vvv                          # 484 tests passing
 FOUNDRY_PROFILE=deploy forge build --sizes  # All contracts < 24KB
 ```
 
