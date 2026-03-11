@@ -1346,8 +1346,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // sells accumulate. After 5 days: cumulative ≈ 14.5% which is under 15%.
         for (uint256 i = 0; i < 5; i++) {
             if (i > 0) vm.warp(block.timestamp + 1 days);
-            uint256 currentReserve = issuedToken.balanceOf(address(manager));
-            uint256 dailySellAmount = (currentReserve * 290) / 10_000;
+            uint256 reserve = issuedToken.balanceOf(address(manager));
+            uint256 dailySellAmount = (reserve * 290) / 10_000;
             _issuerSellIssuedToken(dailySellAmount);
         }
 

@@ -173,7 +173,7 @@ These properties must **always** hold:
 
 - [ ] **LP removal rights**: Verify `createEscrow()` correctly records lock-up and vesting parameters
 - [ ] **Vesting calculation**: Verify linear vesting respects lock duration and returns correct vested amount over time
-- [ ] **Sell limit enforcement**: Verify `afterSwap` correctly detects issuer sells via hookData + BalanceDelta and reverts when daily/weekly limits exceeded
+- [ ] **Sell limit enforcement**: Verify `afterSwap` correctly detects issuer sells via hookData + BalanceDelta and reverts when daily/weekly limits exceeded (denominator = current pool reserve via `balanceOf(poolManager)`)
 - [ ] **LP removal enforcement**: Verify `beforeRemoveLiquidity` reverts on both single-tx threshold (`SingleLPRemovalExceeded`) and cumulative threshold (`CumulativeLPRemovalExceeded`)
 - [ ] **Trigger execution**: Verify `executeTrigger()` interface preserved for v2; only succeeds when cumulative LP removal threshold is actually breached
 - [ ] **Insurance payout**: Verify `executePayout()` correctly snapshots balance and both Merkle and fallback claim modes compute pro-rata correctly

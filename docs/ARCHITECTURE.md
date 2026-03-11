@@ -82,7 +82,7 @@ sequenceDiagram
 
     BastionHook->>BastionHook: Validate token compatibility<br/>(reject fee-on-transfer / rebase)
     BastionHook->>BastionHook: Register issuer + store PoolCommitment<br/>(immutable, must be ≥ governance minimums)
-    BastionHook->>BastionHook: Record initial LP and total supply<br/>for LP/supply ratio transparency
+    BastionHook->>BastionHook: Record initial LP and total supply<br/>for insurance payout calculation
     BastionHook->>EscrowVault: createEscrow(poolId, issuer, lockDuration, vestingDuration)
     BastionHook->>TriggerOracle: registerPool(poolId, triggerConfig)
     BastionHook->>ReputationEngine: recordEvent(issuer, POOL_CREATED, data)
@@ -117,7 +117,7 @@ sequenceDiagram
     Note over BastionHook: Exceeds limit → REVERT entire swap<br/>(no trigger, just block the sale)
 ```
 
-**Issuer sell detection**: Cooperating routers pass `abi.encode(actualSwapper)` in hookData. The hook decodes this to identify whether the swapper is the registered issuer. Sell limits are enforced via `afterSwap` revert — if the issuer's cumulative sales exceed daily (default: 3% of initial supply per 24h) or weekly (default: 15% per 7d) limits, the entire transaction reverts. This blocks sales via any path including routers and aggregators.
+**Issuer sell detection**: Cooperating routers pass `abi.encode(actualSwapper)` in hookData. The hook decodes this to identify whether the swapper is the registered issuer. Sell limits are enforced via `afterSwap` revert — if the issuer's cumulative sales exceed daily (default: 3% of current pool reserve per 24h) or weekly (default: 15% per 7d) limits, the entire transaction reverts. The denominator is the issued token's current balance in PoolManager, which dynamically tightens limits as the pool shrinks from sells. This blocks sales via any path including routers and aggregators.
 
 Insurance fees are collected on **buy-side swaps only** (when the trader receives the issued token). The default fee rate is **1% (100 BPS)**, adjustable by governance within **0.1%–5% (10–500 BPS)**.
 
@@ -229,8 +229,8 @@ All violations are blocked by reverting the transaction. No trigger is fired —
 |-----------|------|---------------|-------|
 | **Single-tx LP removal** | `beforeRemoveLiquidity` revert | >50% of total LP | `SingleLPRemovalExceeded` |
 | **Cumulative LP removal** | `beforeRemoveLiquidity` revert | >80% of total LP in 24h window | `CumulativeLPRemovalExceeded` |
-| **Daily sell limit** | `afterSwap` revert | >3% of initial supply per 24h | `IssuerDailySellExceeded` |
-| **Weekly sell limit** | `afterSwap` revert | >15% of initial supply per 7d | `IssuerWeeklySellExceeded` |
+| **Daily sell limit** | `afterSwap` revert | >3% of current pool reserve per 24h | `IssuerDailySellExceeded` |
+| **Weekly sell limit** | `afterSwap` revert | >15% of current pool reserve per 7d | `IssuerWeeklySellExceeded` |
 | **Vesting enforcement** | `beforeRemoveLiquidity` revert | Based on lock-up + linear vesting | — |
 | **Token compatibility** | Pool creation revert | Fee-on-transfer / rebase tokens rejected | — |
 

@@ -137,8 +137,8 @@ BastionSwap v1 uses **revert-only enforcement** — all issuer violations are bl
 |-----------|-----|------|---------------|
 | Single-tx LP removal | `beforeRemoveLiquidity` revert | Issuer attempts to remove LP exceeding single-tx limit | >50% of total LP |
 | Cumulative LP removal | `beforeRemoveLiquidity` revert | Cumulative LP removals within 24h window exceed threshold | >80% of total LP |
-| Daily sell limit | `afterSwap` revert (rollback) | Issuer's token balance decreases beyond daily cumulative limit. Detects sales via any path (direct, router, aggregator) by comparing issuer balance before/after swap | >3% of initial supply per 24h |
-| Weekly sell limit | `afterSwap` revert (rollback) | Same mechanism, 7-day rolling window | >15% of initial supply per 7d |
+| Daily sell limit | `afterSwap` revert (rollback) | Issuer's cumulative sells exceed daily limit. Denominator is current pool reserve (issued token balance in PoolManager), dynamically tightening as pool shrinks. Detects sales via any path (direct, router, aggregator) using hookData + BalanceDelta | >3% of current pool reserve per 24h |
+| Weekly sell limit | `afterSwap` revert (rollback) | Same mechanism, 7-day rolling window | >15% of current pool reserve per 7d |
 | Vesting enforcement | `beforeRemoveLiquidity` revert | Issuer tries to remove more LP than currently vested | Based on lock-up + linear vesting schedule |
 | Token compatibility | `createPool` revert (in router) | Fee-on-transfer or rebase token detected via transfer test | Exact amount must be received |
 
