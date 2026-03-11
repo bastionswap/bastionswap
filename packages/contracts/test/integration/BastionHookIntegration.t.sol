@@ -87,9 +87,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
         }
         vm.etch(hookAddr, deployed.code);
         // Restore storage lost by vm.etch
-        vm.store(hookAddr, bytes32(uint256(21)), bytes32(uint256(uint160(governance))));
+        vm.store(hookAddr, bytes32(uint256(22)), bytes32(uint256(uint160(governance))));
         // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-        vm.store(hookAddr, bytes32(uint256(23)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+        vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
         hook = BastionHook(payable(hookAddr));
 
         // Deploy tokens
@@ -192,14 +192,14 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithIssuer();
 
         assertTrue(hook.isIssuer(poolId, issuerAddr));
-        (address registeredIssuer,,,) = hook.getPoolInfo(poolId);
+        (address registeredIssuer,,,,) = hook.getPoolInfo(poolId);
         assertEq(registeredIssuer, issuerAddr);
     }
 
     function test_poolCreation_escrowCreated() public {
         _initPoolWithIssuer();
 
-        (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
+        (, uint256 escrowId,,,) = hook.getPoolInfo(poolId);
         assertGt(escrowId, 0);
 
         // EscrowVault should hold NO tokens (LP permission model)
@@ -301,7 +301,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_vestingCalculation_duringLockAndVesting() public {
         _initPoolWithIssuer();
 
-        (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
+        (, uint256 escrowId,,,) = hook.getPoolInfo(poolId);
 
         // During lock period: 0
         assertEq(escrowVault.calculateVestedLiquidity(escrowId), 0);
@@ -325,7 +325,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_triggerScenario_commitmentBreach() public {
         _initPoolWithIssuer();
 
-        (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
+        (, uint256 escrowId,,,) = hook.getPoolInfo(poolId);
 
         // Simulate commitment breach reported by hook
         vm.prank(address(hook));
@@ -348,7 +348,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_fullFlow_createSwapVestTrigger() public {
         // 1. Create pool with issuer
         _initPoolWithIssuer();
-        (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
+        (, uint256 escrowId,,,) = hook.getPoolInfo(poolId);
         assertTrue(hook.isIssuer(poolId, issuerAddr));
         // Vault holds no tokens
         assertEq(issuedToken.balanceOf(address(escrowVault)), 0);
@@ -398,7 +398,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_getPoolInfo_returnsCorrectData() public {
         _initPoolWithIssuer();
 
-        (address iss, uint256 eid, address issTkn, uint256 totalLiq) = hook.getPoolInfo(poolId);
+        (address iss, uint256 eid, address issTkn, uint256 totalLiq,) = hook.getPoolInfo(poolId);
         assertEq(iss, issuerAddr);
         assertGt(eid, 0);
         assertEq(issTkn, address(issuedToken));
@@ -688,7 +688,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithIssuer();
 
         // Get current tracked liquidity
-        (,,, uint256 totalLiq) = hook.getPoolInfo(poolId);
+        (,,, uint256 totalLiq,) = hook.getPoolInfo(poolId);
         assertGt(totalLiq, 0);
 
         // Directly call beforeRemoveLiquidity with removeAmount > totalLiquidity
@@ -703,7 +703,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         hook.beforeRemoveLiquidity(address(this), poolKey, params, "");
 
         // totalLiquidity should be 0 (overflow protection)
-        (,,, uint256 newTotalLiq) = hook.getPoolInfo(poolId);
+        (,,, uint256 newTotalLiq,) = hook.getPoolInfo(poolId);
         assertEq(newTotalLiq, 0);
     }
 
@@ -1662,7 +1662,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // The _isTriggered flag should be set if forceRemoveIssuerLP was called
         // But since there's no BastionRouter in this test, forceRemoval may fail gracefully.
         // Check that the escrow is triggered directly
-        (, uint256 escrowId,,) = hook.getPoolInfo(poolId);
+        (, uint256 escrowId,,,) = hook.getPoolInfo(poolId);
         assertTrue(escrowVault.isTriggered(escrowId));
     }
 

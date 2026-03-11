@@ -278,7 +278,7 @@ contract E2ESimulation is Script {
         console2.log("--- Assertions ---");
 
         // 1. getPoolInfo
-        (address issuer, uint256 escrowId, address issuedTok, uint256 totalLiq) = hook.getPoolInfo(poolId);
+        (address issuer, uint256 escrowId, address issuedTok, uint256 totalLiq,) = hook.getPoolInfo(poolId);
         require(issuer == deployer, "FAIL: issuer mismatch");
         require(escrowId > 0, "FAIL: escrowId should be > 0");
         require(issuedTok == address(issuedToken), "FAIL: issuedToken mismatch");

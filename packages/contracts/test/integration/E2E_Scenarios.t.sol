@@ -97,9 +97,9 @@ contract E2E_ScenariosTest is Test, Deployers {
             }
             vm.etch(hookAddr, deployed.code);
             // Restore storage lost by vm.etch
-            vm.store(hookAddr, bytes32(uint256(21)), bytes32(uint256(uint160(governance))));
+            vm.store(hookAddr, bytes32(uint256(22)), bytes32(uint256(uint160(governance))));
             // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-            vm.store(hookAddr, bytes32(uint256(23)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+            vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
         }
         hook = BastionHook(payable(hookAddr));
 
@@ -187,7 +187,7 @@ contract E2E_ScenariosTest is Test, Deployers {
             ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: int256(ISSUER_LP), salt: 0}),
             _encodeHookData(commitment)
         );
-        (, _escrowId,,) = hook.getPoolInfo(_poolId);
+        (, _escrowId,,,) = hook.getPoolInfo(_poolId);
 
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
@@ -217,7 +217,7 @@ contract E2E_ScenariosTest is Test, Deployers {
     }
 
     function _getTotalLP() internal view returns (uint256) {
-        (,,, uint256 totalLP) = hook.getPoolInfo(_poolId);
+        (,,,uint256 totalLP,) = hook.getPoolInfo(_poolId);
         return totalLP;
     }
 

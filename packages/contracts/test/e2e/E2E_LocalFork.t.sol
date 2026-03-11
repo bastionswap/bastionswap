@@ -162,7 +162,7 @@ contract E2E_LocalFork is Test {
         require(ok, "hook fund");
 
         // ── Raise TVL cap for E2E tests ──
-        hook.setMaxPoolTVL(0); // unlimited
+        hook.setMaxPoolTVL(address(0), 0); // unlimited for ETH pools
 
         vm.stopPrank();
 
@@ -251,7 +251,7 @@ contract E2E_LocalFork is Test {
     }
 
     function _getEscrowId(PoolId pid) internal view returns (uint256) {
-        (, uint256 eid,,) = hook.getPoolInfo(pid);
+        (, uint256 eid,,,) = hook.getPoolInfo(pid);
         return eid;
     }
 
@@ -265,7 +265,7 @@ contract E2E_LocalFork is Test {
         assertGt(sqrtPrice, 0, "pool initialized");
 
         // 2. Issuer A registered
-        (address iss, uint256 escrowId, address issuedToken,) = hook.getPoolInfo(poolIdA);
+        (address iss, uint256 escrowId, address issuedToken,,) = hook.getPoolInfo(poolIdA);
         assertEq(iss, issuerA, "issuer");
         assertEq(issuedToken, address(tokenA), "issued token");
 
@@ -537,7 +537,7 @@ contract E2E_LocalFork is Test {
         );
         vm.stopPrank();
 
-        (, uint256 eid,,) = hook.getPoolInfo(pid);
+        (, uint256 eid,,,) = hook.getPoolInfo(pid);
         (,uint40 lockD, uint40 vestD,) = escrowVault.getEscrowInfo(eid);
         assertEq(lockD, 30 days, "30d lock");
         assertEq(vestD, 150 days, "150d vesting");
@@ -602,7 +602,7 @@ contract E2E_LocalFork is Test {
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
         // Set _isTriggered on hook (slot 12)
-        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(13))), bytes32(uint256(1)));
 
         ITriggerOracle.TriggerResult memory trigStatus = triggerOracle.checkTrigger(poolIdA);
         assertTrue(trigStatus.triggered, "trigger fired");

@@ -172,7 +172,9 @@ contract E2E_Comprehensive is Test {
         insurancePool.setTreasury(deployer);
 
         // ── Raise TVL cap for E2E tests ──
-        hook.setMaxPoolTVL(0); // unlimited
+        hook.setMaxPoolTVL(address(0), 0); // unlimited for ETH pools
+        hook.setMaxPoolTVL(WETH, 0);       // unlimited for WETH pools
+        hook.setMaxPoolTVL(USDC, 0);       // unlimited for USDC pools
 
         vm.stopPrank();
 
@@ -241,7 +243,7 @@ contract E2E_Comprehensive is Test {
         });
         poolIdA = poolKeyA.toId();
         poolACreatedAt = block.timestamp;
-        (, escrowIdA,,) = hook.getPoolInfo(poolIdA);
+        (, escrowIdA,,,) = hook.getPoolInfo(poolIdA);
         vm.stopPrank();
     }
 
@@ -261,7 +263,7 @@ contract E2E_Comprehensive is Test {
     }
 
     function _getEscrowId(PoolId pid) internal view returns (uint256) {
-        (, uint256 eid,,) = hook.getPoolInfo(pid);
+        (, uint256 eid,,,) = hook.getPoolInfo(pid);
         return eid;
     }
 
@@ -312,7 +314,7 @@ contract E2E_Comprehensive is Test {
         assertGt(sqrtPrice, 0, "pool initialized");
 
         // 2. Issuer A registered
-        (address iss, uint256 eid, address issuedToken,) = hook.getPoolInfo(poolIdA);
+        (address iss, uint256 eid, address issuedToken,,) = hook.getPoolInfo(poolIdA);
         assertEq(iss, issuerA, "issuer");
         assertEq(issuedToken, address(tokenA), "issued token");
 
@@ -1009,8 +1011,8 @@ contract E2E_Comprehensive is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        // Set _isTriggered on hook (slot 12) — in v2, hook.executeTrigger() does this automatically
-        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
+        // Set _isTriggered on hook (slot 13) — in v2, hook.executeTrigger() does this automatically
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(13))), bytes32(uint256(1)));
 
         // 1. Triggered
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
@@ -1061,8 +1063,8 @@ contract E2E_Comprehensive is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        // Set _isTriggered on hook (slot 12) — in v2, hook.executeTrigger() does this automatically
-        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
+        // Set _isTriggered on hook (slot 13) — in v2, hook.executeTrigger() does this automatically
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(13))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
 
         // 20a: Issuer sell -> revert
@@ -1349,8 +1351,8 @@ contract E2E_Comprehensive is Test {
 
         // 29e: TVL cap
         vm.prank(deployer);
-        hook.setMaxPoolTVL(100 ether);
-        assertEq(hook.maxPoolTVL(), 100 ether, "TVL cap set");
+        hook.setMaxPoolTVL(address(0), 100 ether);
+        assertEq(hook.maxPoolTVL(address(0)), 100 ether, "TVL cap set");
 
         // 29f: Issuer reward bps
         vm.prank(deployer);
@@ -1414,12 +1416,12 @@ contract E2E_Comprehensive is Test {
         // Old governance -> revert
         vm.prank(deployer);
         vm.expectRevert();
-        hook.setMaxPoolTVL(999 ether);
+        hook.setMaxPoolTVL(address(0), 999 ether);
 
         // New governance -> succeeds
         vm.prank(newGov);
-        hook.setMaxPoolTVL(999 ether);
-        assertEq(hook.maxPoolTVL(), 999 ether, "new gov works");
+        hook.setMaxPoolTVL(address(0), 999 ether);
+        assertEq(hook.maxPoolTVL(address(0)), 999 ether, "new gov works");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1630,9 +1632,9 @@ contract E2E_Comprehensive is Test {
     // Scenario 41: TVL cap
     function test_e2e_tvlCap() public {
         // Pool A already has LP, so set cap just above it to block further additions
-        // Set cap to 1 (any addition will exceed since pool already has liquidity)
+        // Set cap to 1 wei (any addition will exceed since pool already has base reserve)
         vm.prank(deployer);
-        hook.setMaxPoolTVL(1);
+        hook.setMaxPoolTVL(address(0), 1);
 
         // generalLP adding any liquidity -> exceeds cap -> revert
         vm.startPrank(generalLP);
@@ -1645,7 +1647,7 @@ contract E2E_Comprehensive is Test {
 
         // Remove cap
         vm.prank(deployer);
-        hook.setMaxPoolTVL(0);
+        hook.setMaxPoolTVL(address(0), 0);
 
         // Now adding LP -> succeeds
         vm.startPrank(generalLP);
@@ -1804,8 +1806,8 @@ contract E2E_Comprehensive is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        // Set _isTriggered on hook (slot 12) — in v2, hook.executeTrigger() does this automatically
-        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
+        // Set _isTriggered on hook (slot 13) — in v2, hook.executeTrigger() does this automatically
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(13))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "trigger infra works");
     }
 }

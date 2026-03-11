@@ -59,6 +59,9 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => router address that created the issuer's LP position
     mapping(PoolId => address) internal _issuerLPOwner;
 
+    /// @dev poolId => base token address for this pool
+    mapping(PoolId => address) internal _poolBaseTokens;
+
     /// @dev poolId => PoolKey stored during issuer registration for force removal
     mapping(PoolId => PoolKey) internal _poolKeys;
 
@@ -129,8 +132,8 @@ contract BastionHook is BaseTestHooks {
 
     // ─── Governance Parameters ───────────────────────────────────────
 
-    /// @notice Maximum total liquidity per pool (0 = unlimited)
-    uint256 public maxPoolTVL;
+    /// @notice Maximum base token reserve per pool, keyed by base token address (0 = unlimited)
+    mapping(address => uint256) public maxPoolTVL;
 
     /// @notice Default lock duration when hookData doesn't specify custom (default 7 days)
     uint40 public defaultLockDuration;
@@ -188,7 +191,7 @@ contract BastionHook is BaseTestHooks {
     event BaseTokenRemoved(address indexed token);
     event MinBaseAmountUpdated(address indexed token, uint256 newMinAmount);
     event GovernanceTransferred(address indexed oldGov, address indexed newGov);
-    event MaxPoolTVLUpdated(uint256 newMaxTVL);
+    event MaxPoolTVLUpdated(address indexed token, uint256 newMaxTVL);
     event DefaultLockDurationUpdated(uint256 newDuration);
     event DefaultVestingDurationUpdated(uint256 newDuration);
     event MinLockDurationUpdated(uint256 newDuration);
@@ -228,8 +231,10 @@ contract BastionHook is BaseTestHooks {
         GOVERNANCE = _governance;
         _owner = _governance;
 
-        // Initialize governance parameters
-        maxPoolTVL = 2 ether; // soft launch cap
+        // Initialize governance parameters — per-token TVL caps
+        maxPoolTVL[address(0)] = 2 ether;     // ETH
+        maxPoolTVL[_weth] = 2 ether;          // WETH
+        maxPoolTVL[_usdc] = 5000e6;           // USDC (5000 USDC)
         defaultLockDuration = 7 days;
         defaultVestingDuration = 83 days;
         minLockDuration = 7 days;
@@ -307,10 +312,9 @@ contract BastionHook is BaseTestHooks {
             }
         }
 
-        // Enforce TVL cap for ALL LP additions
-        if (liquidity > 0 && maxPoolTVL > 0) {
-            uint256 newTotal = _totalLiquidity[poolId] + liquidity;
-            if (newTotal > maxPoolTVL) revert ExceedsMaxTVL();
+        // Enforce per-token TVL cap for ALL LP additions
+        if (liquidity > 0) {
+            _enforceTVLCap(poolId, key, params, hookData);
         }
 
         // Track total liquidity
@@ -679,12 +683,13 @@ contract BastionHook is BaseTestHooks {
     function getPoolInfo(PoolId poolId)
         external
         view
-        returns (address issuer, uint256 escrowId, address issuedToken, uint256 totalLiquidity)
+        returns (address issuer, uint256 escrowId, address issuedToken, uint256 totalLiquidity, address baseToken)
     {
         issuer = _issuers[poolId];
         escrowId = _escrowIds[poolId];
         issuedToken = _issuedTokens[poolId];
         totalLiquidity = _totalLiquidity[poolId];
+        baseToken = _poolBaseTokens[poolId];
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -778,11 +783,10 @@ contract BastionHook is BaseTestHooks {
         emit GovernanceTransferred(oldGov, newGovernance);
     }
 
-    /// @notice Set the maximum pool TVL (0 = unlimited, max 1000 ether).
-    function setMaxPoolTVL(uint256 newMaxTVL) external onlyGovernance {
-        if (newMaxTVL > 1000 ether) revert ValueOutOfRange();
-        maxPoolTVL = newMaxTVL;
-        emit MaxPoolTVLUpdated(newMaxTVL);
+    /// @notice Set the maximum pool TVL for a specific base token (0 = unlimited).
+    function setMaxPoolTVL(address token, uint256 cap) external onlyGovernance {
+        maxPoolTVL[token] = cap;
+        emit MaxPoolTVLUpdated(token, cap);
     }
 
     /// @notice Set the default lock duration (1–90 days).
@@ -862,7 +866,7 @@ contract BastionHook is BaseTestHooks {
         _escrowIds[poolId] = escrowId;
 
         // Initialize sell tracking & register with TriggerOracle (extracted to reduce stack depth)
-        _initSellTrackingAndOracle(poolId, token, liquidity, issuer, triggerConfig);
+        _initSellTrackingAndOracle(poolId, key, token, liquidity, issuer, triggerConfig);
 
         // Record pool creation in reputation engine
         try reputationEngine.recordEvent(
@@ -881,11 +885,17 @@ contract BastionHook is BaseTestHooks {
     ///      Extracted to reduce stack depth in _registerIssuerAndCreateEscrow.
     function _initSellTrackingAndOracle(
         PoolId poolId,
+        PoolKey calldata key,
         address token,
         uint128 liquidity,
         address issuer,
         ITriggerOracle.TriggerConfig memory triggerConfig
     ) internal {
+        // Store base token for this pool
+        address t0 = Currency.unwrap(key.currency0);
+        address t1 = Currency.unwrap(key.currency1);
+        _poolBaseTokens[poolId] = (t0 == token) ? t1 : t0;
+
         uint256 totalSupply = ERC20(token).totalSupply();
         _initialTotalSupply[poolId] = totalSupply;
         _initialLiquidity[poolId] = uint256(liquidity);
@@ -905,6 +915,38 @@ contract BastionHook is BaseTestHooks {
         // Register issuer and config in TriggerOracle
         triggerOracle.registerIssuer(poolId, issuer, totalSupply, token);
         triggerOracle.setTriggerConfig(poolId, triggerConfig);
+    }
+
+    /// @dev Enforces per-token TVL cap based on base token reserve.
+    function _enforceTVLCap(
+        PoolId poolId,
+        PoolKey calldata key,
+        ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) internal view {
+        address baseToken = _poolBaseTokens[poolId];
+        if (baseToken == address(0) && hookData.length > 0) {
+            // First LP — derive base from allowlist
+            address t0 = Currency.unwrap(key.currency0);
+            address t1 = Currency.unwrap(key.currency1);
+            baseToken = allowedBaseTokens[t0] ? t0 : t1;
+        }
+        uint256 cap = maxPoolTVL[baseToken];
+        if (cap > 0) {
+            (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+            int24 tl = (TickMath.MIN_TICK / key.tickSpacing) * key.tickSpacing;
+            int24 tu = (TickMath.MAX_TICK / key.tickSpacing) * key.tickSpacing;
+            bool baseIsToken0 = (Currency.unwrap(key.currency0) == baseToken);
+
+            uint128 currentLiq = uint128(_totalLiquidity[poolId]);
+            uint256 currentReserve = baseIsToken0
+                ? _getAmount0ForLiquidity(sqrtPriceX96, TickMath.getSqrtPriceAtTick(tl), TickMath.getSqrtPriceAtTick(tu), currentLiq)
+                : _getAmount1ForLiquidity(sqrtPriceX96, TickMath.getSqrtPriceAtTick(tl), TickMath.getSqrtPriceAtTick(tu), currentLiq);
+
+            uint256 addingAmount = _computeBaseAmount(key, params, baseIsToken0);
+
+            if (currentReserve + addingAmount > cap) revert ExceedsMaxTVL();
+        }
     }
 
     /// @dev Validates base token allowlist and minimum amount for initial liquidity.

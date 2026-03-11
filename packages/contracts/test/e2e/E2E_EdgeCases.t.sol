@@ -260,7 +260,7 @@ contract E2E_EdgeCases is Test {
         insurancePool.setTreasury(deployer);
 
         // ── Raise TVL cap for E2E tests ──
-        hook.setMaxPoolTVL(0); // unlimited
+        hook.setMaxPoolTVL(address(0), 0); // unlimited for ETH pools
 
         vm.stopPrank();
 
@@ -329,7 +329,7 @@ contract E2E_EdgeCases is Test {
         });
         poolIdA = poolKeyA.toId();
         poolACreatedAt = block.timestamp;
-        (, escrowIdA,,) = hook.getPoolInfo(poolIdA);
+        (, escrowIdA,,,) = hook.getPoolInfo(poolIdA);
         vm.stopPrank();
     }
 
@@ -356,7 +356,7 @@ contract E2E_EdgeCases is Test {
     }
 
     function _getEscrowId(PoolId pid) internal view returns (uint256) {
-        (, uint256 eid,,) = hook.getPoolInfo(pid);
+        (, uint256 eid,,,) = hook.getPoolInfo(pid);
         return eid;
     }
 
@@ -434,7 +434,7 @@ contract E2E_EdgeCases is Test {
         vm.stopPrank();
 
         // Pool created successfully
-        (address iss,,,) = hook.getPoolInfo(pid);
+        (address iss,,,,) = hook.getPoolInfo(pid);
         assertEq(iss, issuerB, "issuer registered");
     }
 
@@ -527,7 +527,7 @@ contract E2E_EdgeCases is Test {
         vm.stopPrank();
 
         // Pool should work
-        (address iss,,,) = hook.getPoolInfo(pid);
+        (address iss,,,,) = hook.getPoolInfo(pid);
         assertEq(iss, issuerB);
     }
 
@@ -610,7 +610,7 @@ contract E2E_EdgeCases is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(13))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "poolA triggered");
 
         // Pool Y should NOT be triggered
@@ -923,7 +923,7 @@ contract E2E_EdgeCases is Test {
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(12))), bytes32(uint256(1)));
+        vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(13))), bytes32(uint256(1)));
         assertTrue(hook.isPoolTriggered(poolIdA), "triggered");
 
         // After trigger, trading is blocked (issuer sells blocked, but buys may still work)
