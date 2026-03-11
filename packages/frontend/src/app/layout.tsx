@@ -46,7 +46,7 @@ export default function RootLayout({
                   <img src="/logo.png" alt="BastionSwap" width={20} height={20} className="rounded" />
                   <span className="font-medium">BastionSwap</span>
                   <span className="text-gray-300">|</span>
-                  <span className="text-xs text-gray-400">Escrow-native DEX on Base</span>
+                  <span className="text-xs text-gray-400">Rug-proof swaps on Uniswap V4 &middot; Base Sepolia Testnet</span>
                 </div>
                 <div className="flex items-center gap-4 text-xs text-gray-400">
                   <span className="text-gray-300 cursor-default" title="Coming soon">Docs</span>

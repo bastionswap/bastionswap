@@ -68,17 +68,6 @@ const CheckCircle = ({ className = "" }: { className?: string }) => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
   </svg>
 );
-const EyeIcon = ({ className = "" }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-);
-const BoltIcon = ({ className = "" }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-  </svg>
-);
 
 const CheckItem = ({ children }: { children: React.ReactNode }) => (
   <li className="flex items-start gap-2.5 text-sm text-gray-600">
@@ -100,7 +89,7 @@ const statIcons = [
   <svg key="pools" className="h-5 w-5 text-bastion-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>,
   <svg key="lock" className="h-5 w-5 text-bastion-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>,
   <svg key="shield" className="h-5 w-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>,
-  <svg key="coin" className="h-5 w-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+  <svg key="block" className="h-5 w-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>,
 ];
 
 export default function HomePage() {
@@ -108,9 +97,9 @@ export default function HomePage() {
 
   const statItems = [
     { label: "Protected Pools", value: stats?.totalBastionPools ?? 0 },
-    { label: "LP Locked in Escrow", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 6 })}` : "0", unit: "LP" },
-    { label: "Insurance Pool Total", value: stats ? `${parseFloat(stats.totalInsuranceBalance).toFixed(4)}` : "0", unit: "ETH" },
-    { label: "Paid to Holders", value: stats ? `${parseFloat(stats.totalCompensationPaid).toFixed(4)}` : "0", unit: "ETH" },
+    { label: "LP Locked", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 6 })}` : "0", unit: "LP" },
+    { label: "Insurance Pools", value: stats ? `${parseFloat(stats.totalInsuranceBalance).toFixed(4)}` : "0", unit: "ETH" },
+    { label: "Transactions Protected", value: stats?.totalBastionPools ? `${(stats.totalBastionPools * 0).toLocaleString()}` : "0" },
   ];
 
   return (
@@ -124,17 +113,20 @@ export default function HomePage() {
         </div>
 
         <h1 className="relative text-4xl font-extrabold tracking-tight text-gray-900 sm:text-5xl lg:text-6xl leading-[1.1]">
-          The DEX where rug pulls{" "}
+          The DEX where rug pulls are{" "}
           <br className="hidden sm:block" />
           <span className="bg-gradient-to-r from-bastion-600 to-emerald-600 bg-clip-text text-transparent">
-            don&apos;t pay.
+            blocked on-chain.
           </span>
         </h1>
         <p className="relative mt-6 max-w-2xl text-lg text-gray-500 leading-relaxed">
-          BastionSwap locks issuer liquidity with on-chain vesting
-          and automatically compensates holders if anything goes wrong.
+          BastionSwap enforces issuer sell limits and LP vesting
+          directly in the swap transaction. Exceeding limits?
+          The transaction reverts. It never happened.
           <br className="hidden sm:block" />
-          Trade any token — if the issuer rugs, you get paid back.
+          <span className="mt-2 block text-base text-gray-400">
+            Powered by Uniswap V4 Hooks on Base.
+          </span>
         </p>
         <div className="relative mt-10 flex flex-col gap-3 sm:flex-row sm:gap-4">
           <Link href="/swap" className="btn-primary text-center px-8 py-3.5 text-base">
@@ -167,79 +159,82 @@ export default function HomePage() {
       <section className="relative -mx-4 sm:-mx-6 px-4 sm:px-6 py-16 sm:py-20 bg-gray-950 text-white">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-2xl font-bold sm:text-3xl lg:text-4xl leading-tight">
-            Every day, thousands of tokens launch on DEXs.
+            Every day, thousands of tokens launch.
             <br className="hidden sm:block" />
             <span className="text-gray-400"> Most are scams.</span>
           </h2>
           <div className="mt-8 space-y-5 text-base sm:text-lg text-gray-400 leading-relaxed text-left sm:text-center">
             <p>
-              On Uniswap alone, new tokens launch every minute. Anyone can
-              create a token, add liquidity, and pull it all out once buyers
-              drive up the price. There&apos;s no protection, no refund, no recourse.
-            </p>
-            <p>
-              Token scanners play whack-a-mole with new scam patterns.
+              On DEXs, anyone can create a token, add liquidity, and drain it.
+              Token scanners detect yesterday&apos;s scam patterns.
               Template launchpads restrict what you can build.
-              Neither solves the root cause.
             </p>
             <p className="text-white font-medium">
-              BastionSwap takes a different approach: instead of trying to
-              detect scams, we make scamming unprofitable.
+              BastionSwap doesn&apos;t detect scams.
+              It makes them impossible to execute.
             </p>
           </div>
         </div>
       </section>
 
-      {/* --- How It Works --- */}
+      {/* --- Two Lines of Defense --- */}
       <section>
         <div className="text-center mb-12">
           <p className="text-sm font-semibold text-bastion-600 uppercase tracking-wider mb-2">How it works</p>
           <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-            Four layers of protection
+            Two lines of defense
           </h2>
         </div>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            {
-              icon: <LockIcon className="h-7 w-7 text-bastion-600" />,
-              step: "01",
-              title: "Issuer launches token",
-              desc: "The issuer creates a pool with initial liquidity. The protocol automatically locks their LP with a vesting schedule — 7-day lockup, then 83-day linear unlock. No extra steps, no separate escrow deposit.",
-              iconBg: "bg-bastion-100",
-            },
-            {
-              icon: <ShieldIcon className="h-7 w-7 text-emerald-600" />,
-              step: "02",
-              title: "Insurance builds automatically",
-              desc: "Every time someone buys the token, 1% goes into a per-token insurance pool denominated in ETH or USDC. The issuer can't touch it. Nobody can — except the protocol.",
-              iconBg: "bg-emerald-100",
-            },
-            {
-              icon: <EyeIcon className="h-7 w-7 text-blue-600" />,
-              step: "03",
-              title: "You trade with full transparency",
-              desc: "The dashboard shows everything: escrow countdown, insurance pool size, issuer reputation score, and commitment parameters. You see exactly how protected you are before you buy.",
-              iconBg: "bg-blue-100",
-            },
-            {
-              icon: <BoltIcon className="h-7 w-7 text-amber-600" />,
-              step: "04",
-              title: "If anything goes wrong",
-              desc: "The protocol detects rug pulls, mass dumps, and commitment breaches automatically on-chain. Issuer LP is seized, combined with the insurance pool, and distributed to holders as compensation. Detection and seizure are automatic — holders claim their share from the dashboard.",
-              iconBg: "bg-amber-100",
-            },
-          ].map(({ icon, step, title, desc, iconBg }) => (
-            <div key={step} className="glass-card relative overflow-hidden p-7">
-              <div className="flex items-center gap-3 mb-4">
-                <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${iconBg}`}>
-                  {icon}
-                </div>
-                <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">Step {step}</span>
+        <div className="grid gap-6 sm:grid-cols-2 max-w-5xl mx-auto">
+          {/* Defense 01 — Prevention */}
+          <div className="glass-card relative overflow-hidden p-7">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-bastion-100">
+                <LockIcon className="h-7 w-7 text-bastion-600" />
               </div>
-              <h3 className="mb-2 text-base font-semibold text-gray-900">{title}</h3>
-              <p className="text-sm text-gray-500 leading-relaxed">{desc}</p>
+              <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">Defense 01</span>
             </div>
-          ))}
+            <h3 className="mb-2 text-base font-semibold text-gray-900">Prevention: blocked before it happens</h3>
+            <div className="space-y-3 text-sm text-gray-500 leading-relaxed">
+              <p>
+                When an issuer creates a pool, their LP is locked with
+                a vesting schedule — they can&apos;t pull liquidity early.
+              </p>
+              <p>
+                Sell limits are enforced on every swap. If the issuer tries
+                to dump tokens beyond their committed daily or weekly limit,
+                the entire transaction reverts. This works regardless of
+                how the swap is routed — direct, through a router,
+                or via any aggregator.
+              </p>
+              <p className="text-gray-700 font-medium">
+                The harmful action never executes. No damage, no recovery needed.
+              </p>
+            </div>
+          </div>
+
+          {/* Defense 02 — Compensation */}
+          <div className="glass-card relative overflow-hidden p-7">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100">
+                <ShieldIcon className="h-7 w-7 text-emerald-600" />
+              </div>
+              <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">Defense 02</span>
+            </div>
+            <h3 className="mb-2 text-base font-semibold text-gray-900">Compensation: insurance if anything slips through</h3>
+            <div className="space-y-3 text-sm text-gray-500 leading-relaxed">
+              <p>
+                1% of every buy swap builds a per-token insurance pool.
+                If cumulative LP removal exceeds thresholds, the issuer&apos;s
+                remaining LP is seized and combined with the insurance pool
+                to compensate holders.
+              </p>
+              <p className="text-gray-700 font-medium">
+                Prevention handles 99% of cases.
+                Insurance is the safety net for the rest.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -252,19 +247,14 @@ export default function HomePage() {
           </h2>
           <div className="mt-8 space-y-5 text-base text-gray-500 leading-relaxed text-left sm:text-center">
             <p>
-              Buyers avoid new tokens because they can&apos;t tell scams
-              from real projects. BastionSwap fixes this.
+              When you launch on BastionSwap, your commitments are
+              on-chain and immutable: lock-up period, vesting schedule,
+              daily and weekly sell limits — all visible to buyers.
             </p>
             <p>
-              When you launch on BastionSwap, your commitment is
-              visible on-chain: lock-up period, vesting schedule,
-              sell limits — all immutable. Buyers see exactly what
-              you&apos;ve promised and can verify it themselves.
-            </p>
-            <p>
-              Stricter commitments earn higher reputation scores
-              and featured placement. Complete your vesting and
-              earn 10% of the insurance pool as a reward.
+              Set stricter limits, earn a higher reputation score.
+              Complete your vesting, earn 10% of the insurance pool
+              as a reward.
             </p>
             <p className="text-gray-700 font-medium">
               Same Uniswap V4 liquidity. Same trading experience.
@@ -309,11 +299,11 @@ export default function HomePage() {
               </div>
               <ul className="space-y-3">
                 <CheckItem>Issuer LP locked with customizable vesting (7d–365d)</CheckItem>
+                <CheckItem>Daily and weekly sell limits enforced by transaction revert</CheckItem>
                 <CheckItem>1% insurance pool auto-funded from every buy</CheckItem>
-                <CheckItem>On-chain rug pull detection (LP removal, dumps, commitment breach)</CheckItem>
-                <CheckItem>Automatic compensation to holders if triggered</CheckItem>
-                <CheckItem>Issuer reputation score visible on dashboard</CheckItem>
-                <CheckItem>Works through any frontend or aggregator — protection is at the protocol level</CheckItem>
+                <CheckItem>LP removal limits with cumulative threshold detection</CheckItem>
+                <CheckItem>Issuer reputation score on dashboard</CheckItem>
+                <CheckItem>Works through any frontend or aggregator</CheckItem>
               </ul>
             </div>
           </div>
@@ -331,8 +321,8 @@ export default function HomePage() {
             </div>
             <ul className="space-y-3">
               <XItem>No LP restrictions — issuer can remove anytime</XItem>
+              <XItem>No sell limits — issuer can dump freely</XItem>
               <XItem>No insurance mechanism</XItem>
-              <XItem>No on-chain monitoring</XItem>
               <XItem>Suitable for established pairs (ETH/USDC, WBTC/ETH)</XItem>
             </ul>
           </div>
