@@ -221,17 +221,14 @@ export default function HomePage() {
               </div>
               <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">Defense 02</span>
             </div>
-            <h3 className="mb-2 text-base font-semibold text-gray-900">Compensation: insurance if anything slips through</h3>
+            <h3 className="mb-2 text-base font-semibold text-gray-900">Compensation: insurance for what prevention can&apos;t catch</h3>
             <div className="space-y-3 text-sm text-gray-500 leading-relaxed">
               <p>
                 1% of every buy swap builds a per-token insurance pool.
-                If cumulative LP removal exceeds thresholds, the issuer&apos;s
-                remaining LP is seized and combined with the insurance pool
-                to compensate holders.
-              </p>
-              <p className="text-gray-700 font-medium">
-                Prevention handles 99% of cases.
-                Insurance is the safety net for the rest.
+                In v2, this pool will cover losses from contract-level exploits
+                like honeypots and hidden taxes that slip past on-chain prevention.
+                If a token is confirmed malicious, the issuer&apos;s remaining LP
+                is seized and combined with the insurance pool to compensate holders.
               </p>
             </div>
           </div>
@@ -301,7 +298,6 @@ export default function HomePage() {
                 <CheckItem>Issuer LP locked with customizable vesting (7d–365d)</CheckItem>
                 <CheckItem>Daily and weekly sell limits enforced by transaction revert</CheckItem>
                 <CheckItem>1% insurance pool auto-funded from every buy</CheckItem>
-                <CheckItem>LP removal limits with cumulative threshold detection</CheckItem>
                 <CheckItem>Issuer reputation score on dashboard</CheckItem>
                 <CheckItem>Works through any frontend or aggregator</CheckItem>
               </ul>
