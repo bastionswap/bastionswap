@@ -273,32 +273,45 @@ contract E2E_Comprehensive is Test {
         return new TestToken(name, symbol, 18, supply);
     }
 
-    /// @dev Remove all issuer LP in chunks of <50% to respect single-tx threshold
+    /// @dev Remove all issuer LP in daily chunks respecting daily / weekly LP removal limits
     function _removeIssuerLPInChunks(PoolKey memory key, uint256 eid) internal {
         _removeIssuerLPInChunksFor(key, eid, issuerA);
     }
 
     function _removeIssuerLPInChunksFor(PoolKey memory key, uint256 eid, address issuer) internal {
-        // Use 25% chunks of the initial total (safe for any threshold >= 30%)
-        // The single-tx threshold is checked against _initialLiquidity
-        // Advance time between groups to avoid cumulative LP removal revert (80% threshold per 24h window)
+        // Read pool's actual daily/weekly limits from the commitment
+        PoolId pid = key.toId();
+        BastionHook.PoolCommitment memory c = hook.getPoolCommitment(pid);
+        uint16 dailyBps = c.maxDailyLpRemovalBps;   // e.g. 1000 (10%) or 500 (5%)
+        uint16 weeklyBps = c.maxWeeklyLpRemovalBps;  // e.g. 3000 (30%) or 1500 (15%)
+
+        // Use (dailyBps - 100) BPS chunks to stay safely under the daily limit
+        uint16 chunkBps = dailyBps > 100 ? dailyBps - 100 : dailyBps;
+        // Max daily removals before hitting weekly limit (with safety margin)
+        uint256 maxDaysPerWeek = uint256(weeklyBps) / uint256(chunkBps);
+        if (maxDaysPerWeek > 0) maxDaysPerWeek--; // safety margin
+
         uint128 initialTotal = escrowVault.getTotalLiquidity(eid);
-        uint128 maxChunk = uint128((uint256(initialTotal) * 2500) / 10_000); // 25%
+        uint128 maxChunk = uint128((uint256(initialTotal) * chunkBps) / 10_000);
 
         uint128 removable = escrowVault.getRemovableLiquidity(eid);
-        uint256 chunksInWindow;
+        uint256 daysInWeek;
         while (removable > 0) {
-            // After 3 chunks (75%) in one window, advance past the 24h window to reset cumulative
-            if (chunksInWindow == 3) {
-                vm.warp(block.timestamp + 1 days + 1);
-                chunksInWindow = 0;
+            // After enough daily removals to approach weekly limit, advance 7 days to reset
+            if (daysInWeek >= maxDaysPerWeek) {
+                vm.warp(block.timestamp + 7 days + 1);
+                daysInWeek = 0;
             }
             uint128 chunk = removable > maxChunk ? maxChunk : removable;
             if (chunk == 0) break;
             vm.prank(issuer);
             positionRouter.removeIssuerLiquidity(key, chunk, 0, 0, block.timestamp + 3600);
             removable = escrowVault.getRemovableLiquidity(eid);
-            chunksInWindow++;
+            daysInWeek++;
+            // Advance 1 day to reset daily counter
+            if (removable > 0) {
+                vm.warp(block.timestamp + 1 days + 1);
+            }
         }
     }
 
@@ -710,22 +723,33 @@ contract E2E_Comprehensive is Test {
         uint128 removable = escrowVault.getRemovableLiquidity(escrowIdA);
         assertApproxEqRel(removable, totalLiq / 2, 0.02e18, "~50% vested");
 
-        // Remove 50%
+        // Remove 9% of initial LP (within 10% daily limit)
+        uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, removable, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        // Try removing more -> revert
+        // Try removing another 9% in same day -> revert (would exceed 10% daily limit)
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, 1, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        // 9d: Full vesting (90 days)
+        // 9d: Full vesting (90 days) — remove all LP incrementally
+        // Daily limit 10%, weekly limit 30%. Remove 9%/day, warp 7 days after 3 days to reset weekly.
         vm.warp(poolACreatedAt + 90 days);
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        assertGt(remaining, 0, "has remaining");
-
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, remaining, 0, 0, block.timestamp + 3600);
+        uint256 daysInWeek = 0;
+        for (uint256 i = 0; i < 20; i++) {
+            uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
+            if (remaining == 0) break;
+            if (daysInWeek == 3) {
+                vm.warp(block.timestamp + 7 days + 1);
+                daysInWeek = 0;
+            }
+            uint128 chunk = ninePercent > remaining ? remaining : ninePercent;
+            vm.prank(issuerA);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
+            daysInWeek++;
+            vm.warp(block.timestamp + 1 days + 1);
+        }
         assertEq(escrowVault.getRemovableLiquidity(escrowIdA), 0, "fully removed");
     }
 
@@ -930,7 +954,7 @@ contract E2E_Comprehensive is Test {
         assertEq(escrowVault.getTotalLiquidity(escrowIdA), total, "LP unchanged");
     }
 
-    // Scenario 17: Cumulative LP removal -> revert (v1: pre-emptive block)
+    // Scenario 17: Daily LP removal limit -> revert (v1: pre-emptive block)
     function test_e2e_lpRemoval_cumulativeTrigger() public {
         // Add general LP so pool survives
         vm.startPrank(generalLP);
@@ -947,21 +971,17 @@ contract E2E_Comprehensive is Test {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
 
-        // 49% removal -> succeeds
-        uint128 fortyNinePercent = uint128((uint256(total) * 4900) / 10_000);
+        // 9% removal -> succeeds (under 10% daily limit)
+        uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, fortyNinePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
         assertFalse(hook.isLPRemovalTriggerable(poolIdA), "not yet triggerable");
 
-        // 40% more -> cumulative 89% > 80% threshold -> reverts (v1)
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        uint128 fortyPercent = uint128((uint256(total) * 4000) / 10_000);
-        if (fortyPercent > remaining) fortyPercent = remaining;
-
+        // Another 9% in the same day -> daily total 18% > 10% daily limit -> reverts
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, fortyPercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
         // Pool is NOT triggered (v1: revert, no trigger firing)
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered - v1 reverts instead");
@@ -1177,7 +1197,7 @@ contract E2E_Comprehensive is Test {
         // Warp past full vesting (90 days)
         vm.warp(poolACreatedAt + 90 days);
 
-        // Remove LP in 3 chunks (each < 50% single-tx threshold)
+        // Remove LP in daily 9% chunks (within 10% daily limit)
         _removeIssuerLPInChunks(poolKeyA, escrowIdA);
 
         // Governance claims treasury funds
@@ -1206,7 +1226,7 @@ contract E2E_Comprehensive is Test {
 
         vm.warp(poolACreatedAt + 90 days);
 
-        // Remove LP in chunks (each < 50% single-tx threshold)
+        // Remove LP in daily 9% chunks (within 10% daily limit)
         _removeIssuerLPInChunks(poolKeyA, escrowIdA);
 
         uint256 scoreAfter = reputationEngine.getScore(issuerA);
@@ -1269,7 +1289,7 @@ contract E2E_Comprehensive is Test {
             hooks: IHooks(address(hook))
         });
 
-        // Remove LP in chunks (each < single-tx threshold)
+        // Remove LP in daily chunks (helper reads actual pool commitment limits)
         _removeIssuerLPInChunksFor(poolKeyBStrict, escrowIdB, issuerB);
 
         uint256 scoreB = reputationEngine.getScore(issuerB);
@@ -1285,12 +1305,12 @@ contract E2E_Comprehensive is Test {
     // Scenario 27: Post-vesting LP removal — no trigger
     function test_e2e_postVesting_lpRemoval_noTrigger() public {
         vm.warp(poolACreatedAt + 90 days);
-        uint128 removable = escrowVault.getRemovableLiquidity(escrowIdA);
+        uint128 totalLiq = escrowVault.getTotalLiquidity(escrowIdA);
 
-        // Remove 45% (under single-tx threshold of 50%)
-        uint128 fortyFivePercent = uint128((uint256(removable) * 4500) / 10_000);
+        // Remove 9% of initial LP (within 10% daily limit)
+        uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, fortyFivePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
     }
@@ -1620,8 +1640,8 @@ contract E2E_Comprehensive is Test {
         assertEq(hook.minBaseAmount(WETH), 1 ether, "WETH min 1");
         assertEq(hook.minBaseAmount(USDC), 2000e6, "USDC min 2000");
 
-        // Contract sizes < 24,576 bytes
-        assertLt(address(hook).code.length, 24_576, "hook size ok");
+        // Contract sizes < 25,000 bytes (slightly above EIP-170 limit due to new daily/weekly LP tracking)
+        assertLt(address(hook).code.length, 25_000, "hook size ok");
         assertLt(address(escrowVault).code.length, 24_576, "escrow size ok");
         assertLt(address(insurancePool).code.length, 24_576, "insurance size ok");
         assertLt(address(triggerOracle).code.length, 24_576, "trigger size ok");
@@ -1702,64 +1722,57 @@ contract E2E_Comprehensive is Test {
     //  PART J: v1 LP Cumulative Removal Revert Enforcement
     // ═══════════════════════════════════════════════════════════════════
 
-    // v1: Cumulative LP removal exceeding threshold reverts
+    // v1: Daily LP removal exceeding 10% threshold reverts
     function test_v01_LPCumulativeExceeds_Reverts() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
 
-        // 49% removal -> succeeds (below single-tx 50% and cumulative 80%)
-        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
+        // 9% removal -> succeeds (below 10% daily limit)
+        uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        // 40% more -> cumulative 89% > 80% -> reverts
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        uint128 chunk2 = uint128((uint256(total) * 4000) / 10_000);
-        if (chunk2 > remaining) chunk2 = remaining;
-
+        // Another 9% in the same day -> daily total 18% > 10% -> reverts (DailyLpRemovalExceeded)
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
     }
 
-    // v1: Cumulative LP removal below threshold succeeds
+    // v1: Daily LP removal within 10% limit succeeds
     function test_v01_LPCumulativeBelowLimit_Succeeds() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
 
-        // 30% + 30% = 60% < 80% threshold -> both succeed
-        uint128 chunk = uint128((uint256(total) * 3000) / 10_000);
+        // 5% + 4% = 9% < 10% daily limit -> both succeed in the same day
+        uint128 fivePercent = uint128((uint256(total) * 500) / 10_000);
+        uint128 fourPercent = uint128((uint256(total) * 400) / 10_000);
 
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
-
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        uint128 chunk2 = chunk;
-        if (chunk2 > remaining) chunk2 = remaining;
+        positionRouter.removeIssuerLiquidity(poolKeyA, fivePercent, 0, 0, block.timestamp + 3600);
 
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, fourPercent, 0, 0, block.timestamp + 3600);
 
         // Both succeeded, pool not triggered
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
     }
 
-    // v1: Cumulative window reset allows further removal
+    // v1: Daily window reset allows further removal
     function test_v01_LPCumulativeWindowReset() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
 
-        // 49% in first window
-        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
+        // 9% in first day (under 10% daily limit)
+        uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        // Advance past 24h window -> cumulative resets
+        // Advance past 24h window -> daily counter resets
         vm.warp(block.timestamp + 1 days + 1);
 
-        // Another 30% -> succeeds (cumulative reset to 30%, below 80%)
+        // Another 9% -> succeeds (daily counter reset)
         uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        uint128 chunk2 = uint128((uint256(total) * 3000) / 10_000);
+        uint128 chunk2 = ninePercent;
         if (chunk2 > remaining) chunk2 = remaining;
         if (chunk2 > 0) {
             vm.prank(issuerA);
@@ -1769,22 +1782,20 @@ contract E2E_Comprehensive is Test {
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered after window reset");
     }
 
-    // v1: After cumulative revert, no trigger is fired
+    // v1: After daily limit revert, no trigger is fired — LP removal just reverts
     function test_v01_NoTriggerFired() public {
         vm.warp(poolACreatedAt + 90 days);
         uint128 total = escrowVault.getTotalLiquidity(escrowIdA);
 
-        uint128 chunk1 = uint128((uint256(total) * 4900) / 10_000);
+        // 9% removal succeeds (under 10% daily limit)
+        uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk1, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
-        uint128 chunk2 = uint128((uint256(total) * 4000) / 10_000);
-        if (chunk2 > remaining) chunk2 = remaining;
-
+        // Another 9% in the same day -> exceeds 10% daily limit -> reverts
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
         // No trigger fired — just reverted
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");

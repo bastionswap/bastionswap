@@ -90,8 +90,8 @@ sequenceDiagram
 
 **PoolCommitment struct** (immutable per pool, set at creation):
 - `lockDuration`, `vestingDuration` — lock-up + linear vesting schedule
-- `maxSingleLpRemovalBps`, `maxCumulativeLpRemovalBps` — LP removal limits
-- `maxDailySellBps`, `weeklyDumpWindowSeconds`, `weeklyDumpThresholdBps` — sell limits
+- `maxDailyLpRemovalBps`, `maxWeeklyLpRemovalBps` — daily/weekly LP removal limits
+- `maxDailySellBps`, `maxWeeklySellBps` — daily/weekly sell limits
 
 The first LP provider is automatically registered as the **issuer** for that pool. Subsequent LP adds do not create new escrows. Both pool tokens are validated — at least one must be a whitelisted base token (ETH, WETH, USDC). If both are base tokens, Bastion protection is skipped.
 
@@ -144,20 +144,20 @@ Escrow Creation          Lock-up Period              Linear Vesting
 **Constraints enforced:**
 - **Lock Duration**: No LP removal until `lockDuration` seconds pass after escrow creation (default: 7 days, min: 7 days)
 - **Linear Vesting**: After lock expires, LP unlocks linearly over `vestingDuration` (default: 83 days, min: 7 days)
-- **Single-tx LP Removal Limit**: Max LP removable in one transaction (default: 50% of total LP, per PoolCommitment)
-- **Cumulative LP Removal Limit**: Cumulative removals within 24h window (default: 80%, reverts if exceeded in v1)
+- **Daily LP Removal Limit**: Max LP removable within a 24h rolling window (default: 10% of initial LP, per PoolCommitment)
+- **Weekly LP Removal Limit**: Max LP removable within a 7-day rolling window (default: 30% of initial LP, per PoolCommitment)
 - **Immutable Commitments**: Per-pool parameters set at creation, cannot be changed afterward
 
 ### 4. Violation Enforcement (v1)
 
-BastionSwap v1 uses **revert-only enforcement** for all issuer violations. Every violation — sell limits, single-tx LP removal, and cumulative LP removal — is blocked by reverting the transaction in BastionHook. No trigger is fired.
+BastionSwap v1 uses **revert-only enforcement** for all issuer violations. Every violation — sell limits, daily LP removal, and weekly LP removal — is blocked by reverting the transaction in BastionHook. No trigger is fired.
 
 ```
 Issuer attempts violation
     │
     ├── Sell exceeds daily/weekly limit → afterSwap REVERT
-    ├── Single-tx LP removal > threshold → beforeRemoveLiquidity REVERT
-    └── Cumulative LP removal > threshold → beforeRemoveLiquidity REVERT
+    ├── Daily LP removal > threshold → beforeRemoveLiquidity REVERT
+    └── Weekly LP removal > threshold → beforeRemoveLiquidity REVERT
 ```
 
 ### 4b. Trigger Infrastructure (Preserved for v2)
@@ -227,8 +227,8 @@ All violations are blocked by reverting the transaction. No trigger is fired —
 
 | Protection | Hook | Default Limit | Error |
 |-----------|------|---------------|-------|
-| **Single-tx LP removal** | `beforeRemoveLiquidity` revert | >50% of total LP | `SingleLPRemovalExceeded` |
-| **Cumulative LP removal** | `beforeRemoveLiquidity` revert | >80% of total LP in 24h window | `CumulativeLPRemovalExceeded` |
+| **Daily LP removal** | `beforeRemoveLiquidity` revert | >10% of initial LP per 24h | `DailyLpRemovalExceeded` |
+| **Weekly LP removal** | `beforeRemoveLiquidity` revert | >30% of initial LP per 7d | `WeeklyLpRemovalExceeded` |
 | **Daily sell limit** | `afterSwap` revert | >3% of current pool reserve per 24h | `IssuerDailySellExceeded` |
 | **Weekly sell limit** | `afterSwap` revert | >15% of current pool reserve per 7d | `IssuerWeeklySellExceeded` |
 | **Vesting enforcement** | `beforeRemoveLiquidity` revert | Based on lock-up + linear vesting | — |
@@ -238,7 +238,7 @@ All violations are blocked by reverting the transaction. No trigger is fired —
 
 ### LP Removal Tracking
 
-LP removals are tracked using `_lpCumulativeRemoved` and `_lpRemovalWindowStart` mappings per pool. The denominator for BPS calculations is `_initialLiquidity` (not total supply). Both single-tx and cumulative checks are enforced in `beforeRemoveLiquidity` — if either threshold is breached, the transaction reverts and the state change rolls back. Views: `isLPRemovalTriggerable(poolId)` checks if the cumulative threshold is currently exceeded.
+LP removals are tracked using `_dailyLpRemoved`/`_dailyLpWindowStart` and `_weeklyLpRemoved`/`_weeklyLpWindowStart` mappings per pool. The denominator for BPS calculations is `_initialLiquidity` (set at pool creation). Both daily and weekly window checks are enforced in `beforeRemoveLiquidity` using ceil-division BPS — if either threshold is breached, the transaction reverts and the state change rolls back. Windows reset automatically when the time period elapses.
 
 ### Planned (v2 — Trigger-based LP Seizure)
 
@@ -248,7 +248,7 @@ The trigger infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`, Insurance
 |---------|-----------|-------|
 | **Honeypot** | Decentralized watcher network: transfer() revert detection | Requires off-chain infrastructure |
 | **Hidden Tax** | Decentralized watcher network: swap output deviation >5% | Requires off-chain infrastructure |
-| **Cumulative LP removal** | Watcher network confirms on-chain threshold breach | Upgrades from revert to LP seizure + compensation |
+| **Excessive LP removal** | Watcher network confirms on-chain threshold breach | Upgrades from revert to LP seizure + compensation |
 
 ### Protocol Constants & Governance Defaults
 

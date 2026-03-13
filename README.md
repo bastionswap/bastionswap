@@ -7,7 +7,7 @@
 
 BastionSwap is a **Uniswap V4 Hook-based** decentralized exchange protocol that protects traders from rug-pulls and token exploits through **mandatory escrow vesting**, **on-chain trigger detection**, and **per-token insurance pools**.
 
-When a token issuer creates a liquidity pool, their LP is automatically locked with a vesting schedule (lock-up + linear vesting). All issuer violations are enforced on-chain via **transaction revert** — exceeding sell limits, single-tx LP removal limits, or cumulative LP removal limits reverts the entire transaction, blocking the action via any path including routers and aggregators. Trigger-based LP seizure infrastructure is preserved for v2 watcher network integration.
+When a token issuer creates a liquidity pool, their LP is automatically locked with a vesting schedule (lock-up + linear vesting). All issuer violations are enforced on-chain via **transaction revert** — exceeding sell limits, daily LP removal limits, or weekly LP removal limits reverts the entire transaction, blocking the action via any path including routers and aggregators. Trigger-based LP seizure infrastructure is preserved for v2 watcher network integration.
 
 ## Live Demo (Base Sepolia)
 
@@ -119,7 +119,7 @@ graph TB
 
 | Contract | Role |
 |----------|------|
-| **BastionHook** | V4 Hook entry point. Intercepts `beforeAddLiquidity`, `beforeRemoveLiquidity`, `beforeSwap`, and `afterSwap` to orchestrate escrow locking, insurance fee collection, and issuer violation enforcement. All violations (sell limits, single-tx LP removal, cumulative LP removal) are enforced via transaction revert — blocks actions via any path including routers and aggregators. Validates token compatibility (rejects fee-on-transfer and rebase tokens from Bastion Protected pools). Records LP/supply ratio at pool creation for dashboard transparency. |
+| **BastionHook** | V4 Hook entry point. Intercepts `beforeAddLiquidity`, `beforeRemoveLiquidity`, `beforeSwap`, and `afterSwap` to orchestrate escrow locking, insurance fee collection, and issuer violation enforcement. All violations (sell limits, daily/weekly LP removal) are enforced via transaction revert — blocks actions via any path including routers and aggregators. Validates token compatibility (rejects fee-on-transfer and rebase tokens from Bastion Protected pools). Records LP/supply ratio at pool creation for dashboard transparency. |
 | **BastionSwapRouter** | Swap-only router handling exact-input, exact-output, and multi-hop swaps via PoolManager unlock callbacks. Emits `SwapExecuted` with actual user address. |
 | **BastionPositionRouter** | LP management router for pool creation, liquidity add/remove, and fee collection. Emits `LiquidityChanged` for subgraph indexing. |
 | **EscrowVault** | Manages issuer LP removal rights with lock-up + linear vesting. Does not custody assets — controls removal permissions only. Per-pool commitment parameters (immutable) set by issuer at creation. Coordinates forced LP removal on trigger events. |
@@ -135,8 +135,8 @@ BastionSwap v1 uses **revert-only enforcement** — all issuer violations are bl
 
 | Protection | How | When | Default Limit |
 |-----------|-----|------|---------------|
-| Single-tx LP removal | `beforeRemoveLiquidity` revert | Issuer attempts to remove LP exceeding single-tx limit | >50% of total LP |
-| Cumulative LP removal | `beforeRemoveLiquidity` revert | Cumulative LP removals within 24h window exceed threshold | >80% of total LP |
+| Daily LP removal | `beforeRemoveLiquidity` revert | Issuer's daily LP removals within 24h window exceed threshold | >10% of initial LP per 24h |
+| Weekly LP removal | `beforeRemoveLiquidity` revert | Issuer's weekly LP removals within 7d window exceed threshold | >30% of initial LP per 7d |
 | Daily sell limit | `afterSwap` revert (rollback) | Issuer's cumulative sells exceed daily limit. Denominator is current pool reserve (issued token balance in PoolManager), dynamically tightening as pool shrinks. Detects sales via any path (direct, router, aggregator) using hookData + BalanceDelta | >3% of current pool reserve per 24h |
 | Weekly sell limit | `afterSwap` revert (rollback) | Same mechanism, 7-day rolling window | >15% of current pool reserve per 7d |
 | Vesting enforcement | `beforeRemoveLiquidity` revert | Issuer tries to remove more LP than currently vested | Based on lock-up + linear vesting schedule |
@@ -150,7 +150,7 @@ BastionSwap v1 uses **revert-only enforcement** — all issuer violations are bl
 |---------|-----------|----------|
 | Honeypot | Watcher network: transfer() revert detection | LP seizure + compensation |
 | Hidden Tax | Watcher network: swap output deviation >5% | LP seizure + compensation |
-| Cumulative LP removal (upgrade) | Watcher network: on-chain cumulative tracking confirmation | LP seizure + compensation (replaces revert-only) |
+| Excessive LP removal (upgrade) | Watcher network: on-chain tracking confirmation | LP seizure + compensation (replaces revert-only) |
 
 ### Two-Layer Parameter System
 
@@ -170,8 +170,8 @@ Controlled by governance (initially deployer EOA, later DAO). Changes only affec
 Set by issuer at pool creation. Immutable once set. Must be equal to or stricter than governance minimums.
 - Lock-up duration (≥ governance minimum)
 - Vesting duration (≥ governance minimum)
-- Max single-tx LP removal (≤ governance default)
-- Max 24h cumulative LP removal (≤ governance default)
+- Max daily LP removal (≤ governance default)
+- Max weekly LP removal (≤ governance default)
 - Max daily sell (≤ governance default)
 - Max weekly sell (≤ governance default)
 

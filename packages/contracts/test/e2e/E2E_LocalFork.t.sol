@@ -497,22 +497,33 @@ contract E2E_LocalFork is Test {
         uint128 expected50 = totalLiq / 2;
         assertApproxEqRel(removable, expected50, 0.02e18, "~50% vested");
 
-        // Remove 50% — should succeed (issuer LP uses salt=0)
+        // Remove 9% of initial LP (within 10% daily limit)
+        uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, removable, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        // Trying to remove more → revert
+        // Trying to remove another 9% in the same day → revert (would exceed 10% daily limit)
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, 1, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        // 6d: Full vesting (90 days)
+        // 6d: Full vesting (90 days) — remove all LP incrementally
+        // Daily limit 10%, weekly limit 30%. Remove 9%/day, warp 7 days after 3 days to reset weekly.
         vm.warp(poolACreatedAt + 90 days);
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowId);
-        assertGt(remaining, 0, "has remaining");
-
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, remaining, 0, 0, block.timestamp + 3600);
+        uint256 daysInWeek = 0;
+        for (uint256 i = 0; i < 20; i++) {
+            uint128 remaining = escrowVault.getRemovableLiquidity(escrowId);
+            if (remaining == 0) break;
+            if (daysInWeek == 3) {
+                vm.warp(block.timestamp + 7 days + 1);
+                daysInWeek = 0;
+            }
+            uint128 chunk = ninePercent > remaining ? remaining : ninePercent;
+            vm.prank(issuerA);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
+            daysInWeek++;
+            vm.warp(block.timestamp + 1 days + 1);
+        }
 
         assertEq(escrowVault.getRemovableLiquidity(escrowId), 0, "fully removed");
     }
@@ -581,26 +592,26 @@ contract E2E_LocalFork is Test {
         );
         vm.stopPrank();
 
-        // 8a: Fast-forward to full vesting, issuer removes 49% LP
+        // 8a: Fast-forward to full vesting, issuer removes 9% LP (within 10% daily limit)
         vm.warp(poolACreatedAt + 90 days);
         uint256 escrowId = _getEscrowId(poolIdA);
-        uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
+        uint128 totalLiq = escrowVault.getTotalLiquidity(escrowId);
 
-        // First removal: ~49% of initial (within single-tx threshold)
-        uint128 half = removable / 2;
+        // First removal: 9% of initial LP (within 10% daily limit)
+        uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, half, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
-        // Second removal: would exceed cumulative 80% threshold -> reverts (v1)
+        // Second removal: another 9% would push daily total to 18% > 10% daily limit -> reverts
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, removable - half, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
 
         // 8b: Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = tokenA.totalSupply();
         vm.prank(address(hook));
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.RUG_PULL, totalSupply);
-        // Set _isTriggered on hook (slot 12)
+        // Set _isTriggered on hook (slot 13)
         vm.store(address(hook), keccak256(abi.encode(poolIdA, uint256(13))), bytes32(uint256(1)));
 
         ITriggerOracle.TriggerResult memory trigStatus = triggerOracle.checkTrigger(poolIdA);
@@ -696,24 +707,30 @@ contract E2E_LocalFork is Test {
         _buyTokenA(trader, 0.3 ether);
 
         uint256 escrowId = _getEscrowId(poolIdA);
+        uint128 totalLiq = escrowVault.getTotalLiquidity(escrowId);
 
         // 11a: Full vesting (90 days) → issuer removes all LP
         vm.warp(poolACreatedAt + 90 days);
         uint128 removable = escrowVault.getRemovableLiquidity(escrowId);
         assertGt(removable, 0, "can remove");
 
-        // Remove in two batches: each within single-tx threshold (50%),
-        // advance past 24h window between batches to reset cumulative counter
-        uint128 half = removable / 2;
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, half, 0, 0, block.timestamp + 3600);
-
-        // Advance past cumulative LP removal window (24h) to reset counter
-        vm.warp(block.timestamp + 1 days + 1);
-
-        uint128 remaining = escrowVault.getRemovableLiquidity(escrowId);
-        vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, remaining, 0, 0, block.timestamp + 3600);
+        // Remove 9% per day (within 10% daily limit).
+        // Weekly limit is 30%, so after 3 daily removals (27%) warp 7 days to reset weekly.
+        uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
+        uint256 daysInWeek = 0;
+        for (uint256 i = 0; i < 20; i++) {
+            uint128 remaining = escrowVault.getRemovableLiquidity(escrowId);
+            if (remaining == 0) break;
+            if (daysInWeek == 3) {
+                vm.warp(block.timestamp + 7 days + 1);
+                daysInWeek = 0;
+            }
+            uint128 chunk = ninePercent > remaining ? remaining : ninePercent;
+            vm.prank(issuerA);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
+            daysInWeek++;
+            vm.warp(block.timestamp + 1 days + 1);
+        }
 
         // 11b: Reputation increased (ESCROW_COMPLETED event)
         // The escrow completion recording depends on the protocol flow.

@@ -499,13 +499,13 @@ contract E2E_EdgeCases is Test {
         // Warp past lock period
         vm.warp(poolACreatedAt + 90 days);
 
-        // Single removal threshold is 5000 bps (50%)
-        uint128 totalLiq = escrowVault.getTotalLiquidity(escrowIdA);
-        uint128 exactFiftyPercent = uint128((uint256(totalLiq) * 5000) / 10_000);
+        // Daily removal threshold is 1000 bps (10%) of _initialLiquidity
+        uint128 initialLiq = escrowVault.getTotalLiquidity(escrowIdA);
+        uint128 exactTenPercent = uint128((uint256(initialLiq) * 1000) / 10_000);
 
-        // Should succeed since LP removal uses > (not >=)
+        // Should succeed since LP removal uses > (not >=) for daily limit
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, exactFiftyPercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, exactTenPercent, 0, 0, block.timestamp + 3600);
     }
 
     function test_MinimumLiquidity_Pool() public {
