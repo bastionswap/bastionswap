@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { parseErrorMessage } from "@/utils/errorMessages";
+import { useTokenInfo } from "@/hooks/useTokenInfo";
 import { TokenSelectModal } from "./TokenSelectModal";
 import {
   useExecuteSwap,
@@ -104,6 +105,12 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
     address
   );
 
+  // Token decimals
+  const { decimals: tokenInDecimals } = useTokenInfo(tokenIn?.address as `0x${string}` | undefined);
+  const { decimals: tokenOutDecimals } = useTokenInfo(tokenOut?.address as `0x${string}` | undefined);
+  const decIn = tokenInDecimals ?? 18;
+  const decOut = tokenOutDecimals ?? 18;
+
   // Faucet
   const faucetAddr = tokenIn ? FAUCETS[tokenIn.address] as `0x${string}` | undefined : undefined;
   const faucetOutAddr = tokenOut ? FAUCETS[tokenOut.address] as `0x${string}` | undefined : undefined;
@@ -156,11 +163,11 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
   const parsedAmountIn = useMemo(() => {
     if (!amountIn || parseFloat(amountIn) <= 0) return 0n;
     try {
-      return parseUnits(amountIn, 18);
+      return parseUnits(amountIn, decIn);
     } catch {
       return 0n;
     }
-  }, [amountIn]);
+  }, [amountIn, decIn]);
 
   // On-chain swap quote (direct)
   const directQuoteParams = useMemo(() => {
@@ -301,9 +308,9 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
     });
   };
 
-  const formatBalance = (bal: bigint | undefined) => {
+  const formatBalance = (bal: bigint | undefined, decimals: number) => {
     if (bal === undefined) return "—";
-    const num = parseFloat(formatUnits(bal, 18));
+    const num = parseFloat(formatUnits(bal, decimals));
     if (num === 0) return "0";
     if (num < 0.0001) return "<0.0001";
     return num.toLocaleString("en-US", { maximumFractionDigits: 4 });
@@ -311,7 +318,7 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
 
   // Real estimated output from on-chain quote
   const estimatedOut = quotedOut && quotedOut > 0n
-    ? parseFloat(formatUnits(quotedOut, 18))
+    ? parseFloat(formatUnits(quotedOut, decOut))
     : 0;
 
   const wrapperClassName = compact ? "" : "mx-auto w-full max-w-[480px]";
@@ -367,15 +374,15 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
             <span className="text-sm font-medium text-gray-500">You pay</span>
             {tokenIn && isConnected && (
               <span className="text-xs text-gray-400 flex items-center gap-1">
-                Balance: {formatBalance(tokenInBalance)}
+                Balance: {formatBalance(tokenInBalance, decIn)}
                 {tokenInBalance !== undefined && tokenInBalance > 0n && (
                   <>
                     {[25, 50, 75, 100].map((pct) => (
                       <button
                         key={pct}
                         onClick={() => pct === 100
-                          ? setAmountIn(formatUnits(tokenInBalance, 18))
-                          : setAmountIn(formatUnits(tokenInBalance * BigInt(pct) / 100n, 18))
+                          ? setAmountIn(formatUnits(tokenInBalance, decIn))
+                          : setAmountIn(formatUnits(tokenInBalance * BigInt(pct) / 100n, decIn))
                         }
                         className="rounded border border-gray-200 px-1.5 py-0.5 text-gray-500 hover:border-bastion-400 hover:text-bastion-600 font-medium transition-colors"
                       >
@@ -547,13 +554,13 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
             <div className="flex justify-between">
               <span className="text-gray-500">Expected Output</span>
               <span className="text-gray-700">
-                {quotedOut ? parseFloat(formatUnits(quotedOut, 18)).toFixed(4) : "—"} {tokenOut.symbol}
+                {quotedOut ? parseFloat(formatUnits(quotedOut, decOut)).toFixed(4) : "—"} {tokenOut.symbol}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Minimum Received</span>
               <span className="text-gray-700">
-                {minAmountOut > 0n ? parseFloat(formatUnits(minAmountOut, 18)).toFixed(4) : "—"} {tokenOut.symbol}
+                {minAmountOut > 0n ? parseFloat(formatUnits(minAmountOut, decOut)).toFixed(4) : "—"} {tokenOut.symbol}
               </span>
             </div>
             <div className="flex justify-between">
