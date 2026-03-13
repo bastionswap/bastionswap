@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { useDeployToken, type DeployTokenResult } from "@/hooks/useDeployToken";
 import { parseErrorMessage } from "@/utils/errorMessages";
+import { formatWithCommas, sanitizeNumericInput } from "@/lib/formatters";
 import Link from "next/link";
 
 const DECIMALS_OPTIONS = [18, 8, 6];
@@ -109,12 +110,10 @@ export default function CreateTokenPage() {
               <label className="mb-1 block text-sm font-medium text-gray-700">Initial Supply</label>
               <input
                 type="text"
-                value={supply}
-                onChange={(e) => {
-                  const v = e.target.value.replace(/[^0-9.]/g, "");
-                  setSupply(v);
-                }}
-                placeholder="1000000"
+                inputMode="decimal"
+                value={formatWithCommas(supply)}
+                onChange={(e) => { const v = sanitizeNumericInput(e.target.value); if (v !== null) setSupply(v); }}
+                placeholder="1,000,000"
                 disabled={isActive}
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors focus:border-bastion-400 focus:bg-white disabled:opacity-50"
               />
