@@ -299,13 +299,6 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                     default_: 1500,
                     lowerBetter: true,
                   },
-                  {
-                    label: "Hidden Tax Threshold",
-                    value: formatBps(Number(triggerConfig.taxDeviationThreshold)),
-                    raw: Number(triggerConfig.taxDeviationThreshold),
-                    default_: 500,
-                    lowerBetter: true,
-                  },
                 ].map(({ label, value, raw, default_, lowerBetter }) => (
                   <div key={label} className="flex items-center justify-between text-sm">
                     <span className="text-gray-400">{label}</span>
