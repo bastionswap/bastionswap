@@ -7,9 +7,9 @@ dataSources:
     name: BastionHook
     network: base-sepolia
     source:
-      address: "0x4bc94824a7AcB06001ECd59Bd77db518eBAA4aC8"
+      address: "0xe02eE40c15cF6e9012C9a169B3faf1faBb0fCac8"
       abi: BastionHook
-      startBlock: 38767402
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -44,7 +44,7 @@ dataSources:
     source:
       address: "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408"
       abi: PoolManager
-      startBlock: 38584702
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -70,9 +70,9 @@ dataSources:
     name: EscrowVault
     network: base-sepolia
     source:
-      address: "0xE4A0Fd4936ADF81ED9E77DDcDe3f2654719ceC06"
+      address: "0x3b5dA03D8d0c6C8BF8DB9cB831705abb23CB903b"
       abi: EscrowVault
-      startBlock: 38767402
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -104,9 +104,9 @@ dataSources:
     name: InsurancePool
     network: base-sepolia
     source:
-      address: "0xa3C5947CD6CE840B651479a5b98157d12B72C21e"
+      address: "0x4D01FeF8ca2E9fdf2faf99eD84474Eb259B8B329"
       abi: InsurancePool
-      startBlock: 38767402
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -137,9 +137,9 @@ dataSources:
     name: TriggerOracle
     network: base-sepolia
     source:
-      address: "0x0F42632b02AA839F053410322B139184E25971d2"
+      address: "0x48f5C8B1E4A8a91F5E070176266169a97bcA418a"
       abi: TriggerOracle
-      startBlock: 38767402
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -163,9 +163,9 @@ dataSources:
     name: ReputationEngine
     network: base-sepolia
     source:
-      address: "0x844E1A6fbe2CD8C71C5747e8ba393a5921c7FBe0"
+      address: "0x1DA449fC0484a88E94fD5dd3C7466F39D26F11AE"
       abi: ReputationEngine
-      startBlock: 38767402
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -184,9 +184,9 @@ dataSources:
     name: BastionSwapRouter
     network: base-sepolia
     source:
-      address: "0xf2414160c571b62aC255A9b5b4AE1786FCC3B072"
+      address: "0xb069198DCA6B317D1E3E7dcFa150fF0cccD61cCF"
       abi: BastionSwapRouter
-      startBlock: 38767402
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
@@ -205,9 +205,9 @@ dataSources:
     name: BastionPositionRouter
     network: base-sepolia
     source:
-      address: "0x3d9Be7276Cf81caA430a7c005C2f23c4B4b7bfd7"
+      address: "0xE845454848173cf9e5127dc12e566aaDa46ca918"
       abi: BastionPositionRouter
-      startBlock: 38767402
+      startBlock: 38812219
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7

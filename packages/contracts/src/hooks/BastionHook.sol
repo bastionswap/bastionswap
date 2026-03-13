@@ -321,13 +321,9 @@ contract BastionHook is BaseTestHooks {
             }
         }
 
-        // Enforce per-token TVL cap for ALL LP additions
+        // Enforce per-token TVL cap and track total liquidity
         if (liquidity > 0) {
             _enforceTVLCap(poolId, key, params, hookData);
-        }
-
-        // Track total liquidity
-        if (liquidity > 0) {
             _totalLiquidity[poolId] += liquidity;
         }
 
@@ -372,13 +368,7 @@ contract BastionHook is BaseTestHooks {
 
         // Force removal in progress → skip all vesting checks
         if (_tload(_FORCE_REMOVAL_SLOT) == 1) {
-            // Only update tracked liquidity (forceRemoveIssuerLP handles the rest)
-            uint256 currentLP = _totalLiquidity[poolId];
-            if (removeAmount <= currentLP) {
-                _totalLiquidity[poolId] = currentLP - removeAmount;
-            } else {
-                _totalLiquidity[poolId] = 0;
-            }
+            _subTotalLiquidity(poolId, removeAmount);
             return IHooks.beforeRemoveLiquidity.selector;
         }
 
@@ -427,14 +417,9 @@ contract BastionHook is BaseTestHooks {
         }
         // else: different router → different position → allow freely
 
-        uint256 totalLP = _totalLiquidity[poolId];
-
         // Update tracked liquidity (CEI pattern)
-        if (removeAmount <= totalLP) {
-            _totalLiquidity[poolId] = totalLP - removeAmount;
-        } else {
-            _totalLiquidity[poolId] = 0;
-        }
+        _subTotalLiquidity(poolId, removeAmount);
+        uint256 totalLP = _totalLiquidity[poolId];
 
         // Track cumulative LP removal for issuer (for permissionless executeTrigger)
         if (isIssuerRemoval) {
@@ -489,12 +474,11 @@ contract BastionHook is BaseTestHooks {
         _tstore(_issuerSlot(poolId), uint256(uint160(poolIssuer)));
         _tstore(_actualSwapperSlot(poolId), uint256(uint160(actualSwapper)));
 
-        if (issuedToken != address(0) && poolIssuer != address(0)) {
-            // Determine if this is an issuer sell (issuer selling issued token)
+        if (issuedToken != address(0)) {
             bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
             bool isSell = issuedIsToken0 ? params.zeroForOne : !params.zeroForOne;
 
-            if (isSell && actualSwapper == poolIssuer) {
+            if (isSell && poolIssuer != address(0) && actualSwapper == poolIssuer) {
                 // Post-trigger block: issuer cannot sell after trigger
                 if (_isTriggered[poolId]) revert PoolTriggered();
 
@@ -508,12 +492,9 @@ contract BastionHook is BaseTestHooks {
                     _checkSellLimits(poolId, commitment, sellAmount);
                 }
             }
-        }
 
-        // Collect insurance fee on exactInput buy swaps
-        if (issuedToken != address(0) && params.amountSpecified < 0) {
-            bool isBuy = _isBuySwap(key, params, issuedToken);
-            if (isBuy) {
+            // Collect insurance fee on exactInput buy swaps
+            if (!isSell && params.amountSpecified < 0) {
                 BeforeSwapDelta feeDelta = _collectInsuranceFee(poolId, key, params, issuedToken);
                 return (IHooks.beforeSwap.selector, feeDelta, 0);
             }
@@ -707,17 +688,17 @@ contract BastionHook is BaseTestHooks {
     /// @notice Permissionless: anyone can execute trigger if cumulative LP removal threshold is met.
     function executeTrigger(PoolId poolId) external {
         PoolCommitment memory commitment = _poolCommitments[poolId];
-        require(commitment.isSet, "Pool not registered");
-        require(!_isTriggered[poolId], "Already triggered");
+        if (!commitment.isSet) revert ValueOutOfRange();
+        if (_isTriggered[poolId]) revert PoolTriggered();
 
         // Check weekly LP removal threshold
         _updateLpWeeklyWindow(poolId);
 
         uint256 initLiq = _initialLiquidity[poolId];
-        require(initLiq > 0, "No initial liquidity");
+        if (initLiq == 0) revert ValueOutOfRange();
 
         uint256 weeklyBps = (_weeklyLpRemoved[poolId] * 10_000) / initLiq;
-        require(weeklyBps >= commitment.maxWeeklyLpRemovalBps, "Threshold not met");
+        if (weeklyBps < commitment.maxWeeklyLpRemovalBps) revert ValueOutOfRange();
 
         _isTriggered[poolId] = true;
 
@@ -1051,16 +1032,6 @@ contract BastionHook is BaseTestHooks {
         return FullMath.mulDiv(liquidity, effectiveUpper - sqrtPriceAX96, FixedPoint96.Q96);
     }
 
-    /// @dev Determine if a swap is a "buy" of the issued token.
-    function _isBuySwap(
-        PoolKey calldata key,
-        SwapParams calldata params,
-        address issuedToken
-    ) internal pure returns (bool) {
-        bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
-        return issuedIsToken0 ? !params.zeroForOne : params.zeroForOne;
-    }
-
     /// @dev Calculate and collect insurance fee from the swap input via PoolManager delta.
     ///      Takes fee from the base token (specified currency) using poolManager.take(),
     ///      then deposits to InsurancePool. Works for both ETH and ERC-20 base tokens.
@@ -1138,6 +1109,12 @@ contract BastionHook is BaseTestHooks {
 
         _poolCommitments[poolId] = c;
         emit PoolCommitmentSet(poolId, issuer, c);
+    }
+
+    /// @dev Subtract removeAmount from _totalLiquidity (saturating at 0).
+    function _subTotalLiquidity(PoolId poolId, uint256 removeAmount) internal {
+        uint256 cur = _totalLiquidity[poolId];
+        _totalLiquidity[poolId] = removeAmount <= cur ? cur - removeAmount : 0;
     }
 
     // ─── LP Removal Window Helpers ──────────────────────────────────
@@ -1267,15 +1244,15 @@ contract BastionHook is BaseTestHooks {
     }
 
     function _issuedTokenSlot(PoolId poolId) internal pure returns (bytes32) {
-        return keccak256(abi.encode(poolId, "issuedToken"));
+        return keccak256(abi.encode(poolId, uint8(1)));
     }
 
     function _issuerSlot(PoolId poolId) internal pure returns (bytes32) {
-        return keccak256(abi.encode(poolId, "issuer"));
+        return keccak256(abi.encode(poolId, uint8(2)));
     }
 
     function _actualSwapperSlot(PoolId poolId) internal pure returns (bytes32) {
-        return keccak256(abi.encode(poolId, "actualSwapper"));
+        return keccak256(abi.encode(poolId, uint8(3)));
     }
 
     /// @dev Allow receiving ETH for insurance fee deposits
