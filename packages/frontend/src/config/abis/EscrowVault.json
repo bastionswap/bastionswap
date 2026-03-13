@@ -157,11 +157,6 @@
         "internalType": "struct IEscrowVault.IssuerCommitment",
         "components": [
           {
-            "name": "dailyWithdrawLimit",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
             "name": "maxSellPercent",
             "type": "uint16",
             "internalType": "uint16"
@@ -209,11 +204,6 @@
         "type": "tuple",
         "internalType": "struct IEscrowVault.IssuerCommitment",
         "components": [
-          {
-            "name": "dailyWithdrawLimit",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
           {
             "name": "maxSellPercent",
             "type": "uint16",
@@ -450,11 +440,6 @@
         "internalType": "struct IEscrowVault.IssuerCommitment",
         "components": [
           {
-            "name": "dailyWithdrawLimit",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
             "name": "maxSellPercent",
             "type": "uint16",
             "internalType": "uint16"
@@ -499,11 +484,6 @@
         "indexed": false,
         "internalType": "struct IEscrowVault.IssuerCommitment",
         "components": [
-          {
-            "name": "dailyWithdrawLimit",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
           {
             "name": "maxSellPercent",
             "type": "uint16",
@@ -667,11 +647,6 @@
   {
     "type": "error",
     "name": "CommitmentNotStricter",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "DailyLimitExceeded",
     "inputs": []
   },
   {

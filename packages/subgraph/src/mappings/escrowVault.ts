@@ -126,9 +126,6 @@ export function handleCommitmentSet(event: CommitmentSet): void {
 
   let commitment = new Commitment(escrowId);
   commitment.escrow = escrowId;
-  commitment.dailyWithdrawLimit = BigInt.fromI32(
-    event.params.newCommitment.dailyWithdrawLimit
-  );
   commitment.maxSellPercent = BigInt.fromI32(
     event.params.newCommitment.maxSellPercent
   );

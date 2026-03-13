@@ -206,7 +206,7 @@ contract E2E_Comprehensive is Test {
         ITriggerOracle.TriggerConfig memory triggerConfig
     ) internal pure returns (bytes memory) {
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 300});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 300});
         return abi.encode(issuer, token, lockDur, vestDur, commitment, triggerConfig);
     }
 
@@ -222,7 +222,7 @@ contract E2E_Comprehensive is Test {
         ITriggerOracle.TriggerConfig memory cfg
     ) internal pure returns (bytes memory) {
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 200});
         return abi.encode(issuer, token, lockDur, vestDur, commitment, cfg);
     }
 
@@ -394,7 +394,9 @@ contract E2E_Comprehensive is Test {
 
     // Scenario 3: Pool creation failures
     function test_e2e_poolCreation_failures() public {
-        // 3a: Min LP not met (0.001 ETH < 1 ETH minimum)
+        // 3a: Min LP not met — set min to 1 ETH via governance, then try 0.001 ETH
+        vm.prank(deployer);
+        hook.updateMinBaseAmount(address(0), 1 ether);
         TestToken tkFail = _createFreshToken("Fail", "FAIL", 1_000_000e18);
         tkFail.transfer(issuerB, 200_000e18);
         vm.startPrank(issuerB);
@@ -405,6 +407,9 @@ contract E2E_Comprehensive is Test {
             _buildHookDataDefault(issuerB, address(tkFail))
         );
         vm.stopPrank();
+        // Reset min back to 0
+        vm.prank(deployer);
+        hook.updateMinBaseAmount(address(0), 0);
 
         // 3b: Non-base token pair
         TestToken fakeBase = _createFreshToken("FakeBase", "FB", 1_000_000e18);
@@ -547,7 +552,7 @@ contract E2E_Comprehensive is Test {
 
         // Use USDC as base token — build hookData with USDC base
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 300});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 300});
         bytes memory hookData = abi.encode(
             issuerB, address(tkUsdc), uint40(7 days), uint40(83 days), commitment, _defaultTriggerConfig()
         );
@@ -1635,10 +1640,10 @@ contract E2E_Comprehensive is Test {
         assertTrue(hook.allowedBaseTokens(USDC), "USDC allowed");
         assertFalse(hook.allowedBaseTokens(address(tokenA)), "tokenA not base");
 
-        // Min base amounts
-        assertEq(hook.minBaseAmount(address(0)), 1 ether, "ETH min 1");
-        assertEq(hook.minBaseAmount(WETH), 1 ether, "WETH min 1");
-        assertEq(hook.minBaseAmount(USDC), 2000e6, "USDC min 2000");
+        // Min base amounts (0 = no minimum on testnet, set for mainnet via governance)
+        assertEq(hook.minBaseAmount(address(0)), 0, "ETH min 0");
+        assertEq(hook.minBaseAmount(WETH), 0, "WETH min 0");
+        assertEq(hook.minBaseAmount(USDC), 0, "USDC min 0");
 
         // Contract sizes < 25,000 bytes (slightly above EIP-170 limit due to new daily/weekly LP tracking)
         assertLt(address(hook).code.length, 25_000, "hook size ok");

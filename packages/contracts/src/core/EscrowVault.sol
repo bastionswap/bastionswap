@@ -14,7 +14,6 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 contract EscrowVault is IEscrowVault, ReentrancyGuard {
     // ─── Constants ────────────────────────────────────────────────────
 
-    uint16 internal constant BPS_BASE = 10_000;
     uint256 public constant MIN_LOCK_DURATION = 7 days;
     uint256 public constant MIN_VESTING_DURATION = 7 days;
 
@@ -42,9 +41,6 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     /// @dev escrowId => Escrow
     mapping(uint256 => Escrow) internal _escrows;
 
-    /// @dev escrowId => dayNumber => liquidity withdrawn that day
-    mapping(uint256 => mapping(uint256 => uint256)) internal _dailyWithdrawn;
-
     /// @dev PoolId hash => escrowId (for pool-based lookups)
     mapping(bytes32 => uint256) internal _poolEscrowIds;
 
@@ -61,7 +57,6 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     error EscrowNotFound();
     error EscrowTriggered();
     error NothingToRelease();
-    error DailyLimitExceeded();
     error CommitmentNotStricter();
     error LockDurationTooShort();
     error VestingDurationTooShort();
@@ -166,19 +161,6 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         if (removable == 0) revert NothingToRelease();
         if (liquidityRemoved > removable) revert NothingToRelease();
 
-        // Enforce daily withdraw limit
-        if (escrow.commitment.dailyWithdrawLimit > 0) {
-            uint256 dayNumber = block.timestamp / 1 days;
-            uint256 dailyMax = (uint256(escrow.totalLiquidity) * escrow.commitment.dailyWithdrawLimit) / BPS_BASE;
-            uint256 alreadyToday = _dailyWithdrawn[escrowId][dayNumber];
-
-            if (alreadyToday + liquidityRemoved > dailyMax) {
-                revert DailyLimitExceeded();
-            }
-
-            _dailyWithdrawn[escrowId][dayNumber] = alreadyToday + liquidityRemoved;
-        }
-
         escrow.removedLiquidity += liquidityRemoved;
 
         emit LPRemovalRecorded(escrowId, liquidityRemoved);
@@ -258,11 +240,9 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
         IssuerCommitment memory current = escrow.commitment;
 
-        bool isStricter = newCommitment.dailyWithdrawLimit <= current.dailyWithdrawLimit
-            && newCommitment.maxSellPercent <= current.maxSellPercent;
+        bool isStricter = newCommitment.maxSellPercent <= current.maxSellPercent;
 
-        bool isChanged = newCommitment.dailyWithdrawLimit != current.dailyWithdrawLimit
-            || newCommitment.maxSellPercent != current.maxSellPercent;
+        bool isChanged = newCommitment.maxSellPercent != current.maxSellPercent;
 
         if (!isStricter || !isChanged) revert CommitmentNotStricter();
 

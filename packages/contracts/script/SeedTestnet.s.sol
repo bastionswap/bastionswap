@@ -90,7 +90,6 @@ contract SeedTestnet is Script {
         uint40 vestingDuration = 83 days;
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 500,
             maxSellPercent: 300
         });
 

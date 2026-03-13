@@ -138,7 +138,6 @@ contract IssuerFeeCollectionTest is Test, Deployers {
 
     function _createPool() internal {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
         ITriggerOracle.TriggerConfig memory triggerConfig = ITriggerOracle.TriggerConfig({

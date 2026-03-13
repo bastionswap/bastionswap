@@ -240,22 +240,17 @@ contract BastionHook is BaseTestHooks {
         GOVERNANCE = _governance;
         _owner = _governance;
 
-        // Initialize governance parameters — per-token TVL caps
-        maxPoolTVL[address(0)] = 2 ether;     // ETH
-        maxPoolTVL[_weth] = 2 ether;          // WETH
-        maxPoolTVL[_usdc] = 5000e6;           // USDC (5000 USDC)
+        // Initialize governance parameters — TVL caps (0 = unlimited, set for mainnet)
+        // maxPoolTVL defaults to 0 (unlimited) for all tokens
         defaultLockDuration = 7 days;
         defaultVestingDuration = 83 days;
         minLockDuration = 7 days;
         minVestingDuration = 7 days;
 
-        // Initialize base tokens
+        // Initialize base tokens (minBaseAmount 0 = no minimum, set for mainnet)
         allowedBaseTokens[address(0)] = true; // native ETH
-        minBaseAmount[address(0)] = 1 ether;
         allowedBaseTokens[_weth] = true;
-        minBaseAmount[_weth] = 1 ether;
         allowedBaseTokens[_usdc] = true;
-        minBaseAmount[_usdc] = 2000e6; // 2000 USDC (6 decimals)
     }
 
     // ─── Hook Permission Flags ────────────────────────────────────────

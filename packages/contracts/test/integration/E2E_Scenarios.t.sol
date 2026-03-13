@@ -229,7 +229,7 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         // Phase 1: Pool creation
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 200});
 
         _initPool(commitment);
 
@@ -347,7 +347,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("=== SCENARIO 2: Legitimate Project (LP Permission Model) ===");
 
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 500, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 200});
 
         _initPool(commitment);
 
@@ -404,7 +404,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         console.log("=== SCENARIO 3: Cumulative LP Removal Trigger (LP Permission Model) ===");
 
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 200});
 
         _initPool(commitment);
 

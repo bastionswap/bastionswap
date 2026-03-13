@@ -138,7 +138,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     uint40 constant DEFAULT_VESTING = 83 days;
 
     function _defaultCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
-        return IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
+        return IEscrowVault.IssuerCommitment({maxSellPercent: 200});
     }
 
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {

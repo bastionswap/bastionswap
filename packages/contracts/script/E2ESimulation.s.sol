@@ -206,7 +206,6 @@ contract E2ESimulation is Script {
         uint40 vestingDuration = 83 days;
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 

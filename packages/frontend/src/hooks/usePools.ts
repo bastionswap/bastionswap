@@ -123,7 +123,6 @@ const POOL_DETAIL_QUERY = gql`
         lockDuration
         vestingDuration
         commitment {
-          dailyWithdrawLimit
           maxSellPercent
         }
       }
@@ -185,7 +184,6 @@ export interface SubgraphPool {
     lockDuration?: string;
     vestingDuration?: string;
     commitment?: {
-      dailyWithdrawLimit: string;
       maxSellPercent: string;
     } | null;
   } | null;
@@ -440,7 +438,7 @@ function useLocalPoolsOnChain() {
         let repScore = 0;
         let poolsCreated = 0, escrowsCompleted = 0, triggerCount = 0;
         let escrowCreatedAt = 0, escrowLockDuration = 0, escrowVestingDuration = 0;
-        let escrowCommitment: { dailyWithdrawLimit: number; maxSellPercent: number } | null = null;
+        let escrowCommitment: { maxSellPercent: number } | null = null;
 
         if (info) {
           escrowStatus = batch2Results[batch2Idx]?.status === "success"
@@ -459,7 +457,7 @@ function useLocalPoolsOnChain() {
           }
 
           const escrowInfo = batch2Results[batch2Idx + 3]?.status === "success"
-            ? (batch2Results[batch2Idx + 3].result as [bigint, bigint, bigint, { dailyWithdrawLimit: number; maxSellPercent: number }])
+            ? (batch2Results[batch2Idx + 3].result as [bigint, bigint, bigint, { maxSellPercent: number }])
             : null;
           if (escrowInfo) {
             escrowCreatedAt = Number(escrowInfo[0]);
@@ -501,7 +499,6 @@ function useLocalPoolsOnChain() {
                 vestingDuration: escrowVestingDuration > 0 ? escrowVestingDuration.toString() : undefined,
                 commitment: escrowCommitment
                   ? {
-                      dailyWithdrawLimit: escrowCommitment.dailyWithdrawLimit.toString(),
                       maxSellPercent: escrowCommitment.maxSellPercent.toString(),
                     }
                   : undefined,

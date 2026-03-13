@@ -175,11 +175,11 @@ contract E2E_LocalFork is Test {
     // ═══════════════════════════════════════════════════════════════════
 
     function _defaultCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
-        return IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 300});
+        return IEscrowVault.IssuerCommitment({maxSellPercent: 300});
     }
 
     function _strictCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
-        return IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 100, maxSellPercent: 200});
+        return IEscrowVault.IssuerCommitment({maxSellPercent: 200});
     }
 
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
@@ -934,9 +934,9 @@ contract E2E_LocalFork is Test {
         assertFalse(hook.allowedBaseTokens(address(tokenA)), "tokenA not base");
         assertFalse(hook.allowedBaseTokens(address(tokenB)), "tokenB not base");
 
-        // Min base amounts
-        assertEq(hook.minBaseAmount(address(0)), 1 ether, "ETH min 1");
-        assertEq(hook.minBaseAmount(WETH), 1 ether, "WETH min 1");
-        assertEq(hook.minBaseAmount(USDC), 2000e6, "USDC min 2000");
+        // Min base amounts (0 = no minimum on testnet, set for mainnet via governance)
+        assertEq(hook.minBaseAmount(address(0)), 0, "ETH min 0");
+        assertEq(hook.minBaseAmount(WETH), 0, "WETH min 0");
+        assertEq(hook.minBaseAmount(USDC), 0, "USDC min 0");
     }
 }

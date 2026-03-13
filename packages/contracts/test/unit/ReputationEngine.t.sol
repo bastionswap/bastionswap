@@ -35,14 +35,12 @@ contract ReputationEngineTest is Test {
 
     function _defaultCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
         return IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 500, // 5%
             maxSellPercent: 1000 // 10%
         });
     }
 
     function _strictCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
         return IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 100, // 1%
             maxSellPercent: 200 // 2%
         });
     }

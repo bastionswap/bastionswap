@@ -292,7 +292,7 @@ contract E2E_EdgeCases is Test {
         ITriggerOracle.TriggerConfig memory triggerConfig
     ) internal pure returns (bytes memory) {
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 300});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 300});
         return abi.encode(issuer, token, lockDur, vestDur, commitment, triggerConfig);
     }
 
@@ -308,7 +308,7 @@ contract E2E_EdgeCases is Test {
         ITriggerOracle.TriggerConfig memory cfg
     ) internal pure returns (bytes memory) {
         IEscrowVault.IssuerCommitment memory commitment =
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
+            IEscrowVault.IssuerCommitment({maxSellPercent: 200});
         return abi.encode(issuer, token, lockDur, vestDur, commitment, cfg);
     }
 
@@ -811,7 +811,7 @@ contract E2E_EdgeCases is Test {
         // Verify unauthorized direct calls revert
         vm.prank(attacker);
         vm.expectRevert();
-        escrowVault.createEscrow(poolIdA, issuerA, 1000, 7 days, 83 days, IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 300}));
+        escrowVault.createEscrow(poolIdA, issuerA, 1000, 7 days, 83 days, IEscrowVault.IssuerCommitment({maxSellPercent: 300}));
     }
 
     // ═══════════════════════════════════════════════════════════════════

@@ -14,7 +14,6 @@ interface EscrowStatusProps {
     lockDuration?: string;
     vestingDuration?: string;
     commitment?: {
-      dailyWithdrawLimit: string;
       maxSellPercent: string;
     } | null;
   };

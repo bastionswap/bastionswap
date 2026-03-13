@@ -44,7 +44,6 @@ export interface CreatePoolInput {
   lockDuration: number;      // in seconds (min 7 days)
   vestingDuration: number;   // in seconds (min 7 days)
   commitment: {
-    dailyWithdrawLimit: number;
     maxSellPercent: number;
   };
   triggerConfig: {
@@ -377,7 +376,7 @@ export function useCreateBastionPool() {
         "address",
         "uint40",
         "uint40",
-        "(uint16,uint16)",
+        "(uint16)",
         "(uint16,uint16,uint16,uint40,uint16,uint40,uint16)",
       ]),
       [
@@ -386,7 +385,6 @@ export function useCreateBastionPool() {
         params.lockDuration,
         params.vestingDuration,
         [
-          params.commitment.dailyWithdrawLimit,
           params.commitment.maxSellPercent,
         ] as const,
         [

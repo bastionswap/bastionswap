@@ -106,7 +106,6 @@ contract EscrowVaultInvariantTest is Test {
         escrowId = uint256(keccak256(abi.encode(poolId, issuer)));
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -188,7 +187,6 @@ contract EscrowVaultInvariantWithLockTest is Test {
         escrowId = uint256(keccak256(abi.encode(poolId, issuer)));
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -238,7 +236,7 @@ contract EscrowVaultFuzzTest is Test {
     // ─── Helpers ──────────────────────────────────────────────────────
 
     function _noLimitCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
-        return IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200});
+        return IEscrowVault.IssuerCommitment({maxSellPercent: 200});
     }
 
     function _createEscrow(PoolId poolId, uint128 liquidity, uint40 lockDuration, uint40 vestingDuration)

@@ -11,11 +11,9 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 interface IEscrowVault {
     // ─── Structs ──────────────────────────────────────────────────────
 
-    /// @notice Defines the issuer's up-front commitments that are enforced on-chain.
-    /// @param dailyWithdrawLimit Maximum percentage (basis points) of LP the issuer can withdraw per day
+    /// @notice Defines the issuer's up-front commitments stored in EscrowVault.
     /// @param maxSellPercent Maximum percentage (basis points) of token supply the issuer may sell per 24h window
     struct IssuerCommitment {
-        uint16 dailyWithdrawLimit;
         uint16 maxSellPercent;
     }
 
@@ -100,7 +98,7 @@ interface IEscrowVault {
     function getTotalLiquidity(uint256 escrowId) external view returns (uint128 totalLiquidity);
 
     /// @notice Records an LP removal by the issuer. Called by BastionHook.
-    /// @dev Enforces daily withdraw limits and updates removedLiquidity.
+    /// @dev Updates removedLiquidity. Daily/weekly LP limits enforced by BastionHook.
     /// @param escrowId Identifier of the escrow position
     /// @param liquidityRemoved Amount of liquidity being removed
     function recordLPRemoval(uint256 escrowId, uint128 liquidityRemoved) external;

@@ -97,7 +97,6 @@ contract ProtocolHandler is Test {
             issuers.push(issuer);
 
             IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-                dailyWithdrawLimit: 0,
                 maxSellPercent: 200
             });
 
@@ -365,7 +364,6 @@ contract EconomicHandler is Test {
         escrowId = uint256(keccak256(abi.encode(poolId, issuer)));
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -501,18 +499,15 @@ contract CrossContractFuzzTest is Test {
 
     function _createEscrowWithParams(
         uint128 liquidity,
-        uint40 lockDuration,
-        uint16 dailyLimit
+        uint40 lockDuration
     ) internal returns (uint256 escrowId, PoolId poolId, address issuer) {
         liquidity = uint128(bound(liquidity, 1e18, type(uint128).max / 2));
         lockDuration = uint40(bound(lockDuration, 7 days, 90 days));
-        dailyLimit = uint16(bound(dailyLimit, 0, 10000));
 
         issuer = makeAddr("fuzz_issuer");
-        poolId = PoolId.wrap(bytes32(uint256(keccak256(abi.encode(liquidity, lockDuration, dailyLimit)))));
+        poolId = PoolId.wrap(bytes32(uint256(keccak256(abi.encode(liquidity, lockDuration)))));
 
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: dailyLimit,
             maxSellPercent: 10000
         });
 
@@ -526,12 +521,9 @@ contract CrossContractFuzzTest is Test {
     function testFuzz_fullFlowRemovalInvariants(
         uint128 liquidity,
         uint40 lockDuration,
-        uint16 dailyLimit,
         uint256 warpTime
     ) public {
-        // Force dailyLimit to 0 so that removing all removable liquidity at once never hits DailyLimitExceeded
-        dailyLimit = 0;
-        (uint256 escrowId, , ) = _createEscrowWithParams(liquidity, lockDuration, dailyLimit);
+        (uint256 escrowId, , ) = _createEscrowWithParams(liquidity, lockDuration);
         liquidity = uint128(bound(liquidity, 1e18, type(uint128).max / 2));
         warpTime = bound(warpTime, 0, 365 days);
 
@@ -557,7 +549,7 @@ contract CrossContractFuzzTest is Test {
         uint40 lockDuration,
         uint256 warpBeforeTrigger
     ) public {
-        (uint256 escrowId, , ) = _createEscrowWithParams(liquidity, lockDuration, 0);
+        (uint256 escrowId, , ) = _createEscrowWithParams(liquidity, lockDuration);
         liquidity = uint128(bound(liquidity, 1e18, type(uint128).max / 2));
         warpBeforeTrigger = bound(warpBeforeTrigger, 0, 365 days);
 

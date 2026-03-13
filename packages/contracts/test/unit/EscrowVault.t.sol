@@ -79,7 +79,6 @@ contract EscrowVaultTest is Test {
 
     function _defaultCommitment() internal pure returns (IEscrowVault.IssuerCommitment memory) {
         return IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 500, // 5%
             maxSellPercent: 200 // 2%
         });
     }
@@ -207,7 +206,6 @@ contract EscrowVaultTest is Test {
 
     function test_recordLPRemoval_happyPath() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -229,7 +227,6 @@ contract EscrowVaultTest is Test {
 
     function test_recordLPRemoval_partialVesting() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -289,7 +286,6 @@ contract EscrowVaultTest is Test {
 
     function test_recordLPRemoval_emitsEvent() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -309,7 +305,6 @@ contract EscrowVaultTest is Test {
 
     function test_recordLPRemoval_exceedsRemovable_reverts() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -325,57 +320,6 @@ contract EscrowVaultTest is Test {
         vm.prank(hook);
         vm.expectRevert(EscrowVault.NothingToRelease.selector);
         vault.recordLPRemoval(escrowId, vested + 1);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  DAILY LIMIT TESTS
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_dailyLimit_withinLimit() public {
-        _createDefaultEscrow();
-
-        // dailyWithdrawLimit = 500 bps = 5% = 5e18 of 100e18
-        // Warp past full vesting so enough is vested
-        vm.warp(block.timestamp + 90 days);
-
-        vm.prank(hook);
-        vault.recordLPRemoval(defaultEscrowId, 5e18);
-
-        IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(defaultEscrowId);
-        assertEq(status.removedLiquidity, 5e18);
-    }
-
-    function test_dailyLimit_exceedsLimit() public {
-        _createDefaultEscrow();
-
-        vm.warp(block.timestamp + 90 days);
-
-        // First removal: 5e18 (daily max)
-        vm.prank(hook);
-        vault.recordLPRemoval(defaultEscrowId, 5e18);
-
-        // Second removal same day: should revert
-        vm.prank(hook);
-        vm.expectRevert(EscrowVault.DailyLimitExceeded.selector);
-        vault.recordLPRemoval(defaultEscrowId, 1);
-    }
-
-    function test_dailyLimit_resetsNextDay() public {
-        _createDefaultEscrow();
-
-        vm.warp(block.timestamp + 90 days);
-
-        // First day: remove 5e18
-        vm.prank(hook);
-        vault.recordLPRemoval(defaultEscrowId, 5e18);
-
-        // Next day: can remove another 5e18
-        vm.warp(block.timestamp + 1 days);
-        vm.prank(hook);
-        vault.recordLPRemoval(defaultEscrowId, 5e18);
-
-        IEscrowVault.EscrowStatus memory status = vault.getEscrowStatus(defaultEscrowId);
-        assertEq(status.removedLiquidity, 10e18);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -447,7 +391,6 @@ contract EscrowVaultTest is Test {
 
     function test_triggerForceRemoval_blocksRemoval() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -477,7 +420,6 @@ contract EscrowVaultTest is Test {
 
     function test_getRemovableLiquidity_afterVesting() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -492,7 +434,6 @@ contract EscrowVaultTest is Test {
 
     function test_getRemovableLiquidity_afterPartialRemoval() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -540,8 +481,7 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         IEscrowVault.IssuerCommitment memory stricter = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 300, // 3% (was 5%)
-            maxSellPercent: 200
+            maxSellPercent: 100
         });
 
         vm.prank(issuer);
@@ -552,8 +492,7 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         IEscrowVault.IssuerCommitment memory stricter = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 300,
-            maxSellPercent: 200
+            maxSellPercent: 100
         });
 
         vm.expectEmit(true, false, false, true);
@@ -567,32 +506,17 @@ contract EscrowVaultTest is Test {
         _createDefaultEscrow();
 
         IEscrowVault.IssuerCommitment memory stricter = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 300,
-            maxSellPercent: 200
+            maxSellPercent: 100
         });
 
         vm.expectRevert(EscrowVault.OnlyIssuer.selector);
         vault.setCommitment(defaultEscrowId, stricter);
     }
 
-    function test_setCommitment_revertsLooserDailyLimit() public {
-        _createDefaultEscrow();
-
-        IEscrowVault.IssuerCommitment memory looser = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 800, // 8% (was 5%) — looser
-            maxSellPercent: 200
-        });
-
-        vm.prank(issuer);
-        vm.expectRevert(EscrowVault.CommitmentNotStricter.selector);
-        vault.setCommitment(defaultEscrowId, looser);
-    }
-
     function test_setCommitment_revertsLooserMaxSellPercent() public {
         _createDefaultEscrow();
 
         IEscrowVault.IssuerCommitment memory looser = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 500,
             maxSellPercent: 500 // 5% (was 2%) — looser
         });
 
@@ -618,8 +542,7 @@ contract EscrowVaultTest is Test {
         vault.triggerForceRemoval(defaultEscrowId, 1);
 
         IEscrowVault.IssuerCommitment memory stricter = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 300,
-            maxSellPercent: 200
+            maxSellPercent: 100
         });
 
         vm.prank(issuer);
@@ -653,7 +576,6 @@ contract EscrowVaultTest is Test {
 
     function test_getEscrowStatus_fullyVested() public {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
 
@@ -695,7 +617,6 @@ contract EscrowVaultTest is Test {
 
     function test_isFullyVested_trueAfterFullRemoval() public {
         IEscrowVault.IssuerCommitment memory noDailyLimit = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 0,
             maxSellPercent: 200
         });
         PoolId pid = PoolId.wrap(bytes32(uint256(42)));
@@ -805,7 +726,6 @@ contract EscrowVaultTest is Test {
         assertEq(createdAt, uint40(block.timestamp));
         assertEq(lockDur, DEFAULT_LOCK);
         assertEq(vestDur, DEFAULT_VESTING);
-        assertEq(commitment.dailyWithdrawLimit, 500);
         assertEq(commitment.maxSellPercent, 200);
     }
 }

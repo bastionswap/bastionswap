@@ -36,7 +36,6 @@ interface IssuerInfoProps {
     totalTriggersActivated?: number;
   };
   commitment?: {
-    dailyWithdrawLimit: string;
     maxSellPercent: string;
   } | null;
   lockDuration?: number;
@@ -48,7 +47,6 @@ interface IssuerInfoProps {
 }
 
 const DEFAULTS = {
-  dailyWithdrawLimit: 500,
   totalDuration: 7_776_000, // 90 days default
   maxSellPercent: 300,
 };
@@ -233,13 +231,6 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
             )}
             {[
               ...(commitment ? [
-                {
-                  label: "Daily Withdraw Limit",
-                  value: formatBps(parseInt(commitment.dailyWithdrawLimit)),
-                  raw: parseInt(commitment.dailyWithdrawLimit),
-                  default_: DEFAULTS.dailyWithdrawLimit,
-                  lowerBetter: true,
-                },
                 {
                   label: "Max Sell / 24h",
                   value: formatBps(parseInt(commitment.maxSellPercent)),

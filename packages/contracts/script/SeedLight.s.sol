@@ -65,7 +65,6 @@ contract SeedLight is Script {
 
     function _buildHookData(address deployer, address token) internal pure returns (bytes memory) {
         IEscrowVault.IssuerCommitment memory commitment = IEscrowVault.IssuerCommitment({
-            dailyWithdrawLimit: 500,
             maxSellPercent: 300
         });
 

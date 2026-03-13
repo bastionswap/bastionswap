@@ -133,7 +133,7 @@ contract GasBenchmarkTest is Test, Deployers {
         return abi.encode(
             issuerAddr, address(issuedToken),
             lockDuration, vestingDuration,
-            IEscrowVault.IssuerCommitment({dailyWithdrawLimit: 0, maxSellPercent: 200}),
+            IEscrowVault.IssuerCommitment({maxSellPercent: 200}),
             ITriggerOracle.TriggerConfig({
                 dailyLpRemovalBps: 1000, weeklyLpRemovalBps: 3000,
                 dumpThresholdPercent: 300, dumpWindowSeconds: 86400,

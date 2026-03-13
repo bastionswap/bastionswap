@@ -56,7 +56,6 @@ const BASE_TOKENS: Record<number, BaseTokenOption[]> = {
 };
 
 const DEFAULT_COMMITMENT = {
-  dailyWithdrawLimit: 500, // 5% in bps
   maxSellPercent: 300, // 3% in bps
 };
 
@@ -66,7 +65,6 @@ type CommitmentMode = "quick" | "standard" | "strict" | "custom";
 interface CommitmentPreset {
   lockDays: number;
   vestingDays: number;
-  dailyWithdrawLimit: number;
   maxSellPercent: number;
   dailyLpRemoval: number;
   weeklyLpRemoval: number;
@@ -75,9 +73,9 @@ interface CommitmentPreset {
 }
 
 const COMMITMENT_PRESETS: Record<Exclude<CommitmentMode, "custom">, CommitmentPreset> = {
-  quick:    { lockDays: 7,  vestingDays: 23,  dailyWithdrawLimit: 500, maxSellPercent: 300, dailyLpRemoval: 1000, dump: 300, weeklyLpRemoval: 3000, weeklySell: 1500 },
-  standard: { lockDays: 7,  vestingDays: 83,  dailyWithdrawLimit: 500, maxSellPercent: 300, dailyLpRemoval: 1000, dump: 300, weeklyLpRemoval: 3000, weeklySell: 1500 },
-  strict:   { lockDays: 30, vestingDays: 150, dailyWithdrawLimit: 300, maxSellPercent: 200, dailyLpRemoval: 500, dump: 100, weeklyLpRemoval: 1500, weeklySell: 800 },
+  quick:    { lockDays: 7,  vestingDays: 23,  maxSellPercent: 300, dailyLpRemoval: 1000, dump: 300, weeklyLpRemoval: 3000, weeklySell: 1500 },
+  standard: { lockDays: 7,  vestingDays: 83,  maxSellPercent: 300, dailyLpRemoval: 1000, dump: 300, weeklyLpRemoval: 3000, weeklySell: 1500 },
+  strict:   { lockDays: 30, vestingDays: 150, maxSellPercent: 200, dailyLpRemoval: 500, dump: 100, weeklyLpRemoval: 1500, weeklySell: 800 },
 };
 
 // Keep backward compatibility alias
@@ -234,7 +232,7 @@ function CreatePoolContent() {
 
   const activeCommitment = vestingMode === "custom"
     ? commitment
-    : { dailyWithdrawLimit: COMMITMENT_PRESETS[vestingMode].dailyWithdrawLimit, maxSellPercent: COMMITMENT_PRESETS[vestingMode].maxSellPercent };
+    : { maxSellPercent: COMMITMENT_PRESETS[vestingMode].maxSellPercent };
 
   const handleCreatePool = () => {
     if (!contracts || !address) return;
@@ -250,7 +248,6 @@ function CreatePoolContent() {
       lockDuration: activeLockDays * 86400,
       vestingDuration: activeVestingDays * 86400,
       commitment: {
-        dailyWithdrawLimit: activeCommitment.dailyWithdrawLimit,
         maxSellPercent: activeTrigger.dump,
       },
       triggerConfig: {
@@ -626,7 +623,7 @@ function CreatePoolContent() {
                       const preset = COMMITMENT_PRESETS[mode];
                       setLockDays(preset.lockDays);
                       setVestingDays(preset.vestingDays);
-                      setCommitment({ dailyWithdrawLimit: preset.dailyWithdrawLimit, maxSellPercent: preset.maxSellPercent });
+                      setCommitment({ maxSellPercent: preset.maxSellPercent });
                       setTriggerThresholds({ dailyLpRemoval: preset.dailyLpRemoval, weeklyLpRemoval: preset.weeklyLpRemoval, dump: preset.dump, weeklySell: preset.weeklySell });
                     }
                   }}
@@ -784,31 +781,6 @@ function CreatePoolContent() {
             </div>
 
             <div className="space-y-7">
-              <div>
-                <div className="flex justify-between text-sm mb-3">
-                  <span className="text-gray-600 font-medium">Daily Withdraw Limit</span>
-                  <span className="text-gray-900 font-semibold tabular-nums">{formatBps(commitment.dailyWithdrawLimit)}</span>
-                </div>
-                <input
-                  type="range"
-                  min={100}
-                  max={2000}
-                  step={50}
-                  value={commitment.dailyWithdrawLimit}
-                  onChange={(e) =>
-                    setCommitment({
-                      ...commitment,
-                      dailyWithdrawLimit: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full accent-bastion-600"
-                />
-                <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                  <span>1% (Strict)</span>
-                  <span>20% (Relaxed)</span>
-                </div>
-              </div>
-
               <div>
                 <div className="flex justify-between text-sm mb-3">
                   <span className="text-gray-600 font-medium">Daily LP Removal Limit</span>
@@ -977,11 +949,6 @@ function CreatePoolContent() {
               <span className="text-gray-500">Insurance Fee</span>
               <span className="text-gray-900 font-medium">1% per buy swap</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Daily Withdraw</span>
-              <span className="text-gray-900 font-medium">{formatBps(activeCommitment.dailyWithdrawLimit)}</span>
-            </div>
-            <hr className="border-gray-200" />
             <div className="flex justify-between">
               <span className="text-gray-500">Daily LP Removal Limit</span>
               <span className="text-gray-900 font-medium">{formatBps(activeTrigger.dailyLpRemoval)}</span>

@@ -42,7 +42,6 @@ type Escrow @entity {
 type Commitment @entity {
   id: ID! # escrowId
   escrow: Escrow!
-  dailyWithdrawLimit: BigInt!
   maxSellPercent: BigInt!
 }
 
