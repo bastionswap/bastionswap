@@ -12,7 +12,7 @@ import {
   type CreatePoolStep,
 } from "@/hooks/useCreatePool";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { formatBps } from "@/lib/formatters";
+import { formatBps, formatWithCommas, sanitizeNumericInput } from "@/lib/formatters";
 import { parseErrorMessage } from "@/utils/errorMessages";
 import { getContracts } from "@/config/contracts";
 import { VestingChart } from "@/components/ui/VestingChart";
@@ -448,9 +448,10 @@ function CreatePoolContent() {
                 )}
               </div>
               <input
-                type="number"
-                value={tokenAmount}
-                onChange={(e) => setTokenAmount(e.target.value)}
+                type="text"
+                inputMode="decimal"
+                value={formatWithCommas(tokenAmount)}
+                onChange={(e) => { const v = sanitizeNumericInput(e.target.value); if (v !== null) setTokenAmount(v); }}
                 placeholder="0"
                 className="input-base text-lg"
               />
@@ -498,9 +499,10 @@ function CreatePoolContent() {
                 )}
               </div>
               <input
-                type="number"
-                value={baseAmount}
-                onChange={(e) => setBaseAmount(e.target.value)}
+                type="text"
+                inputMode="decimal"
+                value={formatWithCommas(baseAmount)}
+                onChange={(e) => { const v = sanitizeNumericInput(e.target.value); if (v !== null) setBaseAmount(v); }}
                 placeholder="0"
                 className="input-base text-lg"
               />

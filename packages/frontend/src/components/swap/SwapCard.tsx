@@ -25,7 +25,7 @@ import {
 import { useSwapRoute } from "@/hooks/useSwapRoute";
 import { usePoolReserves, useAllPools } from "@/hooks/usePools";
 import { getContracts } from "@/config/contracts";
-import { explorerUrl } from "@/lib/formatters";
+import { explorerUrl, formatWithCommas, sanitizeNumericInput } from "@/lib/formatters";
 
 export interface Token {
   address: string;
@@ -397,11 +397,12 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
           <div className="flex items-center gap-3">
             <div className="flex-1 min-w-0">
               <input
-                type="number"
-                value={amountIn}
-                onChange={(e) => setAmountIn(e.target.value)}
+                type="text"
+                inputMode="decimal"
+                value={formatWithCommas(amountIn)}
+                onChange={(e) => { const v = sanitizeNumericInput(e.target.value); if (v !== null) setAmountIn(v); }}
                 placeholder="0"
-                className="w-full bg-transparent text-3xl font-semibold text-gray-900 placeholder-gray-300 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                className="w-full bg-transparent text-3xl font-semibold text-gray-900 placeholder-gray-300 focus:outline-none"
               />
             </div>
             <button
@@ -447,9 +448,9 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
           <div className="flex items-center gap-3">
             <div className="flex-1 min-w-0 relative">
               <input
-                type="number"
+                type="text"
                 placeholder="0"
-                value={estimatedOut > 0 ? estimatedOut.toFixed(4) : ""}
+                value={estimatedOut > 0 ? formatWithCommas(estimatedOut.toFixed(4)) : ""}
                 readOnly
                 className="w-full bg-transparent text-3xl font-semibold text-gray-900 placeholder-gray-300 focus:outline-none"
               />

@@ -44,6 +44,21 @@ export function timeUntil(timestamp: number): string {
   return formatDuration(diff);
 }
 
+/** Format a numeric string with thousand separators (e.g. "1234567.89" → "1,234,567.89") */
+export function formatWithCommas(value: string): string {
+  if (!value) return "";
+  const [intPart, decPart] = value.split(".");
+  const formatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decPart !== undefined ? `${formatted}.${decPart}` : formatted;
+}
+
+/** Strip commas and return raw value only if it's a valid partial number, otherwise return null */
+export function sanitizeNumericInput(raw: string): string | null {
+  const stripped = raw.replace(/,/g, "");
+  if (stripped === "" || /^\d*\.?\d*$/.test(stripped)) return stripped;
+  return null;
+}
+
 export function explorerUrl(
   addressOrTx: string,
   type: "address" | "tx" = "address"
