@@ -130,12 +130,11 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
         // Initialize default trigger config
         defaultTriggerConfig = TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -364,15 +363,15 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     /// @dev Validates TriggerConfig fields are within sane ranges.
     function _validateTriggerConfig(TriggerConfig calldata cfg) internal pure {
-        // BPS thresholds: must be > 0 and <= 10000
-        if (cfg.lpRemovalThreshold == 0 || cfg.lpRemovalThreshold > BPS_BASE) revert InvalidTriggerConfig();
+        // LP removal BPS: must be > 0 and <= 10000
+        if (cfg.dailyLpRemovalBps == 0 || cfg.dailyLpRemovalBps > BPS_BASE) revert InvalidTriggerConfig();
+        if (cfg.weeklyLpRemovalBps == 0 || cfg.weeklyLpRemovalBps > BPS_BASE) revert InvalidTriggerConfig();
+        // Sell BPS thresholds: must be > 0 and <= 10000
         if (cfg.dumpThresholdPercent == 0 || cfg.dumpThresholdPercent > BPS_BASE) revert InvalidTriggerConfig();
         if (cfg.taxDeviationThreshold == 0 || cfg.taxDeviationThreshold > BPS_BASE) revert InvalidTriggerConfig();
-        if (cfg.slowRugCumulativeThreshold == 0 || cfg.slowRugCumulativeThreshold > BPS_BASE) revert InvalidTriggerConfig();
         if (cfg.weeklyDumpThresholdPercent == 0 || cfg.weeklyDumpThresholdPercent > BPS_BASE) revert InvalidTriggerConfig();
         // Time windows: must be between 1 hour and 30 days
         if (cfg.dumpWindowSeconds < 1 hours || cfg.dumpWindowSeconds > 30 days) revert InvalidTriggerConfig();
-        if (cfg.slowRugWindowSeconds < 1 hours || cfg.slowRugWindowSeconds > 30 days) revert InvalidTriggerConfig();
         if (cfg.weeklyDumpWindowSeconds < 1 days || cfg.weeklyDumpWindowSeconds > 30 days) revert InvalidTriggerConfig();
     }
 }

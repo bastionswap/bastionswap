@@ -48,24 +48,22 @@ export interface CreatePoolInput {
     maxSellPercent: number;
   };
   triggerConfig: {
-    lpRemovalThreshold: number;
+    dailyLpRemovalBps: number;
+    weeklyLpRemovalBps: number;
     dumpThresholdPercent: number;
     dumpWindowSeconds: number;
     taxDeviationThreshold: number;
-    slowRugWindowSeconds: number;
-    slowRugCumulativeThreshold: number;
     weeklyDumpWindowSeconds: number;
     weeklyDumpThresholdPercent: number;
   };
 }
 
 export const DEFAULT_TRIGGER_CONFIG = {
-  lpRemovalThreshold: 5000,
+  dailyLpRemovalBps: 1000,
+  weeklyLpRemovalBps: 3000,
   dumpThresholdPercent: 300,
   dumpWindowSeconds: 86400,
   taxDeviationThreshold: 500,
-  slowRugWindowSeconds: 86400,
-  slowRugCumulativeThreshold: 8000,
   weeklyDumpWindowSeconds: 604800,
   weeklyDumpThresholdPercent: 1500,
 };
@@ -380,7 +378,7 @@ export function useCreateBastionPool() {
         "uint40",
         "uint40",
         "(uint16,uint16)",
-        "(uint16,uint16,uint40,uint16,uint40,uint16,uint40,uint16)",
+        "(uint16,uint16,uint16,uint40,uint16,uint40,uint16)",
       ]),
       [
         address,
@@ -392,12 +390,11 @@ export function useCreateBastionPool() {
           params.commitment.maxSellPercent,
         ] as const,
         [
-          params.triggerConfig.lpRemovalThreshold,
+          params.triggerConfig.dailyLpRemovalBps,
+          params.triggerConfig.weeklyLpRemovalBps,
           params.triggerConfig.dumpThresholdPercent,
           params.triggerConfig.dumpWindowSeconds,
           params.triggerConfig.taxDeviationThreshold,
-          params.triggerConfig.slowRugWindowSeconds,
-          params.triggerConfig.slowRugCumulativeThreshold,
           params.triggerConfig.weeklyDumpWindowSeconds,
           params.triggerConfig.weeklyDumpThresholdPercent,
         ] as const,

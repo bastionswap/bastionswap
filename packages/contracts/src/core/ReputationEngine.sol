@@ -168,7 +168,7 @@ contract ReputationEngine is IReputationEngine {
             uint40 lockDuration,
             uint40 vestingDuration,
             uint16 maxDailySellBps,
-            uint16 weeklyDumpThresholdBps,
+            uint16 maxWeeklySellBps,
             uint40 _defaultLockDuration,
             uint40 _defaultVestingDuration,
             uint16 defaultDailySellBps,
@@ -176,7 +176,7 @@ contract ReputationEngine is IReputationEngine {
         ) = abi.decode(data, (uint40, uint40, uint16, uint16, uint40, uint40, uint16, uint16));
 
         profile.commitmentScore += _calcSingleCommitmentStrictness(
-            lockDuration, vestingDuration, maxDailySellBps, weeklyDumpThresholdBps,
+            lockDuration, vestingDuration, maxDailySellBps, maxWeeklySellBps,
             _defaultLockDuration, _defaultVestingDuration, defaultDailySellBps, defaultWeeklySellBps
         );
         profile.commitmentCount++;
@@ -237,7 +237,7 @@ contract ReputationEngine is IReputationEngine {
         uint40 lockDuration,
         uint40 vestingDuration,
         uint16 maxDailySellBps,
-        uint16 weeklyDumpThresholdBps,
+        uint16 maxWeeklySellBps,
         uint40 _defaultLockDuration,
         uint40 _defaultVestingDuration,
         uint16 defaultDailySellBps,
@@ -270,8 +270,8 @@ contract ReputationEngine is IReputationEngine {
         }
 
         // Weekly sell bonus: (defaultWeekly - poolWeekly) / defaultWeekly
-        if (defaultWeeklySellBps > 0 && weeklyDumpThresholdBps < defaultWeeklySellBps) {
-            totalBonus += uint256(defaultWeeklySellBps - weeklyDumpThresholdBps) * MAX_BPS
+        if (defaultWeeklySellBps > 0 && maxWeeklySellBps < defaultWeeklySellBps) {
+            totalBonus += uint256(defaultWeeklySellBps - maxWeeklySellBps) * MAX_BPS
                 / defaultWeeklySellBps;
         }
 

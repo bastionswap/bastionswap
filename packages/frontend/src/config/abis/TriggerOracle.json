@@ -137,7 +137,12 @@
     "inputs": [],
     "outputs": [
       {
-        "name": "lpRemovalThreshold",
+        "name": "dailyLpRemovalBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "weeklyLpRemovalBps",
         "type": "uint16",
         "internalType": "uint16"
       },
@@ -153,16 +158,6 @@
       },
       {
         "name": "taxDeviationThreshold",
-        "type": "uint16",
-        "internalType": "uint16"
-      },
-      {
-        "name": "slowRugWindowSeconds",
-        "type": "uint40",
-        "internalType": "uint40"
-      },
-      {
-        "name": "slowRugCumulativeThreshold",
         "type": "uint16",
         "internalType": "uint16"
       },
@@ -245,7 +240,12 @@
         "internalType": "struct ITriggerOracle.TriggerConfig",
         "components": [
           {
-            "name": "lpRemovalThreshold",
+            "name": "dailyLpRemovalBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyLpRemovalBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -261,16 +261,6 @@
           },
           {
             "name": "taxDeviationThreshold",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "slowRugWindowSeconds",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -344,7 +334,12 @@
         "internalType": "struct ITriggerOracle.TriggerConfig",
         "components": [
           {
-            "name": "lpRemovalThreshold",
+            "name": "dailyLpRemovalBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyLpRemovalBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -360,16 +355,6 @@
           },
           {
             "name": "taxDeviationThreshold",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "slowRugWindowSeconds",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -517,7 +502,12 @@
         "internalType": "struct ITriggerOracle.TriggerConfig",
         "components": [
           {
-            "name": "lpRemovalThreshold",
+            "name": "dailyLpRemovalBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyLpRemovalBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -533,16 +523,6 @@
           },
           {
             "name": "taxDeviationThreshold",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "slowRugWindowSeconds",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -603,7 +583,12 @@
         "internalType": "struct ITriggerOracle.TriggerConfig",
         "components": [
           {
-            "name": "lpRemovalThreshold",
+            "name": "dailyLpRemovalBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyLpRemovalBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -619,16 +604,6 @@
           },
           {
             "name": "taxDeviationThreshold",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "slowRugWindowSeconds",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -683,7 +658,12 @@
         "internalType": "struct ITriggerOracle.TriggerConfig",
         "components": [
           {
-            "name": "lpRemovalThreshold",
+            "name": "dailyLpRemovalBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyLpRemovalBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -699,16 +679,6 @@
           },
           {
             "name": "taxDeviationThreshold",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "slowRugWindowSeconds",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -739,7 +709,12 @@
         "internalType": "struct ITriggerOracle.TriggerConfig",
         "components": [
           {
-            "name": "lpRemovalThreshold",
+            "name": "dailyLpRemovalBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyLpRemovalBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -755,16 +730,6 @@
           },
           {
             "name": "taxDeviationThreshold",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "slowRugWindowSeconds",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -896,7 +861,12 @@
         "internalType": "struct ITriggerOracle.TriggerConfig",
         "components": [
           {
-            "name": "lpRemovalThreshold",
+            "name": "dailyLpRemovalBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "weeklyLpRemovalBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -912,16 +882,6 @@
           },
           {
             "name": "taxDeviationThreshold",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "slowRugWindowSeconds",
-            "type": "uint40",
-            "internalType": "uint40"
-          },
-          {
-            "name": "slowRugCumulativeThreshold",
             "type": "uint16",
             "internalType": "uint16"
           },

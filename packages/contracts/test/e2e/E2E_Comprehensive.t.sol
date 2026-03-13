@@ -188,12 +188,11 @@ contract E2E_Comprehensive is Test {
 
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -327,10 +326,10 @@ contract E2E_Comprehensive is Test {
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(poolIdA);
         assertEq(c.lockDuration, 7 days, "lock 7d");
         assertEq(c.vestingDuration, 83 days, "vesting 83d");
-        assertEq(c.maxSingleLpRemovalBps, 5000, "single LP removal 50%");
-        assertEq(c.maxCumulativeLpRemovalBps, 8000, "cumulative LP removal 80%");
+        assertEq(c.maxDailyLpRemovalBps, 1000, "daily LP removal 10%");
+        assertEq(c.maxWeeklyLpRemovalBps, 3000, "weekly LP removal 30%");
         assertEq(c.maxDailySellBps, 300, "daily sell 3%");
-        assertEq(c.weeklyDumpThresholdBps, 1500, "weekly sell 15%");
+        assertEq(c.maxWeeklySellBps, 1500, "weekly sell 15%");
 
         // 5. LP/supply ratio (AMM liquidity units / totalSupply, NOT token amounts)
         // May be 0 when AMM liquidity * 10000 < totalSupply (integer truncation)
@@ -350,12 +349,11 @@ contract E2E_Comprehensive is Test {
         tk.transfer(issuerB, 200_000e18);
 
         ITriggerOracle.TriggerConfig memory strict = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 3000,       // 30% single LP removal (stricter than 50% default)
+            dailyLpRemovalBps: 500,         // 5% daily LP removal (stricter than 10% default)
+            weeklyLpRemovalBps: 1500,       // 15% weekly LP removal (stricter than 30% default)
             dumpThresholdPercent: 200,       // 2% daily sell (stricter than 3% default)
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1000 // 10% weekly (stricter than 15% default)
         });
@@ -373,9 +371,9 @@ contract E2E_Comprehensive is Test {
         assertTrue(c.isSet, "commitment set");
         assertEq(c.lockDuration, 30 days, "30d lock");
         assertEq(c.vestingDuration, 150 days, "150d vesting");
-        assertEq(c.maxSingleLpRemovalBps, 3000, "single LP 30%");
+        assertEq(c.maxDailyLpRemovalBps, 500, "daily LP 5%");
         assertEq(c.maxDailySellBps, 200, "daily sell 2%");
-        assertEq(c.weeklyDumpThresholdBps, 1000, "weekly sell 10%");
+        assertEq(c.maxWeeklySellBps, 1000, "weekly sell 10%");
 
         // 2. Stricter than default
         assertTrue(hook.isCommitmentStricterThanDefault(pid), "stricter");
@@ -445,7 +443,7 @@ contract E2E_Comprehensive is Test {
         TestToken tkLp = _createFreshToken("LpFail", "LPF", 1_000_000e18);
         tkLp.transfer(issuerB, 200_000e18);
         ITriggerOracle.TriggerConfig memory lenientLp = _defaultTriggerConfig();
-        lenientLp.lpRemovalThreshold = 6000; // > 5000 default
+        lenientLp.dailyLpRemovalBps = 1001; // > 1000 default
         vm.startPrank(issuerB);
         tkLp.approve(address(positionRouter), type(uint256).max);
         vm.expectRevert();
@@ -859,7 +857,7 @@ contract E2E_Comprehensive is Test {
         );
         vm.stopPrank();
 
-        // maxDailySellBps = 300 (3%), weeklyDumpThresholdBps = 1500 (15%)
+        // maxDailySellBps = 300 (3%), maxWeeklySellBps = 1500 (15%)
         // Sell 2.9% of current reserve each day. Sells push tokens into pool
         // (growing reserve), but weekly cumulative grows faster.
         vm.startPrank(issuerA);
@@ -921,7 +919,7 @@ contract E2E_Comprehensive is Test {
         uint128 removable = escrowVault.getRemovableLiquidity(escrowIdA);
         assertEq(removable, total, "fully vested");
 
-        // maxSingleLpRemovalBps = 5000 (50%). Try removing 60%
+        // maxDailyLpRemovalBps = 1000 (10%). Try removing 60%
         uint128 sixtyPercent = uint128((uint256(total) * 6000) / 10_000);
 
         vm.prank(issuerA);
@@ -1246,7 +1244,7 @@ contract E2E_Comprehensive is Test {
         tkStrict.transfer(issuerB, 200_000e18);
 
         ITriggerOracle.TriggerConfig memory strictCfg = _defaultTriggerConfig();
-        strictCfg.lpRemovalThreshold = 3000;       // stricter than 50% default
+        strictCfg.dailyLpRemovalBps = 500;          // stricter than 10% default
         strictCfg.dumpThresholdPercent = 200;       // stricter than 3% default
 
         vm.startPrank(issuerB);
@@ -1459,7 +1457,7 @@ contract E2E_Comprehensive is Test {
         );
         vm.stopPrank();
 
-        // weeklyDumpThresholdBps = 1500 (15%)
+        // maxWeeklySellBps = 1500 (15%)
         // Sell 2.9% of current reserve each day. After enough days, cumulative exceeds 15%.
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);

@@ -97,9 +97,9 @@ contract E2E_ScenariosTest is Test, Deployers {
             }
             vm.etch(hookAddr, deployed.code);
             // Restore storage lost by vm.etch
-            vm.store(hookAddr, bytes32(uint256(22)), bytes32(uint256(uint160(governance))));
-            // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-            vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+            vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint160(governance))));
+            // Restore duration params + LP removal defaults: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days, dailyLpRemovalBps=1000, weeklyLpRemovalBps=3000
+            vm.store(hookAddr, bytes32(uint256(26)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120) | (uint256(uint16(1000)) << 160) | (uint256(uint16(3000)) << 176)));
         }
         hook = BastionHook(payable(hookAddr));
 
@@ -155,12 +155,11 @@ contract E2E_ScenariosTest is Test, Deployers {
 
     function _triggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -283,32 +282,29 @@ contract E2E_ScenariosTest is Test, Deployers {
         uint128 removable = escrowVault.getRemovableLiquidity(_escrowId);
         assertGt(removable, 0, "issuer should have removable LP after vesting progress");
 
-        // Issuer removes LP in multiple transactions within the slowRugWindow (24h)
-        // Each removal is below maxSingleLpRemovalBps (50%) individually.
-        uint128 firstChunk = removable / 2;
-        uint128 secondChunk = removable - firstChunk;
-
-        // First LP removal
+        // Daily LP removal limit = 10% of initial LP (1000e18) = 100e18
+        // Remove 90e18 (9%) — within daily limit
+        uint128 safeChunk = 90e18;
         vm.prank(issuerAddr);
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
-            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(firstChunk)), salt: 0}),
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(safeChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
 
-        // Not yet triggerable (cumulative below threshold)
+        // Not yet triggerable (within daily and weekly limits)
         assertFalse(hook.isLPRemovalTriggerable(_poolId), "should not be triggerable after first removal");
 
-        // Second LP removal -> reverts (v1: cumulative exceeds 80% threshold)
+        // Second removal within same day exceeds daily limit (90+90=180e18 = 18% > 10%)
         vm.warp(block.timestamp + 6 hours);
         vm.prank(issuerAddr);
         vm.expectRevert();
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
-            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(safeChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
-        console.log("  v1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
+        console.log("  v1: Second LP removal reverted (DailyLpRemovalExceeded)");
 
         // Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = issuedToken.totalSupply();
@@ -439,30 +435,48 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         uint256 insuranceBaseTokenBefore = baseToken.balanceOf(address(insurancePool));
 
-        // Issuer removes LP — first chunk succeeds
-        uint128 firstChunk = removable / 2;
-        uint128 secondChunk = removable - firstChunk;
+        // Daily limit = 10% of initial LP (1000e18) = 100e18
+        // Weekly limit = 30% of initial LP = 300e18
+        // Remove 90e18 per day across 3 days (cumulative 270e18 = 27%, within 30% weekly)
+        uint128 dailyChunk = 90e18;
 
-        // First removal
+        // Day 1: 90e18 (9% daily, 9% weekly)
         vm.prank(issuerAddr);
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
-            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(firstChunk)), salt: 0}),
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(dailyChunk)), salt: 0}),
+            abi.encode(issuerAddr)
+        );
+        assertFalse(hook.isPoolTriggered(_poolId), "should not be triggered yet");
+
+        // Day 2: +1 day, new daily window, 90e18 (9% daily, 18% weekly cumulative)
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(
+            _poolKey,
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(dailyChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
 
-        assertFalse(hook.isPoolTriggered(_poolId), "should not be triggered yet");
+        // Day 3: +1 day, 90e18 (9% daily, 27% weekly cumulative)
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(issuerAddr);
+        modifyLiquidityRouter.modifyLiquidity(
+            _poolKey,
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(dailyChunk)), salt: 0}),
+            abi.encode(issuerAddr)
+        );
 
-        // Second removal -> reverts (v1: cumulative exceeds 80% threshold)
-        vm.warp(block.timestamp + 6 hours);
+        // Day 4: +1 day, try 90e18 → reverts (weekly cumulative 360e18 = 36% > 30%)
+        vm.warp(block.timestamp + 1 days);
         vm.prank(issuerAddr);
         vm.expectRevert();
         modifyLiquidityRouter.modifyLiquidity(
             _poolKey,
-            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(secondChunk)), salt: 0}),
+            ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(dailyChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
-        console.log("  v1: Second LP removal reverted (CumulativeLPRemovalExceeded)");
+        console.log("  v1: LP removal reverted (WeeklyLpRemovalExceeded)");
 
         // Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = issuedToken.totalSupply();

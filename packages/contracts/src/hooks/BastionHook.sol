@@ -69,11 +69,10 @@ contract BastionHook is BaseTestHooks {
     struct PoolCommitment {
         uint40 lockDuration;
         uint40 vestingDuration;
-        uint16 maxSingleLpRemovalBps;      // from TriggerConfig.lpRemovalThreshold
-        uint16 maxCumulativeLpRemovalBps;   // from TriggerConfig.slowRugCumulativeThreshold
-        uint16 maxDailySellBps;             // from TriggerConfig.dumpThresholdPercent
-        uint40 weeklyDumpWindowSeconds;     // from TriggerConfig.weeklyDumpWindowSeconds
-        uint16 weeklyDumpThresholdBps;      // from TriggerConfig.weeklyDumpThresholdPercent
+        uint16 maxDailyLpRemovalBps;
+        uint16 maxWeeklyLpRemovalBps;
+        uint16 maxDailySellBps;
+        uint16 maxWeeklySellBps;
         uint40 createdAt;
         bool isSet;
     }
@@ -102,13 +101,15 @@ contract BastionHook is BaseTestHooks {
     /// @dev poolId => LP ratio in bps (liquidity * 10000 / totalSupply) at pool creation
     mapping(PoolId => uint256) internal _lpRatioBps;
 
-    /// @dev poolId => cumulative LP removed in current window (for permissionless executeTrigger)
-    mapping(PoolId => uint256) internal _lpCumulativeRemoved;
-
-    /// @dev poolId => LP removal window start timestamp
-    mapping(PoolId => uint40) internal _lpRemovalWindowStart;
-
-    /// @dev poolId => initial liquidity at pool creation (denominator for LP removal threshold)
+    /// @dev poolId => daily LP removed in current window
+    mapping(PoolId => uint256) internal _dailyLpRemoved;
+    /// @dev poolId => daily LP window start timestamp
+    mapping(PoolId => uint40) internal _dailyLpWindowStart;
+    /// @dev poolId => weekly LP removed in current window
+    mapping(PoolId => uint256) internal _weeklyLpRemoved;
+    /// @dev poolId => weekly LP window start timestamp
+    mapping(PoolId => uint40) internal _weeklyLpWindowStart;
+    /// @dev poolId => initial liquidity at pool creation (denominator for LP removal BPS)
     mapping(PoolId => uint256) internal _initialLiquidity;
 
     /// @dev BastionRouter address (set via one-time setter, deployed after hook due to CREATE2)
@@ -147,6 +148,12 @@ contract BastionHook is BaseTestHooks {
     /// @notice Minimum vesting duration issuer can set (default 7 days)
     uint40 public minVestingDuration;
 
+    /// @notice Default daily LP removal limit (default 10%)
+    uint16 public defaultDailyLpRemovalBps = 1000;
+
+    /// @notice Default weekly LP removal limit (default 30%)
+    uint16 public defaultWeeklyLpRemovalBps = 3000;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyPoolManager();
@@ -172,8 +179,8 @@ contract BastionHook is BaseTestHooks {
     error IssuerWeeklySellExceeded();
     error PoolTriggered();
     error IssuerDumpDetected();
-    error SingleLPRemovalExceeded();
-    error CumulativeLPRemovalExceeded();
+    error DailyLpRemovalExceeded();
+    error WeeklyLpRemovalExceeded();
     error ZeroAddress();
     error ValueOutOfRange();
 
@@ -196,6 +203,8 @@ contract BastionHook is BaseTestHooks {
     event DefaultVestingDurationUpdated(uint256 newDuration);
     event MinLockDurationUpdated(uint256 newDuration);
     event MinVestingDurationUpdated(uint256 newDuration);
+    event DefaultDailyLpRemovalBpsUpdated(uint256 newBps);
+    event DefaultWeeklyLpRemovalBpsUpdated(uint256 newBps);
     event PoolCommitmentSet(PoolId indexed poolId, address indexed issuer, PoolCommitment commitment);
     event PoolLiquidityRatio(PoolId indexed poolId, uint256 lpRatioBps);
 
@@ -403,7 +412,7 @@ contract BastionHook is BaseTestHooks {
                             commitment.lockDuration,
                             commitment.vestingDuration,
                             commitment.maxDailySellBps,
-                            commitment.weeklyDumpThresholdBps,
+                            commitment.maxWeeklySellBps,
                             defaultLockDuration,
                             defaultVestingDuration,
                             defaultCfg.dumpThresholdPercent,
@@ -431,24 +440,23 @@ contract BastionHook is BaseTestHooks {
         if (isIssuerRemoval) {
             PoolCommitment memory commitment = _poolCommitments[poolId];
             if (commitment.isSet) {
-                // Single-tx LP removal threshold check (against initial liquidity)
                 uint256 initLiq = _initialLiquidity[poolId];
                 if (initLiq > 0) {
-                    uint256 removalBps = (removeAmount * 10_000 + initLiq - 1) / initLiq;
-                    if (removalBps > commitment.maxSingleLpRemovalBps) revert SingleLPRemovalExceeded();
-                }
+                    // Daily LP removal check
+                    _updateLpDailyWindow(poolId);
+                    uint256 projectedDaily = _dailyLpRemoved[poolId] + removeAmount;
+                    uint256 dailyBps = (projectedDaily * 10_000 + initLiq - 1) / initLiq;
+                    if (dailyBps > commitment.maxDailyLpRemovalBps) revert DailyLpRemovalExceeded();
 
-                // Update cumulative tracking window
-                ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getTriggerConfig(poolId);
-                _updateLpWindow(poolId, cfg);
-                _lpCumulativeRemoved[poolId] += removeAmount;
+                    // Weekly LP removal check
+                    _updateLpWeeklyWindow(poolId);
+                    uint256 projectedWeekly = _weeklyLpRemoved[poolId] + removeAmount;
+                    uint256 weeklyBps = (projectedWeekly * 10_000 + initLiq - 1) / initLiq;
+                    if (weeklyBps > commitment.maxWeeklyLpRemovalBps) revert WeeklyLpRemovalExceeded();
 
-                // Cumulative LP removal threshold check (v1: revert instead of trigger)
-                if (initLiq > 0) {
-                    uint256 cumulativeBps = (_lpCumulativeRemoved[poolId] * 10_000 + initLiq - 1) / initLiq;
-                    if (cumulativeBps > commitment.maxCumulativeLpRemovalBps) {
-                        revert CumulativeLPRemovalExceeded();
-                    }
+                    // Update counters
+                    _dailyLpRemoved[poolId] += removeAmount;
+                    _weeklyLpRemoved[poolId] += removeAmount;
                 }
             }
         }
@@ -671,10 +679,10 @@ contract BastionHook is BaseTestHooks {
         // Thresholds: stricter if lower than defaults from TriggerOracle
         ITriggerOracle.TriggerConfig memory def = triggerOracle.getDefaultTriggerConfig();
 
-        if (c.maxSingleLpRemovalBps < def.lpRemovalThreshold) return true;
-        if (c.maxCumulativeLpRemovalBps < def.slowRugCumulativeThreshold) return true;
+        if (c.maxDailyLpRemovalBps < defaultDailyLpRemovalBps) return true;
+        if (c.maxWeeklyLpRemovalBps < defaultWeeklyLpRemovalBps) return true;
         if (c.maxDailySellBps < def.dumpThresholdPercent) return true;
-        if (c.weeklyDumpThresholdBps < def.weeklyDumpThresholdPercent) return true;
+        if (c.maxWeeklySellBps < def.weeklyDumpThresholdPercent) return true;
 
         return false;
     }
@@ -702,15 +710,14 @@ contract BastionHook is BaseTestHooks {
         require(commitment.isSet, "Pool not registered");
         require(!_isTriggered[poolId], "Already triggered");
 
-        // Check cumulative LP removal threshold
-        ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getTriggerConfig(poolId);
-        _updateLpWindow(poolId, cfg);
+        // Check weekly LP removal threshold
+        _updateLpWeeklyWindow(poolId);
 
         uint256 initLiq = _initialLiquidity[poolId];
         require(initLiq > 0, "No initial liquidity");
 
-        uint256 cumulativeBps = (_lpCumulativeRemoved[poolId] * 10_000) / initLiq;
-        require(cumulativeBps >= cfg.slowRugCumulativeThreshold, "Threshold not met");
+        uint256 weeklyBps = (_weeklyLpRemoved[poolId] * 10_000) / initLiq;
+        require(weeklyBps >= commitment.maxWeeklyLpRemovalBps, "Threshold not met");
 
         _isTriggered[poolId] = true;
 
@@ -722,20 +729,22 @@ contract BastionHook is BaseTestHooks {
 
     /// @notice View: check if cumulative LP removal threshold is currently met.
     function isLPRemovalTriggerable(PoolId poolId) external view returns (bool) {
-        ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getTriggerConfig(poolId);
-        uint256 cumRemoved = _lpCumulativeRemoved[poolId];
-        uint40 windowStart = _lpRemovalWindowStart[poolId];
+        PoolCommitment memory c = _poolCommitments[poolId];
+        if (!c.isSet) return false;
+
+        uint256 weeklyRemoved = _weeklyLpRemoved[poolId];
+        uint40 windowStart = _weeklyLpWindowStart[poolId];
 
         // Check if window expired (reset would happen)
-        if (cfg.slowRugWindowSeconds > 0 && block.timestamp >= windowStart + cfg.slowRugWindowSeconds) {
+        if (block.timestamp >= windowStart + 7 days) {
             return false; // window would reset
         }
 
         uint256 initLiq = _initialLiquidity[poolId];
         if (initLiq == 0) return false;
 
-        uint256 cumulativeBps = (cumRemoved * 10_000) / initLiq;
-        return cumulativeBps >= cfg.slowRugCumulativeThreshold;
+        uint256 weeklyBps = (weeklyRemoved * 10_000) / initLiq;
+        return weeklyBps >= c.maxWeeklyLpRemovalBps;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -815,6 +824,20 @@ contract BastionHook is BaseTestHooks {
         if (newDuration < 1 days || newDuration > 30 days) revert InvalidDuration();
         minVestingDuration = newDuration;
         emit MinVestingDurationUpdated(newDuration);
+    }
+
+    function setDefaultDailyLpRemovalBps(uint16 bps) external {
+        if (msg.sender != GOVERNANCE) revert OnlyGovernance();
+        if (bps < 100 || bps > 5000) revert ValueOutOfRange();
+        defaultDailyLpRemovalBps = bps;
+        emit DefaultDailyLpRemovalBpsUpdated(bps);
+    }
+
+    function setDefaultWeeklyLpRemovalBps(uint16 bps) external {
+        if (msg.sender != GOVERNANCE) revert OnlyGovernance();
+        if (bps < 500 || bps > 8000) revert ValueOutOfRange();
+        defaultWeeklyLpRemovalBps = bps;
+        emit DefaultWeeklyLpRemovalBpsUpdated(bps);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -910,7 +933,8 @@ contract BastionHook is BaseTestHooks {
         // Initialize tracking window starts
         _dailyWindowStart[poolId] = uint40(block.timestamp);
         _weeklyWindowStart[poolId] = uint40(block.timestamp);
-        _lpRemovalWindowStart[poolId] = uint40(block.timestamp);
+        _dailyLpWindowStart[poolId] = uint40(block.timestamp);
+        _weeklyLpWindowStart[poolId] = uint40(block.timestamp);
 
         // Register issuer and config in TriggerOracle
         triggerOracle.registerIssuer(poolId, issuer, totalSupply, token);
@@ -1092,20 +1116,22 @@ contract BastionHook is BaseTestHooks {
         // Read governance defaults
         ITriggerOracle.TriggerConfig memory def = triggerOracle.getDefaultTriggerConfig();
 
-        // Validate: issuer thresholds must be ≤ defaults (lower = stricter)
-        if (triggerConfig.lpRemovalThreshold > def.lpRemovalThreshold) revert CommitmentTooLenient();
-        if (triggerConfig.slowRugCumulativeThreshold > def.slowRugCumulativeThreshold) revert CommitmentTooLenient();
+        // Validate: LP removal thresholds must be ≤ defaults (lower = stricter)
+        if (triggerConfig.dailyLpRemovalBps > def.dailyLpRemovalBps) revert CommitmentTooLenient();
+        if (triggerConfig.weeklyLpRemovalBps > def.weeklyLpRemovalBps) revert CommitmentTooLenient();
+        // Validate: weekly LP must be >= daily LP
+        if (triggerConfig.weeklyLpRemovalBps < triggerConfig.dailyLpRemovalBps) revert ValueOutOfRange();
+        // Validate: sell thresholds must be ≤ defaults
         if (triggerConfig.dumpThresholdPercent > def.dumpThresholdPercent) revert CommitmentTooLenient();
         if (triggerConfig.weeklyDumpThresholdPercent > def.weeklyDumpThresholdPercent) revert CommitmentTooLenient();
 
         PoolCommitment memory c = PoolCommitment({
             lockDuration: lockDuration,
             vestingDuration: vestingDuration,
-            maxSingleLpRemovalBps: triggerConfig.lpRemovalThreshold,
-            maxCumulativeLpRemovalBps: triggerConfig.slowRugCumulativeThreshold,
+            maxDailyLpRemovalBps: triggerConfig.dailyLpRemovalBps,
+            maxWeeklyLpRemovalBps: triggerConfig.weeklyLpRemovalBps,
             maxDailySellBps: triggerConfig.dumpThresholdPercent,
-            weeklyDumpWindowSeconds: triggerConfig.weeklyDumpWindowSeconds,
-            weeklyDumpThresholdBps: triggerConfig.weeklyDumpThresholdPercent,
+            maxWeeklySellBps: triggerConfig.weeklyDumpThresholdPercent,
             createdAt: uint40(block.timestamp),
             isSet: true
         });
@@ -1114,13 +1140,21 @@ contract BastionHook is BaseTestHooks {
         emit PoolCommitmentSet(poolId, issuer, c);
     }
 
-    // ─── LP Removal Window Helper ──────────────────────────────────
+    // ─── LP Removal Window Helpers ──────────────────────────────────
 
-    /// @dev Resets LP cumulative removal counter if window has expired.
-    function _updateLpWindow(PoolId poolId, ITriggerOracle.TriggerConfig memory cfg) internal {
-        if (cfg.slowRugWindowSeconds > 0 && block.timestamp >= _lpRemovalWindowStart[poolId] + cfg.slowRugWindowSeconds) {
-            _lpCumulativeRemoved[poolId] = 0;
-            _lpRemovalWindowStart[poolId] = uint40(block.timestamp);
+    /// @dev Resets daily LP removal counter if 24h window has expired.
+    function _updateLpDailyWindow(PoolId poolId) internal {
+        if (block.timestamp >= _dailyLpWindowStart[poolId] + 1 days) {
+            _dailyLpRemoved[poolId] = 0;
+            _dailyLpWindowStart[poolId] = uint40(block.timestamp);
+        }
+    }
+
+    /// @dev Resets weekly LP removal counter if 7-day window has expired.
+    function _updateLpWeeklyWindow(PoolId poolId) internal {
+        if (block.timestamp >= _weeklyLpWindowStart[poolId] + 7 days) {
+            _weeklyLpRemoved[poolId] = 0;
+            _weeklyLpWindowStart[poolId] = uint40(block.timestamp);
         }
     }
 
@@ -1151,15 +1185,15 @@ contract BastionHook is BaseTestHooks {
         }
 
         // Check weekly limit
-        if (commitment.weeklyDumpThresholdBps > 0 && commitment.weeklyDumpWindowSeconds > 0) {
+        if (commitment.maxWeeklySellBps > 0) {
             uint256 weeklyCum = _weeklyCumulative[poolId];
             uint40 windowStart = _weeklyWindowStart[poolId];
-            if (block.timestamp >= windowStart + commitment.weeklyDumpWindowSeconds) {
+            if (block.timestamp >= windowStart + 7 days) {
                 weeklyCum = 0;
             }
             uint256 projected = weeklyCum + sellAmount;
             uint256 sellBps = (projected * 10_000 + currentReserve - 1) / currentReserve;
-            if (sellBps > commitment.weeklyDumpThresholdBps) revert IssuerWeeklySellExceeded();
+            if (sellBps > commitment.maxWeeklySellBps) revert IssuerWeeklySellExceeded();
         }
     }
 
@@ -1183,7 +1217,7 @@ contract BastionHook is BaseTestHooks {
 
         // Reset weekly window if expired
         uint40 weeklyStart = _weeklyWindowStart[poolId];
-        if (commitment.weeklyDumpWindowSeconds > 0 && block.timestamp >= weeklyStart + commitment.weeklyDumpWindowSeconds) {
+        if (block.timestamp >= weeklyStart + 7 days) {
             _weeklyCumulative[poolId] = 0;
             _weeklyWindowStart[poolId] = uint40(block.timestamp);
         }
@@ -1199,9 +1233,9 @@ contract BastionHook is BaseTestHooks {
         }
 
         // Check weekly limit
-        if (commitment.weeklyDumpThresholdBps > 0) {
+        if (commitment.maxWeeklySellBps > 0) {
             uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
-            if (weeklyBps > commitment.weeklyDumpThresholdBps) revert IssuerDumpDetected();
+            if (weeklyBps > commitment.maxWeeklySellBps) revert IssuerDumpDetected();
         }
     }
 

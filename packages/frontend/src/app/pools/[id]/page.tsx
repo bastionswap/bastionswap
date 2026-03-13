@@ -597,22 +597,20 @@ export default function PoolDetailPage() {
                       poolCommitment={poolCommitment as {
                         lockDuration: number | bigint;
                         vestingDuration: number | bigint;
-                        maxSingleLpRemovalBps: number | bigint;
-                        maxCumulativeLpRemovalBps: number | bigint;
+                        maxDailyLpRemovalBps: number | bigint;
+                        maxWeeklyLpRemovalBps: number | bigint;
                         maxDailySellBps: number | bigint;
-                        weeklyDumpWindowSeconds: number | bigint;
-                        weeklyDumpThresholdBps: number | bigint;
+                        maxWeeklySellBps: number | bigint;
                         createdAt: number | bigint;
                         isSet: boolean;
                       } | undefined}
                       isStricterThanDefault={isStricterThanDefault as boolean | undefined}
                       triggerConfig={triggerConfig as {
-                        lpRemovalThreshold: number | bigint;
+                        dailyLpRemovalBps: number | bigint;
+                        weeklyLpRemovalBps: number | bigint;
                         dumpThresholdPercent: number | bigint;
                         dumpWindowSeconds: number | bigint;
                         taxDeviationThreshold: number | bigint;
-                        slowRugWindowSeconds: number | bigint;
-                        slowRugCumulativeThreshold: number | bigint;
                         weeklyDumpWindowSeconds: number | bigint;
                         weeklyDumpThresholdPercent: number | bigint;
                       } | undefined}

@@ -87,9 +87,9 @@ contract BastionHookIntegrationTest is Test, Deployers {
         }
         vm.etch(hookAddr, deployed.code);
         // Restore storage lost by vm.etch
-        vm.store(hookAddr, bytes32(uint256(22)), bytes32(uint256(uint160(governance))));
-        // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-        vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+        vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint160(governance))));
+        // Restore duration params + LP removal defaults: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days, dailyLpRemovalBps=1000, weeklyLpRemovalBps=3000
+        vm.store(hookAddr, bytes32(uint256(26)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120) | (uint256(uint16(1000)) << 160) | (uint256(uint16(3000)) << 176)));
         hook = BastionHook(payable(hookAddr));
 
         // Deploy tokens
@@ -143,12 +143,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
     function _defaultTriggerConfig() internal pure returns (ITriggerOracle.TriggerConfig memory) {
         return ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -880,8 +879,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertTrue(c.isSet);
         assertEq(c.lockDuration, DEFAULT_LOCK);
         assertEq(c.vestingDuration, DEFAULT_VESTING);
-        assertEq(c.maxSingleLpRemovalBps, 5000);
-        assertEq(c.maxCumulativeLpRemovalBps, 8000);
+        assertEq(c.maxDailyLpRemovalBps, 1000);
+        assertEq(c.maxWeeklyLpRemovalBps, 3000);
         assertEq(c.maxDailySellBps, 300);
         assertGt(c.createdAt, 0);
     }
@@ -891,8 +890,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(poolId);
         // Default triggerConfig matches governance defaults
-        assertEq(c.maxSingleLpRemovalBps, 5000);
-        assertEq(c.maxCumulativeLpRemovalBps, 8000);
+        assertEq(c.maxDailyLpRemovalBps, 1000);
+        assertEq(c.maxWeeklyLpRemovalBps, 3000);
         assertEq(c.maxDailySellBps, 300);
     }
 
@@ -903,12 +902,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         manager.initialize(_key, SQRT_PRICE_1_1);
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5001, // > 5000 default
+            dailyLpRemovalBps: 1001, // > 1000 default
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -932,12 +930,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         manager.initialize(_key, SQRT_PRICE_1_1);
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 301, // > 300 default
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -961,12 +958,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         manager.initialize(_key, SQRT_PRICE_1_1);
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3001, // > 3000 default
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8001, // > 8000 default
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -991,12 +987,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         manager.initialize(_key, SQRT_PRICE_1_1);
 
         ITriggerOracle.TriggerConfig memory strictConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 3000, // < 5000 default
+            dailyLpRemovalBps: 500, // < 1000 default
+            weeklyLpRemovalBps: 1500, // < 3000 default
             dumpThresholdPercent: 200, // < 300 default
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 5000, // < 8000 default
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -1033,12 +1028,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         // Update TriggerOracle defaults
         vm.prank(governance);
         triggerOracle.setDefaultTriggerConfig(ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 3000,
+            dailyLpRemovalBps: 500,
+            weeklyLpRemovalBps: 1500,
             dumpThresholdPercent: 2000,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 5000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         }));
@@ -1047,8 +1041,8 @@ contract BastionHookIntegrationTest is Test, Deployers {
         BastionHook.PoolCommitment memory after_ = hook.getPoolCommitment(poolId);
         assertEq(after_.lockDuration, before.lockDuration);
         assertEq(after_.vestingDuration, before.vestingDuration);
-        assertEq(after_.maxSingleLpRemovalBps, before.maxSingleLpRemovalBps);
-        assertEq(after_.maxCumulativeLpRemovalBps, before.maxCumulativeLpRemovalBps);
+        assertEq(after_.maxDailyLpRemovalBps, before.maxDailyLpRemovalBps);
+        assertEq(after_.maxWeeklyLpRemovalBps, before.maxWeeklyLpRemovalBps);
         assertEq(after_.maxDailySellBps, before.maxDailySellBps);
     }
 
@@ -1096,8 +1090,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         _initPoolWithIssuer();
 
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(poolId);
-        assertEq(c.weeklyDumpWindowSeconds, 604800);
-        assertEq(c.weeklyDumpThresholdBps, 1500);
+        assertEq(c.maxWeeklySellBps, 1500);
     }
 
     function test_poolCommitment_revertsWeeklyDumpTooHigh() public {
@@ -1107,12 +1100,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         manager.initialize(_key, SQRT_PRICE_1_1);
 
         ITriggerOracle.TriggerConfig memory badConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1501 // > 1500 default
         });
@@ -1134,12 +1126,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
     function test_getDefaultTriggerConfig_returnsStruct() public view {
         ITriggerOracle.TriggerConfig memory cfg = triggerOracle.getDefaultTriggerConfig();
-        assertEq(cfg.lpRemovalThreshold, 5000);
+        assertEq(cfg.dailyLpRemovalBps, 1000);
+        assertEq(cfg.weeklyLpRemovalBps, 3000);
         assertEq(cfg.dumpThresholdPercent, 300);
         assertEq(cfg.dumpWindowSeconds, 86400);
         assertEq(cfg.taxDeviationThreshold, 500);
-        assertEq(cfg.slowRugWindowSeconds, 86400);
-        assertEq(cfg.slowRugCumulativeThreshold, 8000);
         assertEq(cfg.weeklyDumpWindowSeconds, 604800);
         assertEq(cfg.weeklyDumpThresholdPercent, 1500);
     }
@@ -1152,12 +1143,11 @@ contract BastionHookIntegrationTest is Test, Deployers {
         manager.initialize(_key, SQRT_PRICE_1_1);
 
         ITriggerOracle.TriggerConfig memory strictConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 500,
+            weeklyLpRemovalBps: 1500,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1000 // stricter than 1500 default
         });
@@ -1175,7 +1165,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         assertTrue(hook.isCommitmentStricterThanDefault(_poolId));
 
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(_poolId);
-        assertEq(c.weeklyDumpThresholdBps, 1000);
+        assertEq(c.maxWeeklySellBps, 1000);
     }
 
     // ═══════════════════════════════════════════════════════════════════

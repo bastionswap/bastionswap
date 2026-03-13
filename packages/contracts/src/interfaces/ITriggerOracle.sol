@@ -26,12 +26,11 @@ interface ITriggerOracle {
 
     /// @notice Configuration thresholds for trigger detection per pool.
     struct TriggerConfig {
-        uint16 lpRemovalThreshold;
+        uint16 dailyLpRemovalBps;
+        uint16 weeklyLpRemovalBps;
         uint16 dumpThresholdPercent;
         uint40 dumpWindowSeconds;
         uint16 taxDeviationThreshold;
-        uint40 slowRugWindowSeconds;
-        uint16 slowRugCumulativeThreshold;
         uint40 weeklyDumpWindowSeconds;
         uint16 weeklyDumpThresholdPercent;
     }

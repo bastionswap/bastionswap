@@ -9,22 +9,20 @@ import { ReputationEngineABI } from "@/config/abis";
 interface PoolCommitmentData {
   lockDuration: number | bigint;
   vestingDuration: number | bigint;
-  maxSingleLpRemovalBps: number | bigint;
-  maxCumulativeLpRemovalBps: number | bigint;
+  maxDailyLpRemovalBps: number | bigint;
+  maxWeeklyLpRemovalBps: number | bigint;
   maxDailySellBps: number | bigint;
-  weeklyDumpWindowSeconds: number | bigint;
-  weeklyDumpThresholdBps: number | bigint;
+  maxWeeklySellBps: number | bigint;
   createdAt: number | bigint;
   isSet: boolean;
 }
 
 interface TriggerConfigData {
-  lpRemovalThreshold: number | bigint;
+  dailyLpRemovalBps: number | bigint;
+  weeklyLpRemovalBps: number | bigint;
   dumpThresholdPercent: number | bigint;
   dumpWindowSeconds: number | bigint;
   taxDeviationThreshold: number | bigint;
-  slowRugWindowSeconds: number | bigint;
-  slowRugCumulativeThreshold: number | bigint;
   weeklyDumpWindowSeconds: number | bigint;
   weeklyDumpThresholdPercent: number | bigint;
 }
@@ -283,25 +281,32 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                 <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Trigger Thresholds</p>
                 {[
                   {
-                    label: "Max LP Removal / tx",
-                    value: formatBps(Number(triggerConfig.lpRemovalThreshold)),
-                    raw: Number(triggerConfig.lpRemovalThreshold),
-                    default_: 5000,
+                    label: "Daily LP Removal Limit",
+                    value: formatBps(Number(triggerConfig.dailyLpRemovalBps)),
+                    raw: Number(triggerConfig.dailyLpRemovalBps),
+                    default_: 1000,
                     lowerBetter: true,
                   },
                   {
-                    label: "Max Issuer Sell",
+                    label: "Weekly LP Removal Limit",
+                    value: formatBps(Number(triggerConfig.weeklyLpRemovalBps)),
+                    raw: Number(triggerConfig.weeklyLpRemovalBps),
+                    default_: 3000,
+                    lowerBetter: true,
+                  },
+                  {
+                    label: "Max Daily Issuer Sell",
                     value: formatBps(Number(triggerConfig.dumpThresholdPercent)),
                     raw: Number(triggerConfig.dumpThresholdPercent),
                     default_: 300,
                     lowerBetter: true,
                   },
                   {
-                    label: "Sell Window",
-                    value: formatDuration(Number(triggerConfig.dumpWindowSeconds)),
-                    raw: Number(triggerConfig.dumpWindowSeconds),
-                    default_: 86400,
-                    lowerBetter: false,
+                    label: "Max Weekly Issuer Sell",
+                    value: formatBps(Number(triggerConfig.weeklyDumpThresholdPercent)),
+                    raw: Number(triggerConfig.weeklyDumpThresholdPercent),
+                    default_: 1500,
+                    lowerBetter: true,
                   },
                   {
                     label: "Hidden Tax Threshold",
@@ -309,34 +314,6 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                     raw: Number(triggerConfig.taxDeviationThreshold),
                     default_: 500,
                     lowerBetter: true,
-                  },
-                  {
-                    label: "Cumulative LP Removal",
-                    value: formatBps(Number(triggerConfig.slowRugCumulativeThreshold)),
-                    raw: Number(triggerConfig.slowRugCumulativeThreshold),
-                    default_: 8000,
-                    lowerBetter: true,
-                  },
-                  {
-                    label: "LP Removal Window",
-                    value: formatDuration(Number(triggerConfig.slowRugWindowSeconds)),
-                    raw: Number(triggerConfig.slowRugWindowSeconds),
-                    default_: 86400,
-                    lowerBetter: false,
-                  },
-                  {
-                    label: "Weekly Issuer Sell",
-                    value: formatBps(Number(triggerConfig.weeklyDumpThresholdPercent)),
-                    raw: Number(triggerConfig.weeklyDumpThresholdPercent),
-                    default_: 1500,
-                    lowerBetter: true,
-                  },
-                  {
-                    label: "Weekly Sell Window",
-                    value: formatDuration(Number(triggerConfig.weeklyDumpWindowSeconds)),
-                    raw: Number(triggerConfig.weeklyDumpWindowSeconds),
-                    default_: 604800,
-                    lowerBetter: false,
                   },
                 ].map(({ label, value, raw, default_, lowerBetter }) => (
                   <div key={label} className="flex items-center justify-between text-sm">

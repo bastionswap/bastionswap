@@ -95,12 +95,11 @@ contract SeedTestnet is Script {
         });
 
         ITriggerOracle.TriggerConfig memory triggerConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });

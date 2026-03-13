@@ -86,9 +86,9 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         assembly { deployed := create(0, add(bytecode, 0x20), mload(bytecode)) }
         vm.etch(hookAddr, deployed.code);
         // Restore storage lost by vm.etch
-        vm.store(hookAddr, bytes32(uint256(22)), bytes32(uint256(uint160(governance))));
-        // Restore duration params: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days
-        vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120)));
+        vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint160(governance))));
+        // Restore duration params + LP removal defaults: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days, dailyLpRemovalBps=1000, weeklyLpRemovalBps=3000
+        vm.store(hookAddr, bytes32(uint256(26)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120) | (uint256(uint16(1000)) << 160) | (uint256(uint16(3000)) << 176)));
         hook = BastionHook(payable(hookAddr));
 
         // Wire up routers (hook.setBastionRouter requires _owner which is lost by vm.etch)
@@ -311,12 +311,11 @@ contract BastionRouterMultiHopTest is Test, Deployers {
         });
 
         ITriggerOracle.TriggerConfig memory triggerConfig = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 5000,
+            dailyLpRemovalBps: 1000,
+            weeklyLpRemovalBps: 3000,
             dumpThresholdPercent: 300,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 8000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });

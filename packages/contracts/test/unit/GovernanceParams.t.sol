@@ -253,48 +253,44 @@ contract GovernanceParamsTest is Test {
 
     function test_oracle_defaultTriggerConfig_initialized() public view {
         (
-            uint16 lpRemoval,
+            uint16 dailyLpRemoval,
+            uint16 weeklyLpRemoval,
             uint16 dumpThreshold,
             uint40 dumpWindow,
             uint16 taxDeviation,
-            uint40 slowRugWindow,
-            uint16 slowRugThreshold,
             ,
         ) = oracle.defaultTriggerConfig();
-        assertEq(lpRemoval, 5000);
+        assertEq(dailyLpRemoval, 1000);
+        assertEq(weeklyLpRemoval, 3000);
         assertEq(dumpThreshold, 300);
         assertEq(dumpWindow, 86400);
         assertEq(taxDeviation, 500);
-        assertEq(slowRugWindow, 86400);
-        assertEq(slowRugThreshold, 8000);
     }
 
     function test_oracle_setDefaultTriggerConfig_success() public {
         ITriggerOracle.TriggerConfig memory config = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 4000,
+            dailyLpRemovalBps: 800,
+            weeklyLpRemovalBps: 2000,
             dumpThresholdPercent: 2000,
             dumpWindowSeconds: 43200,
             taxDeviationThreshold: 300,
-            slowRugWindowSeconds: 172800,
-            slowRugCumulativeThreshold: 7000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
         vm.prank(governance);
         oracle.setDefaultTriggerConfig(config);
 
-        (uint16 lpRemoval,,,,,,, ) = oracle.defaultTriggerConfig();
-        assertEq(lpRemoval, 4000);
+        (uint16 dailyLpRemoval,,,,,, ) = oracle.defaultTriggerConfig();
+        assertEq(dailyLpRemoval, 800);
     }
 
     function test_oracle_setDefaultTriggerConfig_revertsNotGovernance() public {
         ITriggerOracle.TriggerConfig memory config = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 4000,
+            dailyLpRemovalBps: 800,
+            weeklyLpRemovalBps: 2000,
             dumpThresholdPercent: 2000,
             dumpWindowSeconds: 43200,
             taxDeviationThreshold: 300,
-            slowRugWindowSeconds: 172800,
-            slowRugCumulativeThreshold: 7000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -311,12 +307,11 @@ contract GovernanceParamsTest is Test {
         PoolId poolId = PoolId.wrap(bytes32(uint256(1)));
 
         ITriggerOracle.TriggerConfig memory config = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 6000,
+            dailyLpRemovalBps: 1200,
+            weeklyLpRemovalBps: 3500,
             dumpThresholdPercent: 4000,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 9000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });
@@ -324,19 +319,19 @@ contract GovernanceParamsTest is Test {
         oracle.updatePoolTriggerConfig(poolId, config);
 
         ITriggerOracle.TriggerConfig memory stored = oracle.getTriggerConfig(poolId);
-        assertEq(stored.lpRemovalThreshold, 6000);
+        assertEq(stored.dailyLpRemovalBps, 1200);
+        assertEq(stored.weeklyLpRemovalBps, 3500);
         assertTrue(oracle.isConfigSet(poolId));
     }
 
     function test_oracle_updatePoolTriggerConfig_revertsNotGovernance() public {
         PoolId poolId = PoolId.wrap(bytes32(uint256(1)));
         ITriggerOracle.TriggerConfig memory config = ITriggerOracle.TriggerConfig({
-            lpRemovalThreshold: 6000,
+            dailyLpRemovalBps: 1200,
+            weeklyLpRemovalBps: 3500,
             dumpThresholdPercent: 4000,
             dumpWindowSeconds: 86400,
             taxDeviationThreshold: 500,
-            slowRugWindowSeconds: 86400,
-            slowRugCumulativeThreshold: 9000,
             weeklyDumpWindowSeconds: 604800,
             weeklyDumpThresholdPercent: 1500
         });

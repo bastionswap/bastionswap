@@ -10,11 +10,10 @@ interface IBastionHook {
     struct PoolCommitment {
         uint40 lockDuration;
         uint40 vestingDuration;
-        uint16 maxSingleLpRemovalBps;
-        uint16 maxCumulativeLpRemovalBps;
+        uint16 maxDailyLpRemovalBps;
+        uint16 maxWeeklyLpRemovalBps;
         uint16 maxDailySellBps;
-        uint40 weeklyDumpWindowSeconds;
-        uint16 weeklyDumpThresholdBps;
+        uint16 maxWeeklySellBps;
         uint40 createdAt;
         bool isSet;
     }

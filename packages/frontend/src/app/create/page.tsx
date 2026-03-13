@@ -68,15 +68,16 @@ interface CommitmentPreset {
   vestingDays: number;
   dailyWithdrawLimit: number;
   maxSellPercent: number;
-  lpRemoval: number;
+  dailyLpRemoval: number;
+  weeklyLpRemoval: number;
   dump: number;
-  slowRug: number;
+  weeklySell: number;
 }
 
 const COMMITMENT_PRESETS: Record<Exclude<CommitmentMode, "custom">, CommitmentPreset> = {
-  quick:    { lockDays: 7,  vestingDays: 23,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 300, slowRug: 8000 },
-  standard: { lockDays: 7,  vestingDays: 83,  dailyWithdrawLimit: 500, maxSellPercent: 300, lpRemoval: 5000, dump: 300, slowRug: 8000 },
-  strict:   { lockDays: 30, vestingDays: 150, dailyWithdrawLimit: 300, maxSellPercent: 200, lpRemoval: 3000, dump: 100, slowRug: 5000 },
+  quick:    { lockDays: 7,  vestingDays: 23,  dailyWithdrawLimit: 500, maxSellPercent: 300, dailyLpRemoval: 1000, dump: 300, weeklyLpRemoval: 3000, weeklySell: 1500 },
+  standard: { lockDays: 7,  vestingDays: 83,  dailyWithdrawLimit: 500, maxSellPercent: 300, dailyLpRemoval: 1000, dump: 300, weeklyLpRemoval: 3000, weeklySell: 1500 },
+  strict:   { lockDays: 30, vestingDays: 150, dailyWithdrawLimit: 300, maxSellPercent: 200, dailyLpRemoval: 500, dump: 100, weeklyLpRemoval: 1500, weeklySell: 800 },
 };
 
 // Keep backward compatibility alias
@@ -174,9 +175,10 @@ function CreatePoolContent() {
   const [vestingDays, setVestingDays] = useState(83);
   const [copiedHash, setCopiedHash] = useState(false);
   const [triggerThresholds, setTriggerThresholds] = useState({
-    lpRemoval: 5000,
+    dailyLpRemoval: 1000,
+    weeklyLpRemoval: 3000,
     dump: 300,
-    slowRug: 8000,
+    weeklySell: 1500,
   });
 
   const activeLockDays = vestingMode === "custom" ? lockDays : COMMITMENT_PRESETS[vestingMode].lockDays;
@@ -227,10 +229,8 @@ function CreatePoolContent() {
     isPoolAlreadyExists ? tokenAddress : undefined
   );
 
-  // Active trigger thresholds (from preset or custom)
-  const activeTrigger = vestingMode === "custom"
-    ? triggerThresholds
-    : { lpRemoval: COMMITMENT_PRESETS[vestingMode].lpRemoval, dump: COMMITMENT_PRESETS[vestingMode].dump, slowRug: COMMITMENT_PRESETS[vestingMode].slowRug };
+  // Active trigger thresholds (always from state — presets initialize state, user can adjust)
+  const activeTrigger = triggerThresholds;
 
   const activeCommitment = vestingMode === "custom"
     ? commitment
@@ -251,23 +251,22 @@ function CreatePoolContent() {
       vestingDuration: activeVestingDays * 86400,
       commitment: {
         dailyWithdrawLimit: activeCommitment.dailyWithdrawLimit,
-        maxSellPercent: activeCommitment.maxSellPercent,
+        maxSellPercent: activeTrigger.dump,
       },
       triggerConfig: {
-        lpRemovalThreshold: activeTrigger.lpRemoval,
+        dailyLpRemovalBps: activeTrigger.dailyLpRemoval,
+        weeklyLpRemovalBps: activeTrigger.weeklyLpRemoval,
         dumpThresholdPercent: activeTrigger.dump,
         dumpWindowSeconds: 86400,
         taxDeviationThreshold: 500,
-        slowRugWindowSeconds: 86400,
-        slowRugCumulativeThreshold: activeTrigger.slowRug,
         weeklyDumpWindowSeconds: 604800,
-        weeklyDumpThresholdPercent: 1500,
+        weeklyDumpThresholdPercent: activeTrigger.weeklySell,
       },
     });
   };
 
   const trustLevel =
-    totalDays >= 90 && commitment.maxSellPercent <= 300
+    totalDays >= 90 && triggerThresholds.dump <= 300
       ? "High"
       : totalDays >= 30
         ? "Medium"
@@ -628,7 +627,7 @@ function CreatePoolContent() {
                       setLockDays(preset.lockDays);
                       setVestingDays(preset.vestingDays);
                       setCommitment({ dailyWithdrawLimit: preset.dailyWithdrawLimit, maxSellPercent: preset.maxSellPercent });
-                      setTriggerThresholds({ lpRemoval: preset.lpRemoval, dump: preset.dump, slowRug: preset.slowRug });
+                      setTriggerThresholds({ dailyLpRemoval: preset.dailyLpRemoval, weeklyLpRemoval: preset.weeklyLpRemoval, dump: preset.dump, weeklySell: preset.weeklySell });
                     }
                   }}
                   className={`rounded-xl border px-3 py-2.5 text-center transition-all ${
@@ -686,71 +685,6 @@ function CreatePoolContent() {
                 </div>
                 <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 text-center">
                   Total: <span className="font-semibold">{totalDays} days</span>
-                </div>
-
-                {/* Trigger Threshold Sliders */}
-                <div className="pt-4 border-t border-gray-200">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Trigger Detection Thresholds</p>
-                  <p className="text-xs text-gray-400 mb-4">Lower values = stricter protection for buyers</p>
-                  <div className="space-y-5">
-                    <div>
-                      <div className="flex justify-between text-sm mb-3">
-                        <span className="text-gray-600 font-medium">Max LP Removal / tx</span>
-                        <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.lpRemoval)}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={1000}
-                        max={5000}
-                        step={100}
-                        value={triggerThresholds.lpRemoval}
-                        onChange={(e) => setTriggerThresholds({ ...triggerThresholds, lpRemoval: parseInt(e.target.value) })}
-                        className="w-full accent-bastion-600"
-                      />
-                      <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                        <span className="text-emerald-500">10% (Strict)</span>
-                        <span>50% (Default)</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-sm mb-3">
-                        <span className="text-gray-600 font-medium">Max Cumulative LP / 24h</span>
-                        <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.slowRug)}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={3000}
-                        max={8000}
-                        step={100}
-                        value={triggerThresholds.slowRug}
-                        onChange={(e) => setTriggerThresholds({ ...triggerThresholds, slowRug: parseInt(e.target.value) })}
-                        className="w-full accent-bastion-600"
-                      />
-                      <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                        <span className="text-emerald-500">30% (Strict)</span>
-                        <span>80% (Default)</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-sm mb-3">
-                        <span className="text-gray-600 font-medium">Max Daily Issuer Sell</span>
-                        <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.dump)}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={50}
-                        max={300}
-                        step={10}
-                        value={triggerThresholds.dump}
-                        onChange={(e) => setTriggerThresholds({ ...triggerThresholds, dump: parseInt(e.target.value) })}
-                        className="w-full accent-bastion-600"
-                      />
-                      <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                        <span className="text-emerald-500">0.5% (Strict)</span>
-                        <span>3% (Default)</span>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
@@ -874,28 +808,87 @@ function CreatePoolContent() {
                   <span>20% (Relaxed)</span>
                 </div>
               </div>
+
               <div>
                 <div className="flex justify-between text-sm mb-3">
-                  <span className="text-gray-600 font-medium">Max Sell per 24h</span>
-                  <span className="text-gray-900 font-semibold tabular-nums">{formatBps(commitment.maxSellPercent)}</span>
+                  <span className="text-gray-600 font-medium">Daily LP Removal Limit</span>
+                  <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.dailyLpRemoval)}</span>
                 </div>
                 <input
                   type="range"
                   min={100}
                   max={1000}
                   step={50}
-                  value={commitment.maxSellPercent}
-                  onChange={(e) =>
-                    setCommitment({
-                      ...commitment,
-                      maxSellPercent: parseInt(e.target.value),
-                    })
-                  }
+                  value={triggerThresholds.dailyLpRemoval}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    setTriggerThresholds({ ...triggerThresholds, dailyLpRemoval: v, weeklyLpRemoval: Math.max(triggerThresholds.weeklyLpRemoval, v) });
+                  }}
                   className="w-full accent-bastion-600"
                 />
                 <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                  <span>1% (Strict)</span>
-                  <span>10% (Relaxed)</span>
+                  <span className="text-emerald-500">1% (Strict)</span>
+                  <span>10% (Default)</span>
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-sm mb-3">
+                  <span className="text-gray-600 font-medium">Weekly LP Removal Limit</span>
+                  <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.weeklyLpRemoval)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={500}
+                  max={3000}
+                  step={100}
+                  value={triggerThresholds.weeklyLpRemoval}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    setTriggerThresholds({ ...triggerThresholds, weeklyLpRemoval: v, dailyLpRemoval: Math.min(triggerThresholds.dailyLpRemoval, v) });
+                  }}
+                  className="w-full accent-bastion-600"
+                />
+                <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                  <span className="text-emerald-500">5% (Strict)</span>
+                  <span>30% (Default)</span>
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-sm mb-3">
+                  <span className="text-gray-600 font-medium">Max Daily Issuer Sell</span>
+                  <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.dump)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={300}
+                  step={10}
+                  value={triggerThresholds.dump}
+                  onChange={(e) => setTriggerThresholds({ ...triggerThresholds, dump: parseInt(e.target.value) })}
+                  className="w-full accent-bastion-600"
+                />
+                <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                  <span className="text-emerald-500">0.5% (Strict)</span>
+                  <span>3% (Default)</span>
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-sm mb-3">
+                  <span className="text-gray-600 font-medium">Max Weekly Issuer Sell</span>
+                  <span className="text-gray-900 font-semibold tabular-nums">{formatBps(triggerThresholds.weeklySell)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={300}
+                  max={1500}
+                  step={50}
+                  value={triggerThresholds.weeklySell}
+                  onChange={(e) => setTriggerThresholds({ ...triggerThresholds, weeklySell: parseInt(e.target.value) })}
+                  className="w-full accent-bastion-600"
+                />
+                <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+                  <span className="text-emerald-500">3% (Strict)</span>
+                  <span>15% (Default)</span>
                 </div>
               </div>
             </div>
@@ -904,7 +897,7 @@ function CreatePoolContent() {
               <button
                 onClick={() => {
                   setCommitment(DEFAULT_COMMITMENT);
-                  setTriggerThresholds({ lpRemoval: 5000, dump: 300, slowRug: 8000 });
+                  setTriggerThresholds({ dailyLpRemoval: 1000, weeklyLpRemoval: 3000, dump: 300, weeklySell: 1500 });
                 }}
                 className="text-xs text-bastion-600 hover:text-bastion-700 hover:underline transition-colors"
               >
@@ -913,7 +906,7 @@ function CreatePoolContent() {
               <button
                 onClick={() => {
                   setCommitment(DEFAULT_COMMITMENT);
-                  setTriggerThresholds({ lpRemoval: 5000, dump: 300, slowRug: 8000 });
+                  setTriggerThresholds({ dailyLpRemoval: 1000, weeklyLpRemoval: 3000, dump: 300, weeklySell: 1500 });
                   setVestingMode("standard");
                   setStep(4);
                 }}
@@ -988,22 +981,22 @@ function CreatePoolContent() {
               <span className="text-gray-500">Daily Withdraw</span>
               <span className="text-gray-900 font-medium">{formatBps(activeCommitment.dailyWithdrawLimit)}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Max Sell / 24h</span>
-              <span className="text-gray-900 font-medium">{formatBps(activeCommitment.maxSellPercent)}</span>
-            </div>
             <hr className="border-gray-200" />
             <div className="flex justify-between">
-              <span className="text-gray-500">Max LP Removal / tx</span>
-              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.lpRemoval)}</span>
+              <span className="text-gray-500">Daily LP Removal Limit</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.dailyLpRemoval)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Max Cumulative LP / 24h</span>
-              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.slowRug)}</span>
+              <span className="text-gray-500">Weekly LP Removal Limit</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.weeklyLpRemoval)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Max Daily Issuer Sell</span>
               <span className="text-gray-900 font-medium">{formatBps(activeTrigger.dump)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Max Weekly Issuer Sell</span>
+              <span className="text-gray-900 font-medium">{formatBps(activeTrigger.weeklySell)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-gray-500">Protection</span>
