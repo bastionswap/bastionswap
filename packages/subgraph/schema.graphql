@@ -1,4 +1,4 @@
-type Pool @entity {
+type Pool @entity(immutable: false) {
   id: ID! # poolId (bytes32)
   token0: Bytes!
   token1: Bytes!
@@ -25,7 +25,7 @@ type Pool @entity {
   createdTx: Bytes!
 }
 
-type Escrow @entity {
+type Escrow @entity(immutable: false) {
   id: ID! # escrowId (uint256 hex)
   pool: Pool!
   issuer: Bytes!
@@ -39,13 +39,13 @@ type Escrow @entity {
   createdAt: BigInt!
 }
 
-type Commitment @entity {
+type Commitment @entity(immutable: true) {
   id: ID! # escrowId
   escrow: Escrow!
   maxSellPercent: BigInt!
 }
 
-type InsurancePool @entity {
+type InsurancePool @entity(immutable: false) {
   id: ID! # poolId
   pool: Pool!
   balance: BigDecimal!
@@ -60,7 +60,7 @@ type InsurancePool @entity {
   holderCount: Int!
 }
 
-type TriggerEvent @entity {
+type TriggerEvent @entity(immutable: true) {
   id: ID! # poolId-triggerType-timestamp
   pool: Pool!
   triggerType: Int!
@@ -73,7 +73,7 @@ type TriggerEvent @entity {
   withMerkleRoot: Boolean!
 }
 
-type Issuer @entity {
+type Issuer @entity(immutable: false) {
   id: ID! # issuer address
   pools: [Pool!]! @derivedFrom(field: "issuer")
   reputationScore: BigInt!
@@ -83,7 +83,7 @@ type Issuer @entity {
   lastUpdated: BigInt!
 }
 
-type Claim @entity {
+type Claim @entity(immutable: true) {
   id: ID! # poolId-holderAddress
   pool: Pool!
   holder: Bytes!
@@ -93,7 +93,7 @@ type Claim @entity {
   transactionHash: Bytes!
 }
 
-type Position @entity {
+type Position @entity(immutable: false) {
   id: ID! # poolId-user-tickLower-tickUpper
   pool: Pool!
   owner: Bytes!
@@ -105,7 +105,7 @@ type Position @entity {
   lastUpdatedAt: BigInt!
 }
 
-type ProtocolStats @entity {
+type ProtocolStats @entity(immutable: false) {
   id: ID! # "global"
   totalBastionPools: Int!
   totalStandardPools: Int!
@@ -115,7 +115,7 @@ type ProtocolStats @entity {
   totalCompensationPaid: BigDecimal!
 }
 
-type Swap @entity {
+type Swap @entity(immutable: true) {
   id: ID! # txHash-logIndex
   pool: Pool!
   sender: Bytes!
@@ -128,7 +128,7 @@ type Swap @entity {
   transaction: Bytes!
 }
 
-type LiquidityEvent @entity {
+type LiquidityEvent @entity(immutable: true) {
   id: ID! # txHash-logIndex
   pool: Pool!
   sender: Bytes!
@@ -143,7 +143,7 @@ type LiquidityEvent @entity {
   transaction: Bytes!
 }
 
-type PoolHourData @entity {
+type PoolHourData @entity(immutable: false) {
   id: ID! # poolId-hourStartUnix
   pool: Pool!
   hourStartUnix: Int!
@@ -156,7 +156,7 @@ type PoolHourData @entity {
   txCount: Int!
 }
 
-type PoolDayData @entity {
+type PoolDayData @entity(immutable: false) {
   id: ID! # poolId-dayStartUnix
   pool: Pool!
   dayStartUnix: Int!
