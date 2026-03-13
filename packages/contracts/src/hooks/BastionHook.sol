@@ -148,11 +148,11 @@ contract BastionHook is BaseTestHooks {
     /// @notice Minimum vesting duration issuer can set (default 7 days)
     uint40 public minVestingDuration;
 
-    /// @notice Default daily LP removal limit (default 10%)
-    uint16 public defaultDailyLpRemovalBps = 1000;
+    /// @notice Maximum daily LP removal limit (default 10%). Issuers can only commit ≤ this.
+    uint16 public maxDailyLpRemovalBps = 1000;
 
-    /// @notice Default weekly LP removal limit (default 30%)
-    uint16 public defaultWeeklyLpRemovalBps = 3000;
+    /// @notice Maximum weekly LP removal limit (default 30%). Issuers can only commit ≤ this.
+    uint16 public maxWeeklyLpRemovalBps = 3000;
 
     // ─── Errors ───────────────────────────────────────────────────────
 
@@ -203,8 +203,8 @@ contract BastionHook is BaseTestHooks {
     event DefaultVestingDurationUpdated(uint256 newDuration);
     event MinLockDurationUpdated(uint256 newDuration);
     event MinVestingDurationUpdated(uint256 newDuration);
-    event DefaultDailyLpRemovalBpsUpdated(uint256 newBps);
-    event DefaultWeeklyLpRemovalBpsUpdated(uint256 newBps);
+    event MaxDailyLpRemovalBpsUpdated(uint256 newBps);
+    event MaxWeeklyLpRemovalBpsUpdated(uint256 newBps);
     event PoolCommitmentSet(PoolId indexed poolId, address indexed issuer, PoolCommitment commitment);
     event PoolLiquidityRatio(PoolId indexed poolId, uint256 lpRatioBps);
 
@@ -655,8 +655,8 @@ contract BastionHook is BaseTestHooks {
         // Thresholds: stricter if lower than defaults from TriggerOracle
         ITriggerOracle.TriggerConfig memory def = triggerOracle.getDefaultTriggerConfig();
 
-        if (c.maxDailyLpRemovalBps < defaultDailyLpRemovalBps) return true;
-        if (c.maxWeeklyLpRemovalBps < defaultWeeklyLpRemovalBps) return true;
+        if (c.maxDailyLpRemovalBps < maxDailyLpRemovalBps) return true;
+        if (c.maxWeeklyLpRemovalBps < maxWeeklyLpRemovalBps) return true;
         if (c.maxDailySellBps < def.dumpThresholdPercent) return true;
         if (c.maxWeeklySellBps < def.weeklyDumpThresholdPercent) return true;
 
@@ -802,18 +802,18 @@ contract BastionHook is BaseTestHooks {
         emit MinVestingDurationUpdated(newDuration);
     }
 
-    function setDefaultDailyLpRemovalBps(uint16 bps) external {
+    function setMaxDailyLpRemovalBps(uint16 bps) external {
         if (msg.sender != GOVERNANCE) revert OnlyGovernance();
         if (bps < 100 || bps > 5000) revert ValueOutOfRange();
-        defaultDailyLpRemovalBps = bps;
-        emit DefaultDailyLpRemovalBpsUpdated(bps);
+        maxDailyLpRemovalBps = bps;
+        emit MaxDailyLpRemovalBpsUpdated(bps);
     }
 
-    function setDefaultWeeklyLpRemovalBps(uint16 bps) external {
+    function setMaxWeeklyLpRemovalBps(uint16 bps) external {
         if (msg.sender != GOVERNANCE) revert OnlyGovernance();
         if (bps < 500 || bps > 8000) revert ValueOutOfRange();
-        defaultWeeklyLpRemovalBps = bps;
-        emit DefaultWeeklyLpRemovalBpsUpdated(bps);
+        maxWeeklyLpRemovalBps = bps;
+        emit MaxWeeklyLpRemovalBpsUpdated(bps);
     }
 
     // ═══════════════════════════════════════════════════════════════════

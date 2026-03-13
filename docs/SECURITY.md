@@ -34,8 +34,8 @@ These properties must **always** hold:
 **Attack**: Issuer removes all liquidity in a single transaction, crashing the token price.
 
 **Mitigation (v1 — revert-only enforcement)**:
-- **Daily limit**: `beforeRemoveLiquidity` reverts if daily LP removals within a 24h rolling window exceed threshold (default: >10% of initial LP) → `DailyLpRemovalExceeded`
-- **Weekly limit**: `beforeRemoveLiquidity` reverts if weekly LP removals within a 7-day rolling window exceed threshold (default: >30% of initial LP) → `WeeklyLpRemovalExceeded`
+- **Daily limit**: `beforeRemoveLiquidity` reverts if daily LP removals within a 24h rolling window exceed `maxDailyLpRemovalBps` (default 10% of initial LP) → `DailyLpRemovalExceeded`
+- **Weekly limit**: `beforeRemoveLiquidity` reverts if weekly LP removals within a 7-day rolling window exceed `maxWeeklyLpRemovalBps` (default 30% of initial LP) → `WeeklyLpRemovalExceeded`
 - **Vesting enforcement**: Cannot remove more LP than currently vested
 - All checks are pre-emptive — the state change rolls back on revert
 - Trigger-based LP seizure infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`) is preserved for v2 watcher network

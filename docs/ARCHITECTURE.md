@@ -266,6 +266,8 @@ The trigger infrastructure (`executeTrigger()`, `forceRemoveIssuerLP`, Insurance
 | BastionHook | `defaultVestingDuration` | 83 days | Default linear vesting period |
 | BastionHook | `minLockDuration` | 7 days | Minimum allowed lock-up |
 | BastionHook | `minVestingDuration` | 7 days | Minimum allowed vesting |
+| BastionHook | `maxDailyLpRemovalBps` | 1000 (10%) | Max daily LP removal limit for issuers |
+| BastionHook | `maxWeeklyLpRemovalBps` | 3000 (30%) | Max weekly LP removal limit for issuers |
 | BastionHook | `maxPoolTVL` | ETH: 2 ether, WETH: 2 ether, USDC: 5000e6 | Per-token base reserve cap (0 = unlimited) |
 | EscrowVault | `MIN_LOCK_DURATION` | 7 days | Safety floor (immutable) |
 | EscrowVault | `MIN_VESTING_DURATION` | 7 days | Safety floor (immutable) |
