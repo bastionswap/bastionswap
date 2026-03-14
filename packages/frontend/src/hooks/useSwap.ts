@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useReceiptWithTimeout } from "./useReceiptTimeout";
 import {
   useWriteContract,
@@ -10,11 +10,13 @@ import {
   usePublicClient,
   useChainId,
   useSignTypedData,
+  useAccount,
 } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
-import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionResult, encodeAbiParameters, parseAbiParameters } from "viem";
+import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionResult, decodeErrorResult, encodeAbiParameters, parseAbiParameters } from "viem";
 import { getContracts } from "@/config/contracts";
-import { BastionSwapRouterABI } from "@/config/abis";
+import { BastionSwapRouterABI, BastionHookABI, PoolManagerABI } from "@/config/abis";
+import { parseErrorMessage, matchSelector } from "@/utils/errorMessages";
 
 const ERC20_ABI = [
   {
@@ -84,6 +86,88 @@ function generatePermit2Nonce(): bigint {
   const timestamp = BigInt(Date.now());
   const random = BigInt(Math.floor(Math.random() * 0xFFFFFFFF));
   return (timestamp << 32n) | random;
+}
+
+// ─── Error re-simulation helpers ──────────────────────────────────
+
+/** Combined error ABI entries from all contracts for revert data decoding */
+const COMBINED_ERROR_ABI = [
+  ...(BastionHookABI as any[]).filter((e) => e.type === "error"),
+  ...(BastionSwapRouterABI as any[]).filter((e) => e.type === "error"),
+  ...(PoolManagerABI as any[]).filter((e) => e.type === "error"),
+];
+
+/** Walk the error cause chain looking for hex revert data */
+function extractRevertDataFromError(error: unknown): `0x${string}` | null {
+  if (!error || typeof error !== "object") return null;
+  let e: any = error;
+  for (let depth = 0; depth < 10 && e; depth++) {
+    // .data as hex string (RawContractError, RpcRequestError)
+    if (typeof e.data === "string" && e.data.startsWith("0x") && e.data.length >= 10) {
+      return e.data as `0x${string}`;
+    }
+    // .data as object with nested .data (some viem wrappers)
+    if (e.data && typeof e.data === "object" && typeof e.data.data === "string" && e.data.data.startsWith("0x")) {
+      return e.data.data as `0x${string}`;
+    }
+    // .details may contain hex (some RPCs embed revert data in the error message)
+    if (typeof e.details === "string") {
+      const hexMatch = e.details.match(/(?:^|[\s:])?(0x[0-9a-fA-F]{8,})/);
+      if (hexMatch) return hexMatch[1] as `0x${string}`;
+    }
+    e = e.cause;
+  }
+  // Try .walk() for viem errors
+  if (typeof (error as any).walk === "function") {
+    try {
+      const walked = (error as any).walk((e: any) => typeof e?.data === "string" && e.data.startsWith("0x"));
+      if (walked?.data && typeof walked.data === "string") return walked.data as `0x${string}`;
+    } catch {}
+  }
+  return null;
+}
+
+/** Encoded calldata + value for exact replay */
+interface RawCallData {
+  data: `0x${string}`;
+  value: bigint;
+}
+
+/**
+ * Re-simulate a failed swap via eth_call to extract revert data.
+ * Replays the exact same call — eth_call often returns revert data
+ * even when eth_estimateGas (used by writeContract internally) doesn't.
+ */
+async function resimulateForError(
+  publicClient: any,
+  routerAddr: `0x${string}`,
+  account: `0x${string}`,
+  callData: RawCallData,
+): Promise<string | null> {
+  try {
+    await publicClient.call({
+      to: routerAddr,
+      data: callData.data,
+      account,
+      value: callData.value,
+    });
+    return null; // Simulation passed — error was elsewhere
+  } catch (err) {
+    const revertData = extractRevertDataFromError(err);
+    if (!revertData) return null;
+
+    // Try friendly message via selector map (handles WrappedError unwrapping)
+    const friendly = matchSelector(revertData);
+    if (friendly) return friendly;
+
+    // Try decoding error name via combined ABI
+    try {
+      const decoded = decodeErrorResult({ abi: COMBINED_ERROR_ABI as any, data: revertData });
+      return `Transaction failed: ${decoded.errorName}`;
+    } catch {}
+
+    return null;
+  }
 }
 
 // ─── Token Allowance (checks against Permit2) ──────────────────────────────────
@@ -238,6 +322,8 @@ export interface SwapConfig {
 export function useExecuteSwap() {
   const chainId = useChainId();
   const contracts = getContracts(chainId);
+  const publicClient = usePublicClient();
+  const { address: account } = useAccount();
 
   const {
     signTypedData,
@@ -262,6 +348,29 @@ export function useExecuteSwap() {
   const [pendingSwap, setPendingSwap] = useState<SwapConfig | null>(null);
   const [permitNonce, setPermitNonce] = useState<bigint>(0n);
   const [permitDeadline, setPermitDeadline] = useState<bigint>(0n);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isDecodingError, setIsDecodingError] = useState(false);
+  const lastCallRef = useRef<RawCallData | null>(null);
+
+  // When writeContract fails, re-simulate via eth_call to get decoded revert reason
+  useEffect(() => {
+    if (writeError && lastCallRef.current && publicClient && account && contracts) {
+      setIsDecodingError(true);
+      resimulateForError(
+        publicClient,
+        contracts.BastionSwapRouter as `0x${string}`,
+        account,
+        lastCallRef.current,
+      )
+        .then((decoded) => { setErrorMessage(decoded || parseErrorMessage(writeError)); })
+        .catch(() => { setErrorMessage(parseErrorMessage(writeError)); })
+        .finally(() => { setIsDecodingError(false); });
+    } else if (!writeError) {
+      setErrorMessage(null);
+      setIsDecodingError(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [writeError]);
 
   // When signature is received, submit the swap with Permit2
   useEffect(() => {
@@ -281,24 +390,36 @@ export function useExecuteSwap() {
         signature,
       };
 
+      const args = [
+        {
+          currency0: config.currency0,
+          currency1: config.currency1,
+          fee: config.fee,
+          tickSpacing: config.tickSpacing,
+          hooks: config.hooks,
+        },
+        config.zeroForOne,
+        config.amountIn,
+        config.minAmountOut,
+        config.deadline,
+        permitSingle,
+      ] as const;
+
+      // Store encoded calldata for re-simulation (exact same call)
+      lastCallRef.current = {
+        data: encodeFunctionData({
+          abi: BastionSwapRouterABI,
+          functionName: "swapExactInputPermit2",
+          args,
+        }),
+        value: 0n,
+      };
+
       writeContract({
         address: contracts.BastionSwapRouter as `0x${string}`,
         abi: BastionSwapRouterABI,
         functionName: "swapExactInputPermit2",
-        args: [
-          {
-            currency0: config.currency0,
-            currency1: config.currency1,
-            fee: config.fee,
-            tickSpacing: config.tickSpacing,
-            hooks: config.hooks,
-          },
-          config.zeroForOne,
-          config.amountIn,
-          config.minAmountOut,
-          config.deadline,
-          permitSingle,
-        ],
+        args,
         value: 0n,
       });
       setPendingSwap(null);
@@ -308,33 +429,41 @@ export function useExecuteSwap() {
 
   const swap = (config: SwapConfig) => {
     if (!contracts) return;
+    setErrorMessage(null);
 
     const inputToken = config.zeroForOne ? config.currency0 : config.currency1;
     const isNativeInput = inputToken === "0x0000000000000000000000000000000000000000";
+    const poolKey = {
+      currency0: config.currency0,
+      currency1: config.currency1,
+      fee: config.fee,
+      tickSpacing: config.tickSpacing,
+      hooks: config.hooks,
+    };
+    const swapArgs = [poolKey, config.zeroForOne, config.amountIn, config.minAmountOut, config.deadline] as const;
 
     if (isNativeInput) {
+      // Store encoded calldata for re-simulation
+      lastCallRef.current = {
+        data: encodeFunctionData({
+          abi: BastionSwapRouterABI,
+          functionName: "swapExactInput",
+          args: swapArgs,
+        }),
+        value: config.value || 0n,
+      };
+
       // Native ETH — use original swapExactInput directly (no permit needed)
       writeContract({
         address: contracts.BastionSwapRouter as `0x${string}`,
         abi: BastionSwapRouterABI,
         functionName: "swapExactInput",
-        args: [
-          {
-            currency0: config.currency0,
-            currency1: config.currency1,
-            fee: config.fee,
-            tickSpacing: config.tickSpacing,
-            hooks: config.hooks,
-          },
-          config.zeroForOne,
-          config.amountIn,
-          config.minAmountOut,
-          config.deadline,
-        ],
+        args: swapArgs,
         value: config.value || 0n,
       });
     } else {
       // ERC20 input — sign Permit2 first, then submit swap
+      // lastCallRef will be updated in the Permit2 useEffect with the full calldata
       const nonce = generatePermit2Nonce();
       const deadline = config.deadline;
       const routerAddress = contracts.BastionSwapRouter as `0x${string}`;
@@ -368,6 +497,9 @@ export function useExecuteSwap() {
     resetSign();
     resetWrite();
     setPendingSwap(null);
+    setErrorMessage(null);
+    setIsDecodingError(false);
+    lastCallRef.current = null;
   };
 
   return {
@@ -377,6 +509,8 @@ export function useExecuteSwap() {
     isConfirming,
     isSuccess,
     error: signError || writeError,
+    errorMessage: signError ? parseErrorMessage(signError) : errorMessage,
+    isDecodingError,
     reset,
   };
 }
@@ -446,6 +580,8 @@ export interface MultiHopSwapConfig {
 export function useExecuteMultiHopSwap() {
   const chainId = useChainId();
   const contracts = getContracts(chainId);
+  const publicClient = usePublicClient();
+  const { address: account } = useAccount();
 
   const {
     signTypedData,
@@ -470,6 +606,29 @@ export function useExecuteMultiHopSwap() {
   const [pendingSwap, setPendingSwap] = useState<MultiHopSwapConfig | null>(null);
   const [permitNonce, setPermitNonce] = useState<bigint>(0n);
   const [permitDeadline, setPermitDeadline] = useState<bigint>(0n);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isDecodingError, setIsDecodingError] = useState(false);
+  const lastCallRef = useRef<RawCallData | null>(null);
+
+  // When writeContract fails, re-simulate via eth_call to get decoded revert reason
+  useEffect(() => {
+    if (writeError && lastCallRef.current && publicClient && account && contracts) {
+      setIsDecodingError(true);
+      resimulateForError(
+        publicClient,
+        contracts.BastionSwapRouter as `0x${string}`,
+        account,
+        lastCallRef.current,
+      )
+        .then((decoded) => { setErrorMessage(decoded || parseErrorMessage(writeError)); })
+        .catch(() => { setErrorMessage(parseErrorMessage(writeError)); })
+        .finally(() => { setIsDecodingError(false); });
+    } else if (!writeError) {
+      setErrorMessage(null);
+      setIsDecodingError(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [writeError]);
 
   // When signature is received, submit the multi-hop swap with Permit2
   useEffect(() => {
@@ -488,17 +647,29 @@ export function useExecuteMultiHopSwap() {
         signature,
       };
 
+      const args = [
+        config.steps,
+        config.amountIn,
+        config.minAmountOut,
+        config.deadline,
+        permitSingle,
+      ] as const;
+
+      // Store encoded calldata for re-simulation (exact same call)
+      lastCallRef.current = {
+        data: encodeFunctionData({
+          abi: BastionSwapRouterABI,
+          functionName: "swapMultiHopPermit2",
+          args,
+        }),
+        value: 0n,
+      };
+
       writeContract({
         address: contracts.BastionSwapRouter as `0x${string}`,
         abi: BastionSwapRouterABI,
         functionName: "swapMultiHopPermit2",
-        args: [
-          config.steps,
-          config.amountIn,
-          config.minAmountOut,
-          config.deadline,
-          permitSingle,
-        ],
+        args,
         value: 0n,
       });
       setPendingSwap(null);
@@ -508,23 +679,31 @@ export function useExecuteMultiHopSwap() {
 
   const swap = (config: MultiHopSwapConfig) => {
     if (!contracts) return;
+    setErrorMessage(null);
 
     const isNativeInput = config.inputToken === "0x0000000000000000000000000000000000000000";
+    const swapArgs = [config.steps, config.amountIn, config.minAmountOut, config.deadline] as const;
 
     if (isNativeInput) {
+      // Store encoded calldata for re-simulation
+      lastCallRef.current = {
+        data: encodeFunctionData({
+          abi: BastionSwapRouterABI,
+          functionName: "swapMultiHop",
+          args: swapArgs,
+        }),
+        value: config.value || 0n,
+      };
+
       writeContract({
         address: contracts.BastionSwapRouter as `0x${string}`,
         abi: BastionSwapRouterABI,
         functionName: "swapMultiHop",
-        args: [
-          config.steps,
-          config.amountIn,
-          config.minAmountOut,
-          config.deadline,
-        ],
+        args: swapArgs,
         value: config.value || 0n,
       });
     } else {
+      // lastCallRef will be updated in the Permit2 useEffect with the full calldata
       const nonce = generatePermit2Nonce();
       const deadline = config.deadline;
       const routerAddress = contracts.BastionSwapRouter as `0x${string}`;
@@ -558,6 +737,9 @@ export function useExecuteMultiHopSwap() {
     resetSign();
     resetWrite();
     setPendingSwap(null);
+    setErrorMessage(null);
+    setIsDecodingError(false);
+    lastCallRef.current = null;
   };
 
   return {
@@ -567,6 +749,8 @@ export function useExecuteMultiHopSwap() {
     isConfirming,
     isSuccess,
     error: signError || writeError,
+    errorMessage: signError ? parseErrorMessage(signError) : errorMessage,
+    isDecodingError,
     reset,
   };
 }

@@ -68,8 +68,8 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
   const isMultiHop = route?.type === "multi-hop";
 
   // Swap execution
-  const { swap: swapDirect, hash: swapDirectHash, isWriting: isWritingDirect, isConfirming: isConfirmingDirect, isSuccess: isSuccessDirect, error: swapDirectError, reset: resetSwapDirect } = useExecuteSwap();
-  const { swap: swapMultiHop, hash: swapMultiHopHash, isWriting: isWritingMultiHop, isConfirming: isConfirmingMultiHop, isSuccess: isSuccessMultiHop, error: swapMultiHopError, reset: resetSwapMultiHop } = useExecuteMultiHopSwap();
+  const { swap: swapDirect, hash: swapDirectHash, isWriting: isWritingDirect, isConfirming: isConfirmingDirect, isSuccess: isSuccessDirect, error: swapDirectError, errorMessage: swapDirectErrorMessage, isDecodingError: isDecodingDirectError, reset: resetSwapDirect } = useExecuteSwap();
+  const { swap: swapMultiHop, hash: swapMultiHopHash, isWriting: isWritingMultiHop, isConfirming: isConfirmingMultiHop, isSuccess: isSuccessMultiHop, error: swapMultiHopError, errorMessage: swapMultiHopErrorMessage, isDecodingError: isDecodingMultiHopError, reset: resetSwapMultiHop } = useExecuteMultiHopSwap();
 
   // Unified swap state
   const swapHash = isMultiHop ? swapMultiHopHash : swapDirectHash;
@@ -77,6 +77,8 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
   const isConfirming = isMultiHop ? isConfirmingMultiHop : isConfirmingDirect;
   const isSuccess = isMultiHop ? isSuccessMultiHop : isSuccessDirect;
   const swapError = isMultiHop ? swapMultiHopError : swapDirectError;
+  const swapErrorMessage = isMultiHop ? swapMultiHopErrorMessage : swapDirectErrorMessage;
+  const isDecodingSwapError = isMultiHop ? isDecodingMultiHopError : isDecodingDirectError;
   const resetSwap = () => { resetSwapDirect(); resetSwapMultiHop(); };
 
   // Auto-approve + swap
@@ -665,10 +667,10 @@ export function SwapCard({ initialTokenIn, initialTokenOut, compact }: SwapCardP
         )}
 
         {/* Error */}
-        {(swapError || approveError) && (
+        {(swapError || approveError) && !isDecodingSwapError && (
           <div className="mt-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
             <p className="text-sm text-red-600">
-              {parseErrorMessage(swapError || approveError!)}
+              {swapError ? (swapErrorMessage || parseErrorMessage(swapError)) : parseErrorMessage(approveError!)}
             </p>
             <button
               onClick={() => { resetSwap(); resetAutoApprove(); }}
