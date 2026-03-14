@@ -277,7 +277,7 @@ function PositionCard({
         <div className="space-y-2">
           <button
             onClick={handleIssuerCollect}
-            disabled={isBusy}
+            disabled={isBusy || !hasFees}
             className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isIssuerCollecting || isIssuerCollectConfirming ? <LoadingSpinner size="sm" /> : "Collect Fees"}
@@ -305,7 +305,7 @@ function PositionCard({
           ))}
           <button
             onClick={handleCollect}
-            disabled={isBusy}
+            disabled={isBusy || !hasFees}
             className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600 text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isCollecting || isCollectConfirming ? <LoadingSpinner size="sm" /> : "Collect Fees"}
