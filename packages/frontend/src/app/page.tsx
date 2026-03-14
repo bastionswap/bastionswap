@@ -12,8 +12,8 @@ const PROTOCOL_STATS_QUERY = gql`
     protocolStats(id: "global") {
       totalBastionPools
       totalEscrowLocked
-      totalInsuranceBalance
-      totalCompensationPaid
+      totalVolumeETH
+      totalVolumeUSDC
     }
   }
 `;
@@ -21,8 +21,8 @@ const PROTOCOL_STATS_QUERY = gql`
 interface Stats {
   totalBastionPools: number;
   totalEscrowLocked: string;
-  totalInsuranceBalance: string;
-  totalCompensationPaid: string;
+  totalVolumeETH: string;
+  totalVolumeUSDC: string;
 }
 
 function useProtocolStats() {
@@ -36,8 +36,8 @@ function useProtocolStats() {
         const stats: Stats = {
           totalBastionPools: pools.length,
           totalEscrowLocked: pools.reduce((sum, p) => sum + parseFloat(p.escrow?.totalLiquidity ?? "0"), 0).toString(),
-          totalInsuranceBalance: pools.reduce((sum, p) => sum + parseFloat(p.insurancePool?.balance ?? "0"), 0).toString(),
-          totalCompensationPaid: "0",
+          totalVolumeETH: "0",
+          totalVolumeUSDC: "0",
         };
         return { protocolStats: stats };
       }
@@ -87,19 +87,28 @@ const XItem = ({ children }: { children: React.ReactNode }) => (
 
 const statIcons = [
   <svg key="pools" className="h-5 w-5 text-bastion-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>,
+  <svg key="swap" className="h-5 w-5 text-bastion-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>,
   <svg key="lock" className="h-5 w-5 text-bastion-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>,
-  <svg key="shield" className="h-5 w-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>,
-  <svg key="block" className="h-5 w-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>,
 ];
 
 export default function HomePage() {
   const { data: stats } = useProtocolStats();
 
+  const volumeText = (() => {
+    if (!stats) return "0 ETH";
+    const eth = parseFloat(stats.totalVolumeETH);
+    const usdc = parseFloat(stats.totalVolumeUSDC);
+    const ethStr = `${eth.toLocaleString(undefined, { maximumFractionDigits: 4 })} ETH`;
+    if (usdc > 0) {
+      return `${ethStr} · ${usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`;
+    }
+    return ethStr;
+  })();
+
   const statItems = [
     { label: "Protected Pools", value: stats?.totalBastionPools ?? 0 },
+    { label: "Total Volume", value: volumeText },
     { label: "LP Locked", value: stats ? `${parseFloat(stats.totalEscrowLocked).toLocaleString(undefined, { maximumFractionDigits: 6 })}` : "0", unit: "LP" },
-    { label: "Insurance Pools", value: stats ? `${parseFloat(stats.totalInsuranceBalance).toFixed(4)}` : "0", unit: "ETH" },
-    { label: "Transactions Protected", value: stats?.totalBastionPools ? `${(stats.totalBastionPools * 0).toLocaleString()}` : "0" },
   ];
 
   return (
@@ -138,7 +147,7 @@ export default function HomePage() {
         </div>
 
         {/* Protocol stats */}
-        <div className="relative mt-20 grid w-full max-w-3xl grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="relative mt-20 grid w-full max-w-3xl grid-cols-3 gap-4">
           {statItems.map(({ label, value, unit }, i) => (
             <div key={label} className="glass-card px-5 py-5 text-center">
               <div className="mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-gray-50">

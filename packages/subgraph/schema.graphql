@@ -113,6 +113,8 @@ type ProtocolStats @entity(immutable: false) {
   totalInsuranceBalance: BigDecimal!
   totalTriggersActivated: Int!
   totalCompensationPaid: BigDecimal!
+  totalVolumeETH: BigDecimal!
+  totalVolumeUSDC: BigDecimal!
 }
 
 type Swap @entity(immutable: true) {

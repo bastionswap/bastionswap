@@ -77,9 +77,6 @@ export function handleSwap(event: SwapEvent): void {
   pool.reserve1 = reserves[1];
   pool.save();
 
-  // Note: Swap entities are created by BastionSwapRouter's SwapExecuted handler
-  // (which has the actual user address, not the router address)
-
   // Update OHLCV data
   let price = sqrtPriceX96ToPrice(event.params.sqrtPriceX96);
   let absAmount0 = absBigInt(event.params.amount0);

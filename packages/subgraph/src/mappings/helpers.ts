@@ -4,10 +4,15 @@ import { Issuer, PoolDayData, PoolHourData, ProtocolStats } from "../../generate
 export let ZERO_BD = BigDecimal.fromString("0");
 export let ZERO_BI = BigInt.fromI32(0);
 let WAD = BigInt.fromI32(10).pow(18);
+let USDC_UNIT = BigInt.fromI32(10).pow(6);
 let Q96 = BigInt.fromI32(2).pow(96);
 
 export function toDecimal(value: BigInt): BigDecimal {
   return value.toBigDecimal().div(WAD.toBigDecimal());
+}
+
+export function toDecimal6(value: BigInt): BigDecimal {
+  return value.toBigDecimal().div(USDC_UNIT.toBigDecimal());
 }
 
 export function triggerTypeName(triggerType: i32): string {
@@ -31,6 +36,8 @@ export function getOrCreateProtocolStats(): ProtocolStats {
     stats.totalInsuranceBalance = ZERO_BD;
     stats.totalTriggersActivated = 0;
     stats.totalCompensationPaid = ZERO_BD;
+    stats.totalVolumeETH = ZERO_BD;
+    stats.totalVolumeUSDC = ZERO_BD;
     stats.save();
   }
   return stats;
