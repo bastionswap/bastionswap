@@ -347,7 +347,7 @@ contract E2E_Comprehensive is Test {
         // 5. LP/supply ratio (AMM liquidity units / totalSupply, NOT token amounts)
         // May be 0 when AMM liquidity * 10000 < totalSupply (integer truncation)
         // Just verify the view doesn't revert
-        hook.getLpRatioBps(poolIdA);
+        hook.lpRatioBps(poolIdA);
 
         // 6. Reputation baseline
         assertEq(reputationEngine.getScore(issuerA), 100, "baseline score");
@@ -1689,7 +1689,7 @@ contract E2E_Comprehensive is Test {
         // LP ratio = AMM liquidity * 10000 / totalSupply (integer truncation possible)
         // With small AMM liquidity relative to totalSupply, ratio may be 0.
         // This is transparency-only, so just verify it's stored and queryable.
-        uint256 ratioA = hook.getLpRatioBps(poolIdA);
+        uint256 ratioA = hook.lpRatioBps(poolIdA);
 
         // Create pool with MUCH higher token/ETH ratio to get non-zero ratio
         // Use 100 ETH + 100,000 tokens from 100,000 supply = 100% LP ratio
@@ -1703,7 +1703,7 @@ contract E2E_Comprehensive is Test {
         );
         vm.stopPrank();
 
-        uint256 ratioH = hook.getLpRatioBps(pidH);
+        uint256 ratioH = hook.lpRatioBps(pidH);
         // With 100% supply as LP and more ETH, ratio should be higher
         assertGe(ratioH, ratioA, "higher LP allocation -> higher or equal ratio");
 
@@ -1718,7 +1718,7 @@ contract E2E_Comprehensive is Test {
         );
         vm.stopPrank();
 
-        uint256 ratioLow = hook.getLpRatioBps(pidLow);
+        uint256 ratioLow = hook.lpRatioBps(pidLow);
         // Just verify it's queryable (may be 0 due to integer truncation)
         assertLe(ratioLow, ratioH, "lower LP allocation -> lower or equal ratio");
     }

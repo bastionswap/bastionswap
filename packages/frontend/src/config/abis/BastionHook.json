@@ -901,6 +901,82 @@
   },
   {
     "type": "function",
+    "name": "dailyLpRemoved",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "dailyLpWindowStart",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "dailySellCumulative",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "dailySellWindowStart",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "defaultLockDuration",
     "inputs": [],
     "outputs": [
@@ -1070,123 +1146,6 @@
   },
   {
     "type": "function",
-    "name": "getIssuerLpRemovalStatus",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "PoolId"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "dailyRemoved",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "weeklyRemoved",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "dailyWindowStart",
-        "type": "uint40",
-        "internalType": "uint40"
-      },
-      {
-        "name": "weeklyWindowStart",
-        "type": "uint40",
-        "internalType": "uint40"
-      },
-      {
-        "name": "maxDailyBps",
-        "type": "uint16",
-        "internalType": "uint16"
-      },
-      {
-        "name": "maxWeeklyBps",
-        "type": "uint16",
-        "internalType": "uint16"
-      },
-      {
-        "name": "initialLiquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getIssuerSellStatus",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "PoolId"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "dailySold",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "weeklySold",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "dailyWindowStart",
-        "type": "uint40",
-        "internalType": "uint40"
-      },
-      {
-        "name": "weeklyWindowStart",
-        "type": "uint40",
-        "internalType": "uint40"
-      },
-      {
-        "name": "maxDailySellBps",
-        "type": "uint16",
-        "internalType": "uint16"
-      },
-      {
-        "name": "maxWeeklySellBps",
-        "type": "uint16",
-        "internalType": "uint16"
-      },
-      {
-        "name": "currentReserve",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getLpRatioBps",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "PoolId"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "getPoolCommitment",
     "inputs": [
       {
@@ -1306,6 +1265,25 @@
   },
   {
     "type": "function",
+    "name": "initialLiquidity",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "insurancePool",
     "inputs": [],
     "outputs": [
@@ -1384,7 +1362,7 @@
     "name": "isPoolTriggered",
     "inputs": [
       {
-        "name": "poolId",
+        "name": "",
         "type": "bytes32",
         "internalType": "PoolId"
       }
@@ -1394,6 +1372,25 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "lpRatioBps",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -1686,6 +1683,82 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "weeklyLpRemoved",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "weeklyLpWindowStart",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "weeklySellCumulative",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "weeklySellWindowStart",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint40",
+        "internalType": "uint40"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "event",

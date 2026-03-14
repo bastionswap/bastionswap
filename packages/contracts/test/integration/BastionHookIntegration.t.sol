@@ -1675,7 +1675,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
     function test_PoolCreation_RecordsLPRatio() public {
         _initPoolWithIssuer();
 
-        uint256 lpRatio = hook.getLpRatioBps(poolId);
+        uint256 lpRatio = hook.lpRatioBps(poolId);
         // LP ratio should be non-zero (liquidity / totalSupply * 10000)
         // With 1e18 liquidity and ~2M total supply, ratio will be very small
         // Just verify it was recorded
@@ -1691,7 +1691,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         _initPoolWithIssuer();
 
-        uint256 lpRatio = hook.getLpRatioBps(poolId);
+        uint256 lpRatio = hook.lpRatioBps(poolId);
         // Should still succeed even with very low ratio
         assertGe(lpRatio, 0);
     }

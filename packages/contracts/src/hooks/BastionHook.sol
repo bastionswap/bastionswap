@@ -84,33 +84,33 @@ contract BastionHook is BaseTestHooks {
     mapping(PoolId => uint256) internal _initialTotalSupply;
 
     /// @dev poolId => cumulative daily sell amount
-    mapping(PoolId => uint256) internal _dailyCumulative;
+    mapping(PoolId => uint256) public dailySellCumulative;
 
     /// @dev poolId => cumulative weekly sell amount
-    mapping(PoolId => uint256) internal _weeklyCumulative;
+    mapping(PoolId => uint256) public weeklySellCumulative;
 
-    /// @dev poolId => daily window start timestamp
-    mapping(PoolId => uint40) internal _dailyWindowStart;
+    /// @dev poolId => daily sell window start timestamp
+    mapping(PoolId => uint40) public dailySellWindowStart;
 
-    /// @dev poolId => weekly window start timestamp
-    mapping(PoolId => uint40) internal _weeklyWindowStart;
+    /// @dev poolId => weekly sell window start timestamp
+    mapping(PoolId => uint40) public weeklySellWindowStart;
 
     /// @dev poolId => whether the pool has been triggered (local flag for fast access)
-    mapping(PoolId => bool) internal _isTriggered;
+    mapping(PoolId => bool) public isPoolTriggered;
 
     /// @dev poolId => LP ratio in bps (liquidity * 10000 / totalSupply) at pool creation
-    mapping(PoolId => uint256) internal _lpRatioBps;
+    mapping(PoolId => uint256) public lpRatioBps;
 
     /// @dev poolId => daily LP removed in current window
-    mapping(PoolId => uint256) internal _dailyLpRemoved;
+    mapping(PoolId => uint256) public dailyLpRemoved;
     /// @dev poolId => daily LP window start timestamp
-    mapping(PoolId => uint40) internal _dailyLpWindowStart;
+    mapping(PoolId => uint40) public dailyLpWindowStart;
     /// @dev poolId => weekly LP removed in current window
-    mapping(PoolId => uint256) internal _weeklyLpRemoved;
+    mapping(PoolId => uint256) public weeklyLpRemoved;
     /// @dev poolId => weekly LP window start timestamp
-    mapping(PoolId => uint40) internal _weeklyLpWindowStart;
+    mapping(PoolId => uint40) public weeklyLpWindowStart;
     /// @dev poolId => initial liquidity at pool creation (denominator for LP removal BPS)
-    mapping(PoolId => uint256) internal _initialLiquidity;
+    mapping(PoolId => uint256) public initialLiquidity;
 
     /// @dev BastionRouter address (set via one-time setter, deployed after hook due to CREATE2)
     address public bastionRouter;
@@ -374,7 +374,7 @@ contract BastionHook is BaseTestHooks {
             address user = abi.decode(hookData, (address));
             if (user == issuer) {
                 // Block issuer LP removal after trigger
-                if (_isTriggered[poolId]) revert PoolTriggered();
+                if (isPoolTriggered[poolId]) revert PoolTriggered();
 
                 isIssuerRemoval = true;
                 // Enforce vesting
@@ -420,23 +420,23 @@ contract BastionHook is BaseTestHooks {
         if (isIssuerRemoval) {
             PoolCommitment memory commitment = _poolCommitments[poolId];
             if (commitment.isSet) {
-                uint256 initLiq = _initialLiquidity[poolId];
+                uint256 initLiq = initialLiquidity[poolId];
                 if (initLiq > 0) {
                     // Daily LP removal check
                     _updateLpDailyWindow(poolId);
-                    uint256 projectedDaily = _dailyLpRemoved[poolId] + removeAmount;
+                    uint256 projectedDaily = dailyLpRemoved[poolId] + removeAmount;
                     uint256 dailyBps = (projectedDaily * 10_000 + initLiq - 1) / initLiq;
                     if (dailyBps > commitment.maxDailyLpRemovalBps) revert DailyLpRemovalExceeded();
 
                     // Weekly LP removal check
                     _updateLpWeeklyWindow(poolId);
-                    uint256 projectedWeekly = _weeklyLpRemoved[poolId] + removeAmount;
+                    uint256 projectedWeekly = weeklyLpRemoved[poolId] + removeAmount;
                     uint256 weeklyBps = (projectedWeekly * 10_000 + initLiq - 1) / initLiq;
                     if (weeklyBps > commitment.maxWeeklyLpRemovalBps) revert WeeklyLpRemovalExceeded();
 
                     // Update counters
-                    _dailyLpRemoved[poolId] += removeAmount;
-                    _weeklyLpRemoved[poolId] += removeAmount;
+                    dailyLpRemoved[poolId] += removeAmount;
+                    weeklyLpRemoved[poolId] += removeAmount;
                 }
             }
         }
@@ -475,7 +475,7 @@ contract BastionHook is BaseTestHooks {
 
             if (isSell && poolIssuer != address(0) && actualSwapper == poolIssuer) {
                 // Post-trigger block: issuer cannot sell after trigger
-                if (_isTriggered[poolId]) revert PoolTriggered();
+                if (isPoolTriggered[poolId]) revert PoolTriggered();
 
                 // Direct sell defense (1st layer): check commitment limits
                 PoolCommitment memory commitment = _poolCommitments[poolId];
@@ -567,7 +567,7 @@ contract BastionHook is BaseTestHooks {
         if (bastionRouter == address(0)) revert RouterNotSet();
 
         // Set local triggered flag to block future issuer sells
-        _isTriggered[poolId] = true;
+        isPoolTriggered[poolId] = true;
 
         PoolKey memory key = _poolKeys[poolId];
         uint256 liquidity = _totalLiquidity[poolId];
@@ -684,18 +684,18 @@ contract BastionHook is BaseTestHooks {
     function executeTrigger(PoolId poolId) external {
         PoolCommitment memory commitment = _poolCommitments[poolId];
         if (!commitment.isSet) revert ValueOutOfRange();
-        if (_isTriggered[poolId]) revert PoolTriggered();
+        if (isPoolTriggered[poolId]) revert PoolTriggered();
 
         // Check weekly LP removal threshold
         _updateLpWeeklyWindow(poolId);
 
-        uint256 initLiq = _initialLiquidity[poolId];
+        uint256 initLiq = initialLiquidity[poolId];
         if (initLiq == 0) revert ValueOutOfRange();
 
-        uint256 weeklyBps = (_weeklyLpRemoved[poolId] * 10_000) / initLiq;
+        uint256 weeklyBps = (weeklyLpRemoved[poolId] * 10_000) / initLiq;
         if (weeklyBps < commitment.maxWeeklyLpRemovalBps) revert ValueOutOfRange();
 
-        _isTriggered[poolId] = true;
+        isPoolTriggered[poolId] = true;
 
         // Delegate to TriggerOracle for execution (escrow, insurance, reputation)
         PoolKey memory key = _poolKeys[poolId];
@@ -708,15 +708,15 @@ contract BastionHook is BaseTestHooks {
         PoolCommitment memory c = _poolCommitments[poolId];
         if (!c.isSet) return false;
 
-        uint256 weeklyRemoved = _weeklyLpRemoved[poolId];
-        uint40 windowStart = _weeklyLpWindowStart[poolId];
+        uint256 weeklyRemoved = weeklyLpRemoved[poolId];
+        uint40 windowStart = weeklyLpWindowStart[poolId];
 
         // Check if window expired (reset would happen)
         if (block.timestamp >= windowStart + 7 days) {
             return false; // window would reset
         }
 
-        uint256 initLiq = _initialLiquidity[poolId];
+        uint256 initLiq = initialLiquidity[poolId];
         if (initLiq == 0) return false;
 
         uint256 weeklyBps = (weeklyRemoved * 10_000) / initLiq;
@@ -897,20 +897,20 @@ contract BastionHook is BaseTestHooks {
 
         uint256 totalSupply = ERC20(token).totalSupply();
         _initialTotalSupply[poolId] = totalSupply;
-        _initialLiquidity[poolId] = uint256(liquidity);
+        initialLiquidity[poolId] = uint256(liquidity);
 
         // Record LP/supply ratio for transparency
         uint256 lpRatio = (liquidity > 0 && totalSupply > 0)
             ? (uint256(liquidity) * 10_000 / totalSupply)
             : 0;
-        _lpRatioBps[poolId] = lpRatio;
+        lpRatioBps[poolId] = lpRatio;
         emit PoolLiquidityRatio(poolId, lpRatio);
 
         // Initialize tracking window starts
-        _dailyWindowStart[poolId] = uint40(block.timestamp);
-        _weeklyWindowStart[poolId] = uint40(block.timestamp);
-        _dailyLpWindowStart[poolId] = uint40(block.timestamp);
-        _weeklyLpWindowStart[poolId] = uint40(block.timestamp);
+        dailySellWindowStart[poolId] = uint40(block.timestamp);
+        weeklySellWindowStart[poolId] = uint40(block.timestamp);
+        dailyLpWindowStart[poolId] = uint40(block.timestamp);
+        weeklyLpWindowStart[poolId] = uint40(block.timestamp);
 
         // Register issuer and config in TriggerOracle
         triggerOracle.registerIssuer(poolId, issuer, totalSupply, token);
@@ -1116,17 +1116,17 @@ contract BastionHook is BaseTestHooks {
 
     /// @dev Resets daily LP removal counter if 24h window has expired.
     function _updateLpDailyWindow(PoolId poolId) internal {
-        if (block.timestamp >= _dailyLpWindowStart[poolId] + 1 days) {
-            _dailyLpRemoved[poolId] = 0;
-            _dailyLpWindowStart[poolId] = uint40(block.timestamp);
+        if (block.timestamp >= dailyLpWindowStart[poolId] + 1 days) {
+            dailyLpRemoved[poolId] = 0;
+            dailyLpWindowStart[poolId] = uint40(block.timestamp);
         }
     }
 
     /// @dev Resets weekly LP removal counter if 7-day window has expired.
     function _updateLpWeeklyWindow(PoolId poolId) internal {
-        if (block.timestamp >= _weeklyLpWindowStart[poolId] + 7 days) {
-            _weeklyLpRemoved[poolId] = 0;
-            _weeklyLpWindowStart[poolId] = uint40(block.timestamp);
+        if (block.timestamp >= weeklyLpWindowStart[poolId] + 7 days) {
+            weeklyLpRemoved[poolId] = 0;
+            weeklyLpWindowStart[poolId] = uint40(block.timestamp);
         }
     }
 
@@ -1145,8 +1145,8 @@ contract BastionHook is BaseTestHooks {
 
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
-            uint256 dailyCum = _dailyCumulative[poolId];
-            uint40 windowStart = _dailyWindowStart[poolId];
+            uint256 dailyCum = dailySellCumulative[poolId];
+            uint40 windowStart = dailySellWindowStart[poolId];
             // Reset window if expired (view-only projection)
             if (block.timestamp >= windowStart + 86400) {
                 dailyCum = 0;
@@ -1158,8 +1158,8 @@ contract BastionHook is BaseTestHooks {
 
         // Check weekly limit
         if (commitment.maxWeeklySellBps > 0) {
-            uint256 weeklyCum = _weeklyCumulative[poolId];
-            uint40 windowStart = _weeklyWindowStart[poolId];
+            uint256 weeklyCum = weeklySellCumulative[poolId];
+            uint40 windowStart = weeklySellWindowStart[poolId];
             if (block.timestamp >= windowStart + 7 days) {
                 weeklyCum = 0;
             }
@@ -1181,32 +1181,32 @@ contract BastionHook is BaseTestHooks {
         if (currentReserve == 0) return;
 
         // Reset daily window if expired
-        uint40 dailyStart = _dailyWindowStart[poolId];
+        uint40 dailyStart = dailySellWindowStart[poolId];
         if (block.timestamp >= dailyStart + 86400) {
-            _dailyCumulative[poolId] = 0;
-            _dailyWindowStart[poolId] = uint40(block.timestamp);
+            dailySellCumulative[poolId] = 0;
+            dailySellWindowStart[poolId] = uint40(block.timestamp);
         }
 
         // Reset weekly window if expired
-        uint40 weeklyStart = _weeklyWindowStart[poolId];
+        uint40 weeklyStart = weeklySellWindowStart[poolId];
         if (block.timestamp >= weeklyStart + 7 days) {
-            _weeklyCumulative[poolId] = 0;
-            _weeklyWindowStart[poolId] = uint40(block.timestamp);
+            weeklySellCumulative[poolId] = 0;
+            weeklySellWindowStart[poolId] = uint40(block.timestamp);
         }
 
         // Update cumulative counters
-        _dailyCumulative[poolId] += soldAmount;
-        _weeklyCumulative[poolId] += soldAmount;
+        dailySellCumulative[poolId] += soldAmount;
+        weeklySellCumulative[poolId] += soldAmount;
 
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
-            uint256 dailyBps = (_dailyCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
+            uint256 dailyBps = (dailySellCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
             if (dailyBps > commitment.maxDailySellBps) revert IssuerDumpDetected();
         }
 
         // Check weekly limit
         if (commitment.maxWeeklySellBps > 0) {
-            uint256 weeklyBps = (_weeklyCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
+            uint256 weeklyBps = (weeklySellCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
             if (weeklyBps > commitment.maxWeeklySellBps) revert IssuerDumpDetected();
         }
     }
@@ -1216,96 +1216,6 @@ contract BastionHook is BaseTestHooks {
     /// @notice Get the initial total supply recorded at pool creation.
     function getInitialTotalSupply(PoolId poolId) external view returns (uint256) {
         return _initialTotalSupply[poolId];
-    }
-
-    /// @notice Get the LP/supply ratio in bps recorded at pool creation.
-    function getLpRatioBps(PoolId poolId) external view returns (uint256) {
-        return _lpRatioBps[poolId];
-    }
-
-    /// @notice Check if a pool has been triggered (local flag).
-    function isPoolTriggered(PoolId poolId) external view returns (bool) {
-        return _isTriggered[poolId];
-    }
-
-    /// @notice Get issuer sell tracking status for a pool.
-    /// @return dailySold Cumulative tokens sold in current daily window
-    /// @return weeklySold Cumulative tokens sold in current weekly window
-    /// @return dailyWindowStart Start timestamp of current daily window
-    /// @return weeklyWindowStart Start timestamp of current weekly window
-    /// @return maxDailySellBps Maximum daily sell in basis points (from commitment)
-    /// @return maxWeeklySellBps Maximum weekly sell in basis points (from commitment)
-    /// @return currentReserve Current issued token reserve in PoolManager (denominator for BPS calc)
-    function getIssuerSellStatus(PoolId poolId)
-        external
-        view
-        returns (
-            uint256 dailySold,
-            uint256 weeklySold,
-            uint40 dailyWindowStart,
-            uint40 weeklyWindowStart,
-            uint16 maxDailySellBps,
-            uint16 maxWeeklySellBps,
-            uint256 currentReserve
-        )
-    {
-        dailyWindowStart = _dailyWindowStart[poolId];
-        weeklyWindowStart = _weeklyWindowStart[poolId];
-
-        // Apply window reset logic (view-only projection)
-        dailySold = block.timestamp >= uint256(dailyWindowStart) + 1 days
-            ? 0
-            : _dailyCumulative[poolId];
-        weeklySold = block.timestamp >= uint256(weeklyWindowStart) + 7 days
-            ? 0
-            : _weeklyCumulative[poolId];
-
-        PoolCommitment memory c = _poolCommitments[poolId];
-        maxDailySellBps = c.maxDailySellBps;
-        maxWeeklySellBps = c.maxWeeklySellBps;
-
-        address issuedToken = _issuedTokens[poolId];
-        if (issuedToken != address(0)) {
-            currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
-        }
-    }
-
-    /// @notice Get issuer LP removal tracking status for a pool.
-    /// @return dailyRemoved LP removed in current daily window
-    /// @return weeklyRemoved LP removed in current weekly window
-    /// @return dailyWindowStart Start timestamp of current daily window
-    /// @return weeklyWindowStart Start timestamp of current weekly window
-    /// @return maxDailyBps Maximum daily LP removal in basis points (from commitment)
-    /// @return maxWeeklyBps Maximum weekly LP removal in basis points (from commitment)
-    /// @return initialLiquidity Initial liquidity at pool creation (denominator for BPS calc)
-    function getIssuerLpRemovalStatus(PoolId poolId)
-        external
-        view
-        returns (
-            uint256 dailyRemoved,
-            uint256 weeklyRemoved,
-            uint40 dailyWindowStart,
-            uint40 weeklyWindowStart,
-            uint16 maxDailyBps,
-            uint16 maxWeeklyBps,
-            uint256 initialLiquidity
-        )
-    {
-        dailyWindowStart = _dailyLpWindowStart[poolId];
-        weeklyWindowStart = _weeklyLpWindowStart[poolId];
-
-        // Apply window reset logic (view-only projection)
-        dailyRemoved = block.timestamp >= uint256(dailyWindowStart) + 1 days
-            ? 0
-            : _dailyLpRemoved[poolId];
-        weeklyRemoved = block.timestamp >= uint256(weeklyWindowStart) + 7 days
-            ? 0
-            : _weeklyLpRemoved[poolId];
-
-        PoolCommitment memory c = _poolCommitments[poolId];
-        maxDailyBps = c.maxDailyLpRemovalBps;
-        maxWeeklyBps = c.maxWeeklyLpRemovalBps;
-        initialLiquidity = _initialLiquidity[poolId];
     }
 
     // ─── Transient Storage Helpers (EIP-1153) ──────────────────────────
