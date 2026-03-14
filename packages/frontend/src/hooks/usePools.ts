@@ -573,6 +573,7 @@ export function usePool(id: string) {
         : graphClient.request<{ pool: SubgraphPool | null }>(POOL_DETAIL_QUERY, { id }),
     select: (data) => data.pool,
     enabled: !!id && (isLocal ? !local.isLoading : true),
+    refetchInterval: 15_000,
   });
 }
 

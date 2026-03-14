@@ -290,16 +290,26 @@ export default function PoolDetailPage() {
   // Issuer sell tracking (individual public mapping reads)
   const isBastionPool = !!hookAddress && !!pool?.isBastion;
   const poolIdArg = [poolId as `0x${string}`] as const;
-  const { data: rawDailySellCum } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailySellCumulative", args: poolIdArg, query: { enabled: isBastionPool } });
-  const { data: rawWeeklySellCum } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklySellCumulative", args: poolIdArg, query: { enabled: isBastionPool } });
-  const { data: rawDailySellWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailySellWindowStart", args: poolIdArg, query: { enabled: isBastionPool } });
-  const { data: rawWeeklySellWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklySellWindowStart", args: poolIdArg, query: { enabled: isBastionPool } });
+  const refetchOpts = { enabled: isBastionPool, refetchInterval: 15_000 };
+  const { data: rawDailySellCum } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailySellCumulative", args: poolIdArg, query: refetchOpts });
+  const { data: rawWeeklySellCum } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklySellCumulative", args: poolIdArg, query: refetchOpts });
+  const { data: rawDailySellWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailySellWindowStart", args: poolIdArg, query: refetchOpts });
+  const { data: rawWeeklySellWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklySellWindowStart", args: poolIdArg, query: refetchOpts });
   // Issuer LP removal tracking
-  const { data: rawDailyLpRem } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailyLpRemoved", args: poolIdArg, query: { enabled: isBastionPool } });
-  const { data: rawWeeklyLpRem } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklyLpRemoved", args: poolIdArg, query: { enabled: isBastionPool } });
-  const { data: rawDailyLpWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailyLpWindowStart", args: poolIdArg, query: { enabled: isBastionPool } });
-  const { data: rawWeeklyLpWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklyLpWindowStart", args: poolIdArg, query: { enabled: isBastionPool } });
-  const { data: rawInitLiq } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "initialLiquidity", args: poolIdArg, query: { enabled: isBastionPool } });
+  const { data: rawDailyLpRem } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailyLpRemoved", args: poolIdArg, query: refetchOpts });
+  const { data: rawWeeklyLpRem } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklyLpRemoved", args: poolIdArg, query: refetchOpts });
+  const { data: rawDailyLpWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailyLpWindowStart", args: poolIdArg, query: refetchOpts });
+  const { data: rawWeeklyLpWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklyLpWindowStart", args: poolIdArg, query: refetchOpts });
+  const { data: rawInitLiq } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "initialLiquidity", args: poolIdArg, query: refetchOpts });
+
+  // Determine current reserve of the issued token in the pool (matches contract's ERC20.balanceOf(poolManager))
+  const issuedTokenReserve: bigint = (() => {
+    if (!pool?.issuedToken || !pool.reserve0 || !pool.reserve1) return 0n;
+    const isToken0 = pool.issuedToken.toLowerCase() === pool.token0.toLowerCase();
+    const rawStr = isToken0 ? pool.reserve0 : pool.reserve1;
+    // Subgraph reserves are BigDecimal strings — truncate to integer
+    try { return BigInt(rawStr.split(".")[0]); } catch { return 0n; }
+  })();
 
   // Construct issuer status tuples with client-side window reset logic
   const now = Math.floor(Date.now() / 1000);
@@ -312,7 +322,7 @@ export default function PoolDetailPage() {
     Number(rawWeeklySellWin ?? 0),
     Number(pc?.maxDailySellBps ?? 0),
     Number(pc?.maxWeeklySellBps ?? 0),
-    0n, // currentReserve — filled below if issuedToken exists
+    issuedTokenReserve,
   ] as const : undefined;
 
   const issuerLpRemovalStatus = (rawDailyLpWin != null && pc) ? [
@@ -653,6 +663,8 @@ export default function PoolDetailPage() {
                       } | undefined}
                       issuerSellStatus={issuerSellStatus as readonly [bigint, bigint, number, number, number, number, bigint] | undefined}
                       issuerLpRemovalStatus={issuerLpRemovalStatus as readonly [bigint, bigint, number, number, number, number, bigint] | undefined}
+                      issuedTokenDecimals={issuedTokenInfo.decimals ?? 18}
+                      issuedTokenSymbol={issuedTokenInfo.displayName}
                     />
                   ) : (
                     <div className="text-center py-8 text-sm text-gray-400">

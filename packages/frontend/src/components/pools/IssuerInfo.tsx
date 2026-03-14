@@ -1,6 +1,7 @@
 "use client";
 
 import { useReadContract, useChainId } from "wagmi";
+import { formatUnits } from "viem";
 import { Badge } from "@/components/ui/Badge";
 import { shortenAddress, explorerUrl, formatBps, formatDuration } from "@/lib/formatters";
 import { getContracts } from "@/config/contracts";
@@ -46,6 +47,8 @@ interface IssuerInfoProps {
   triggerConfig?: TriggerConfigData;
   issuerSellStatus?: readonly [bigint, bigint, number, number, number, number, bigint];
   issuerLpRemovalStatus?: readonly [bigint, bigint, number, number, number, number, bigint];
+  issuedTokenDecimals?: number;
+  issuedTokenSymbol?: string;
 }
 
 const DEFAULTS = {
@@ -113,11 +116,23 @@ function CommitmentTag({ value, defaultValue, isLowerBetter }: {
   return <span className="text-[10px] text-amber-600 ml-1.5 px-1.5 py-0.5 rounded bg-amber-50">Relaxed</span>;
 }
 
-function UsageBar({ used, max, label, windowStart }: {
+function formatTokenAmt(raw: bigint, decimals: number): string {
+  const val = Number(formatUnits(raw, decimals));
+  if (val === 0) return "0";
+  if (val < 0.01) return "<0.01";
+  if (val < 1000) return val.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return val.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function UsageBar({ used, max, label, windowStart, rawUsed, rawMax, decimals, symbol }: {
   used: number;
   max: number;
   label: string;
   windowStart: number;
+  rawUsed?: bigint;
+  rawMax?: bigint;
+  decimals?: number;
+  symbol?: string;
 }) {
   const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
   const isNearLimit = pct >= 80;
@@ -136,6 +151,8 @@ function UsageBar({ used, max, label, windowStart }: {
       : `${Math.floor(timeLeft / 86400)}d ${Math.floor((timeLeft % 86400) / 3600)}h`
     : "—";
 
+  const showTokenAmounts = rawUsed != null && rawMax != null && decimals != null && symbol;
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[11px]">
@@ -144,6 +161,14 @@ function UsageBar({ used, max, label, windowStart }: {
           {formatBps(used)} / {formatBps(max)}
         </span>
       </div>
+      {showTokenAmounts && (
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-gray-400">{symbol}</span>
+          <span className="text-gray-400 tabular-nums">
+            {formatTokenAmt(rawUsed, decimals)} / {formatTokenAmt(rawMax, decimals)}
+          </span>
+        </div>
+      )}
       <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${
@@ -206,7 +231,7 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   );
 }
 
-export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness, poolCommitment, isStricterThanDefault, triggerConfig, issuerSellStatus, issuerLpRemovalStatus }: IssuerInfoProps) {
+export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness, poolCommitment, isStricterThanDefault, triggerConfig, issuerSellStatus, issuerLpRemovalStatus, issuedTokenDecimals, issuedTokenSymbol }: IssuerInfoProps) {
   const score = parseInt(issuer.reputationScore);
   const created = issuer.totalEscrowsCreated ?? 0;
   const completed = issuer.totalEscrowsCompleted ?? 0;
@@ -403,6 +428,10 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
 
               const dailyUsedBps = reserve > 0 ? Math.round((Number(dailySold) * 10_000) / reserve) : 0;
               const weeklyUsedBps = reserve > 0 ? Math.round((Number(weeklySold) * 10_000) / reserve) : 0;
+              const dec = issuedTokenDecimals ?? 18;
+              const sym = issuedTokenSymbol;
+              const dailyMaxRaw = reserve > 0 ? BigInt(Math.floor(reserve * Number(maxDailyBps) / 10_000)) : 0n;
+              const weeklyMaxRaw = reserve > 0 ? BigInt(Math.floor(reserve * Number(maxWeeklyBps) / 10_000)) : 0n;
 
               return (
                 <>
@@ -413,6 +442,10 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                       max={Number(maxDailyBps)}
                       label="Daily Sell"
                       windowStart={Number(dailyWindowStart)}
+                      rawUsed={dailySold}
+                      rawMax={dailyMaxRaw}
+                      decimals={dec}
+                      symbol={sym}
                     />
                   )}
                   {Number(maxWeeklyBps) > 0 && (
@@ -421,6 +454,10 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                       max={Number(maxWeeklyBps)}
                       label="Weekly Sell"
                       windowStart={Number(weeklyWindowStart)}
+                      rawUsed={weeklySold}
+                      rawMax={weeklyMaxRaw}
+                      decimals={dec}
+                      symbol={sym}
                     />
                   )}
                 </>
@@ -436,6 +473,10 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
 
               if (Number(maxDailyBps) === 0 && Number(maxWeeklyBps) === 0) return null;
 
+              // LP liquidity uses 18-decimal precision
+              const dailyMaxRaw = BigInt(Math.floor(initLiq * Number(maxDailyBps) / 10_000));
+              const weeklyMaxRaw = BigInt(Math.floor(initLiq * Number(maxWeeklyBps) / 10_000));
+
               return (
                 <>
                   <p className="text-[10px] text-gray-400 uppercase tracking-wider mt-2">LP Removal</p>
@@ -445,6 +486,10 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                       max={Number(maxDailyBps)}
                       label="Daily LP Removal"
                       windowStart={Number(dailyWindowStart)}
+                      rawUsed={dailyRemoved}
+                      rawMax={dailyMaxRaw}
+                      decimals={18}
+                      symbol="Liquidity"
                     />
                   )}
                   {Number(maxWeeklyBps) > 0 && (
@@ -453,6 +498,10 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
                       max={Number(maxWeeklyBps)}
                       label="Weekly LP Removal"
                       windowStart={Number(weeklyWindowStart)}
+                      rawUsed={weeklyRemoved}
+                      rawMax={weeklyMaxRaw}
+                      decimals={18}
+                      symbol="Liquidity"
                     />
                   )}
                 </>
