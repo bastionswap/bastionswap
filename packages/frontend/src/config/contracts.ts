@@ -2,14 +2,14 @@ import { LOCAL_CONTRACTS } from "./contracts.generated";
 
 export const CONTRACTS = {
   84532: {
-    BastionHook: "0x47fF5bd209FEB22ec88e43beC94074280fb34ac8",
-    EscrowVault: "0x8e77cC19BC537934149f512a9D407131b1D5e4D0",
-    InsurancePool: "0x2A6318a1ae6BB618EB24cAF77d8E3716c9F02A6E",
-    TriggerOracle: "0xb5b66fcd286f5cE54040C55e56244aB200A192Dd",
-    ReputationEngine: "0x8De50d4e18a990c2867E2C2D5d7693B62FAe6780",
+    BastionHook: "0x6Bc8b16a0cD4820099bC4dEC7896f0840f304aC8",
+    EscrowVault: "0x7Fc45a47b54F94FD4cB810A955465490070F664b",
+    InsurancePool: "0xD06A57C4Be09B89dc3ca48edB1D9dF1f00F18669",
+    TriggerOracle: "0x6Dbf4B751e73e6267c8712c153B116b2d1AD0b2f",
+    ReputationEngine: "0x1C04B5363645f046bE48F6874d514687Ad0d58A4",
     PoolManager: "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408",
-    BastionSwapRouter: "0xA4344dAb82C09FFD9ad4a10476b53C9e6c44e4cE",
-    BastionPositionRouter: "0x05D0E576c2B1A3234B296f36c392CcE228eeE459",
+    BastionSwapRouter: "0x33F31B691bDe1Cf4f820AE304ab199c28f04aba8",
+    BastionPositionRouter: "0xb1B60977ba79346F01df2b733298F73392895c4C",
   },
 } as const;
 
