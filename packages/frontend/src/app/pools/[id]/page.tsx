@@ -530,6 +530,8 @@ export default function PoolDetailPage() {
                   : token0Info.symbol || undefined
               }
               issuedSymbol={issuedTokenInfo.symbol || undefined}
+              token0Decimals={token0Info.decimals ?? 18}
+              token1Decimals={token1Info.decimals ?? 18}
             />
             <RecentTrades
               poolId={pool.id}
@@ -690,6 +692,8 @@ export default function PoolDetailPage() {
                   : token0Info.symbol || undefined
               }
               issuedSymbol={issuedTokenInfo.symbol || undefined}
+              token0Decimals={token0Info.decimals ?? 18}
+              token1Decimals={token1Info.decimals ?? 18}
             />
             <RecentTrades
               poolId={pool.id}

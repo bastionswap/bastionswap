@@ -45,19 +45,28 @@ interface PriceChartProps {
   baseSymbol?: string;
   /** Symbol of the issued token (e.g. "MEME") */
   issuedSymbol?: string;
+  /** Decimals for pool token0 */
+  token0Decimals?: number;
+  /** Decimals for pool token1 */
+  token1Decimals?: number;
 }
 
-export function PriceChart({ poolId, issuedToken, token0, baseSymbol, issuedSymbol }: PriceChartProps) {
+export function PriceChart({ poolId, issuedToken, token0, baseSymbol, issuedSymbol, token0Decimals = 18, token1Decimals = 18 }: PriceChartProps) {
   const [range, setRange] = useState<TimeRange>("24H");
   const { data: chartResult, isLoading } = usePoolChartData(poolId, range);
 
-  // Subgraph price = token1/token0. If issuedToken is token1, invert to show base per issued.
+  // Subgraph price = (sqrtPriceX96/2^96)^2 = token1_raw/token0_raw (no decimal adjustment).
+  // Apply decimal correction: humanPrice = rawPrice * 10^(decimals0 - decimals1)
+  const decimalAdj = 10 ** (token0Decimals - token1Decimals);
+
+  // If issuedToken is token1, invert to show base per issued.
   const needsInvert = !!(issuedToken && token0 && issuedToken.toLowerCase() !== token0.toLowerCase());
 
   const rawData = chartResult?.data ?? [];
-  const data = needsInvert
-    ? rawData.map((p) => ({ ...p, price: p.price > 0 ? 1 / p.price : 0 }))
-    : rawData;
+  const data = rawData.map((p) => {
+    const adjusted = p.price * decimalAdj;
+    return { ...p, price: needsInvert && adjusted > 0 ? 1 / adjusted : adjusted };
+  });
   const currentPrice = data.length > 0 ? data[data.length - 1].price : 0;
   const firstPrice = data.length > 0 ? data[0].price : 0;
   const priceChange = firstPrice > 0 ? ((currentPrice - firstPrice) / firstPrice) * 100 : 0;
