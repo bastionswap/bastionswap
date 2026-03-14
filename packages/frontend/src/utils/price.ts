@@ -18,6 +18,31 @@ export function sqrtPriceX96ToPrice(
  * Uses simplified ratio: amount1/amount0 = price, which is accurate
  * for full-range positions where tick bounds are extreme.
  */
+const Q96 = 2n ** 96n;
+
+/**
+ * Convert raw liquidity + sqrtPriceX96 to token amounts for a full-range position.
+ * For full-range: sqrtPriceLower ≈ 0, sqrtPriceUpper ≈ ∞
+ *   amount0 ≈ L * Q96 / sqrtPriceX96
+ *   amount1 ≈ L * sqrtPriceX96 / Q96
+ */
+export function liquidityToAmounts(
+  liquidity: bigint,
+  sqrtPriceX96: bigint,
+  decimals0: number,
+  decimals1: number
+): { amount0: number; amount1: number } {
+  if (liquidity === 0n || sqrtPriceX96 === 0n) return { amount0: 0, amount1: 0 };
+
+  const amount0Raw = (liquidity * Q96) / sqrtPriceX96;
+  const amount1Raw = (liquidity * sqrtPriceX96) / Q96;
+
+  const amount0 = Number(amount0Raw) / 10 ** decimals0;
+  const amount1 = Number(amount1Raw) / 10 ** decimals1;
+
+  return { amount0, amount1 };
+}
+
 export function computePairedAmount(
   sqrtPriceX96: bigint,
   inputAmount: bigint,

@@ -13,6 +13,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 import {IBastionRouter} from "../interfaces/IBastionRouter.sol";
@@ -341,6 +342,68 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         bytes32 salt = bytes32(uint256(uint160(owner)));
         bytes32 positionKey = keccak256(abi.encodePacked(address(this), tickLower, tickUpper, salt));
         liquidity = poolManager.getPositionLiquidity(key.toId(), positionKey);
+    }
+
+    /// @notice View uncollected fees for a user's position.
+    /// @param key The pool key.
+    /// @param owner The position owner (for salt computation).
+    /// @param tickLower Lower tick of the position (0,0 = full-range).
+    /// @param tickUpper Upper tick of the position (0,0 = full-range).
+    /// @return fees0 Uncollected token0 fees.
+    /// @return fees1 Uncollected token1 fees.
+    function getUnclaimedFees(
+        PoolKey calldata key,
+        address owner,
+        int24 tickLower,
+        int24 tickUpper
+    ) external view returns (uint256 fees0, uint256 fees1) {
+        (tickLower, tickUpper) = _resolveTicks(key.tickSpacing, tickLower, tickUpper);
+        bytes32 salt = bytes32(uint256(uint160(owner)));
+        PoolId poolId = key.toId();
+
+        (uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128) =
+            poolManager.getPositionInfo(poolId, address(this), tickLower, tickUpper, salt);
+
+        if (liquidity == 0) return (0, 0);
+
+        (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) =
+            poolManager.getFeeGrowthInside(poolId, tickLower, tickUpper);
+
+        unchecked {
+            fees0 = FullMath.mulDiv(
+                feeGrowthInside0X128 - feeGrowthInside0LastX128, liquidity, 1 << 128
+            );
+            fees1 = FullMath.mulDiv(
+                feeGrowthInside1X128 - feeGrowthInside1LastX128, liquidity, 1 << 128
+            );
+        }
+    }
+
+    /// @notice View uncollected fees for the issuer's salt-0 position.
+    function getIssuerUnclaimedFees(
+        PoolKey calldata key
+    ) external view returns (uint256 fees0, uint256 fees1) {
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        PoolId poolId = key.toId();
+
+        (uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128) =
+            poolManager.getPositionInfo(poolId, address(this), tickLower, tickUpper, bytes32(0));
+
+        if (liquidity == 0) return (0, 0);
+
+        (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) =
+            poolManager.getFeeGrowthInside(poolId, tickLower, tickUpper);
+
+        unchecked {
+            fees0 = FullMath.mulDiv(
+                feeGrowthInside0X128 - feeGrowthInside0LastX128, liquidity, 1 << 128
+            );
+            fees1 = FullMath.mulDiv(
+                feeGrowthInside1X128 - feeGrowthInside1LastX128, liquidity, 1 << 128
+            );
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
