@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount, useChainId, useReadContract } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { parseErrorMessage } from "@/utils/errorMessages";
@@ -10,6 +10,8 @@ import { useTokenInfo } from "@/hooks/useTokenInfo";
 import { usePoolSqrtPrice } from "@/hooks/usePoolSqrtPrice";
 import { computePairedAmount } from "@/utils/price";
 import { useTokenAllowance, useApprove, useTokenBalance } from "@/hooks/useSwap";
+import { getContracts } from "@/config/contracts";
+import { BastionPositionRouterABI } from "@/config/abis";
 import {
   useUserPositions,
   useAddLiquidity,
@@ -85,7 +87,10 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
                 poolKey={poolKey}
                 token0Symbol={token0Info.symbol || "T0"}
                 token1Symbol={token1Info.symbol || "T1"}
+                token0Decimals={token0Info.decimals ?? 18}
+                token1Decimals={token1Info.decimals ?? 18}
                 isIssuer={isIssuer}
+                owner={address!}
                 onAction={refetchPositions}
               />
             ))}
@@ -113,12 +118,24 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
 
 // ─── Position Card ──────────────────────────────────
 
+function formatFeeAmount(raw: bigint, decimals: number): string {
+  const val = Number(formatUnits(raw, decimals));
+  if (val === 0) return "0";
+  if (val < 0.0001) return "<0.0001";
+  if (val < 1) return val.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  if (val < 1000) return val.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return val.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 function PositionCard({
   position,
   poolKey,
   token0Symbol,
   token1Symbol,
+  token0Decimals,
+  token1Decimals,
   isIssuer,
+  owner,
   onAction,
 }: {
   position: SubgraphPosition;
@@ -131,7 +148,10 @@ function PositionCard({
   };
   token0Symbol: string;
   token1Symbol: string;
+  token0Decimals: number;
+  token1Decimals: number;
   isIssuer: boolean;
+  owner: `0x${string}`;
   onAction: () => void;
 }) {
   const [removePercent, setRemovePercent] = useState<number | null>(null);
@@ -200,9 +220,28 @@ function PositionCard({
 
   const isBusy = isRemoving || isRemoveConfirming || isCollecting || isCollectConfirming || isIssuerCollecting || isIssuerCollectConfirming;
 
+  // Uncollected fees query
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+  const { data: feeResult } = useReadContract({
+    address: contracts?.BastionPositionRouter as `0x${string}`,
+    abi: BastionPositionRouterABI,
+    functionName: isIssuer ? "getIssuerUnclaimedFees" : "getUnclaimedFees",
+    args: isIssuer
+      ? [poolKey]
+      : [poolKey, owner, position.tickLower, position.tickUpper],
+    query: {
+      enabled: !!contracts,
+      refetchInterval: 30_000,
+    },
+  });
+  const fees = feeResult as [bigint, bigint] | undefined;
+  const [fees0, fees1] = fees ?? [0n, 0n];
+  const hasFees = fees0 > 0n || fees1 > 0n;
+
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <div>
           <span className="text-sm font-medium text-gray-900">
             {position.isFullRange ? "Full Range" : `${position.tickLower} / ${position.tickUpper}`}
@@ -213,6 +252,24 @@ function PositionCard({
         </div>
         <span className="text-xs font-mono text-gray-500">
           {formatLiquidity(position.liquidity)} LP
+        </span>
+      </div>
+
+      {/* Uncollected Fees */}
+      <div className={`flex items-center justify-end gap-1.5 text-[11px] mb-3 ${hasFees ? "text-green-600" : "text-gray-400"}`}>
+        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span className="tabular-nums">
+          {hasFees ? (
+            <>
+              {fees0 > 0n && `${formatFeeAmount(fees0, token0Decimals)} ${token0Symbol}`}
+              {fees0 > 0n && fees1 > 0n && " + "}
+              {fees1 > 0n && `${formatFeeAmount(fees1, token1Decimals)} ${token1Symbol}`}
+            </>
+          ) : (
+            `0 ${token0Symbol} + 0 ${token1Symbol}`
+          )}
         </span>
       </div>
 
