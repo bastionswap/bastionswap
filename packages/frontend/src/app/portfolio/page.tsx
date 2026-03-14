@@ -108,23 +108,27 @@ function UnclaimedFees({ position, poolKey }: {
   });
 
   const feeResult = fees as [bigint, bigint] | undefined;
-  if (!feeResult) return null;
 
-  const [fees0, fees1] = feeResult;
-  if (fees0 === 0n && fees1 === 0n) return null;
-
+  const [fees0, fees1] = feeResult ?? [0n, 0n];
   const f0 = Number(formatUnits(fees0, t0.decimals ?? 18));
   const f1 = Number(formatUnits(fees1, t1.decimals ?? 18));
+  const hasAnyFees = f0 > 0 || f1 > 0;
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-green-600">
+    <div className={`flex items-center justify-end gap-1.5 text-[11px] ${hasAnyFees ? "text-green-600" : "text-gray-400"}`}>
       <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
       <span>
-        {f0 > 0 && `${formatTokenAmount(f0)} ${t0.displayName}`}
-        {f0 > 0 && f1 > 0 && " + "}
-        {f1 > 0 && `${formatTokenAmount(f1)} ${t1.displayName}`}
+        {hasAnyFees ? (
+          <>
+            {f0 > 0 && `${formatTokenAmount(f0)} ${t0.displayName}`}
+            {f0 > 0 && f1 > 0 && " + "}
+            {f1 > 0 && `${formatTokenAmount(f1)} ${t1.displayName}`}
+          </>
+        ) : (
+          `0 ${t0.displayName} + 0 ${t1.displayName}`
+        )}
       </span>
     </div>
   );
