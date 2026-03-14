@@ -1070,6 +1070,104 @@
   },
   {
     "type": "function",
+    "name": "getIssuerLpRemovalStatus",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "dailyRemoved",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "weeklyRemoved",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "dailyWindowStart",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "weeklyWindowStart",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "maxDailyBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "maxWeeklyBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "initialLiquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getIssuerSellStatus",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "dailySold",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "weeklySold",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "dailyWindowStart",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "weeklyWindowStart",
+        "type": "uint40",
+        "internalType": "uint40"
+      },
+      {
+        "name": "maxDailySellBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "maxWeeklySellBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "currentReserve",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getLpRatioBps",
     "inputs": [
       {

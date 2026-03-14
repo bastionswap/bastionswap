@@ -1228,6 +1228,86 @@ contract BastionHook is BaseTestHooks {
         return _isTriggered[poolId];
     }
 
+    /// @notice Get issuer sell tracking status for a pool.
+    /// @return dailySold Cumulative tokens sold in current daily window
+    /// @return weeklySold Cumulative tokens sold in current weekly window
+    /// @return dailyWindowStart Start timestamp of current daily window
+    /// @return weeklyWindowStart Start timestamp of current weekly window
+    /// @return maxDailySellBps Maximum daily sell in basis points (from commitment)
+    /// @return maxWeeklySellBps Maximum weekly sell in basis points (from commitment)
+    /// @return currentReserve Current issued token reserve in PoolManager (denominator for BPS calc)
+    function getIssuerSellStatus(PoolId poolId)
+        external
+        view
+        returns (
+            uint256 dailySold,
+            uint256 weeklySold,
+            uint40 dailyWindowStart,
+            uint40 weeklyWindowStart,
+            uint16 maxDailySellBps,
+            uint16 maxWeeklySellBps,
+            uint256 currentReserve
+        )
+    {
+        dailyWindowStart = _dailyWindowStart[poolId];
+        weeklyWindowStart = _weeklyWindowStart[poolId];
+
+        // Apply window reset logic (view-only projection)
+        dailySold = block.timestamp >= uint256(dailyWindowStart) + 1 days
+            ? 0
+            : _dailyCumulative[poolId];
+        weeklySold = block.timestamp >= uint256(weeklyWindowStart) + 7 days
+            ? 0
+            : _weeklyCumulative[poolId];
+
+        PoolCommitment memory c = _poolCommitments[poolId];
+        maxDailySellBps = c.maxDailySellBps;
+        maxWeeklySellBps = c.maxWeeklySellBps;
+
+        address issuedToken = _issuedTokens[poolId];
+        if (issuedToken != address(0)) {
+            currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
+        }
+    }
+
+    /// @notice Get issuer LP removal tracking status for a pool.
+    /// @return dailyRemoved LP removed in current daily window
+    /// @return weeklyRemoved LP removed in current weekly window
+    /// @return dailyWindowStart Start timestamp of current daily window
+    /// @return weeklyWindowStart Start timestamp of current weekly window
+    /// @return maxDailyBps Maximum daily LP removal in basis points (from commitment)
+    /// @return maxWeeklyBps Maximum weekly LP removal in basis points (from commitment)
+    /// @return initialLiquidity Initial liquidity at pool creation (denominator for BPS calc)
+    function getIssuerLpRemovalStatus(PoolId poolId)
+        external
+        view
+        returns (
+            uint256 dailyRemoved,
+            uint256 weeklyRemoved,
+            uint40 dailyWindowStart,
+            uint40 weeklyWindowStart,
+            uint16 maxDailyBps,
+            uint16 maxWeeklyBps,
+            uint256 initialLiquidity
+        )
+    {
+        dailyWindowStart = _dailyLpWindowStart[poolId];
+        weeklyWindowStart = _weeklyLpWindowStart[poolId];
+
+        // Apply window reset logic (view-only projection)
+        dailyRemoved = block.timestamp >= uint256(dailyWindowStart) + 1 days
+            ? 0
+            : _dailyLpRemoved[poolId];
+        weeklyRemoved = block.timestamp >= uint256(weeklyWindowStart) + 7 days
+            ? 0
+            : _weeklyLpRemoved[poolId];
+
+        PoolCommitment memory c = _poolCommitments[poolId];
+        maxDailyBps = c.maxDailyLpRemovalBps;
+        maxWeeklyBps = c.maxWeeklyLpRemovalBps;
+        initialLiquidity = _initialLiquidity[poolId];
+    }
+
     // ─── Transient Storage Helpers (EIP-1153) ──────────────────────────
 
     function _tstore(bytes32 slot, uint256 value) internal {

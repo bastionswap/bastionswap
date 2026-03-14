@@ -287,6 +287,20 @@ export default function PoolDetailPage() {
     args: [poolId as `0x${string}`],
     query: { enabled: !!triggerOracleAddress && !!pool?.isBastion },
   });
+  const { data: issuerSellStatus } = useReadContract({
+    address: hookAddress,
+    abi: BastionHookAbi,
+    functionName: "getIssuerSellStatus",
+    args: [poolId as `0x${string}`],
+    query: { enabled: !!hookAddress && !!pool?.isBastion },
+  });
+  const { data: issuerLpRemovalStatus } = useReadContract({
+    address: hookAddress,
+    abi: BastionHookAbi,
+    functionName: "getIssuerLpRemovalStatus",
+    args: [poolId as `0x${string}`],
+    query: { enabled: !!hookAddress && !!pool?.isBastion },
+  });
 
   const { balance: holderBalance } = useTokenBalance(
     pool?.issuedToken as `0x${string}` | undefined,
@@ -614,6 +628,8 @@ export default function PoolDetailPage() {
                         weeklyDumpWindowSeconds: number | bigint;
                         weeklyDumpThresholdPercent: number | bigint;
                       } | undefined}
+                      issuerSellStatus={issuerSellStatus as readonly [bigint, bigint, number, number, number, number, bigint] | undefined}
+                      issuerLpRemovalStatus={issuerLpRemovalStatus as readonly [bigint, bigint, number, number, number, number, bigint] | undefined}
                     />
                   ) : (
                     <div className="text-center py-8 text-sm text-gray-400">

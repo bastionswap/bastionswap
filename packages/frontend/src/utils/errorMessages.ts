@@ -18,11 +18,19 @@ const ERROR_MAP: Record<string, string> = {
   HookNotSet: "Protocol not fully initialized. Please try again later.",
 
   // ─── BastionHook ──────────────────────────────────────
-  ExceedsVestedAmount: "Cannot remove more LP than vested amount.",
+  ExceedsVestedAmount: "Cannot remove more LP than vested amount. Check your vesting schedule.",
   EscrowTriggered: "This pool has been flagged. Fee collection is blocked.",
   BelowMinBaseAmount: "Base token amount is below the required minimum.",
   NoAllowedBaseToken: "At least one token must be an allowed base token (ETH, WETH, or USDC).",
   InvalidHookData: "Invalid pool creation data.",
+
+  // ─── BastionHook: Issuer Limits ─────────────────────
+  IssuerDailySellExceeded: "Daily sell limit exceeded. You cannot sell more issued tokens today.",
+  IssuerWeeklySellExceeded: "Weekly sell limit exceeded. You cannot sell more issued tokens this week.",
+  IssuerDumpDetected: "Sell limit exceeded. Your cumulative sells have breached the allowed threshold.",
+  PoolTriggered: "This pool has been triggered. Issuer sells and LP removal are permanently blocked.",
+  DailyLpRemovalExceeded: "Daily LP removal limit exceeded. Try again tomorrow.",
+  WeeklyLpRemovalExceeded: "Weekly LP removal limit exceeded. Try again next week.",
 
   // ─── Pool ─────────────────────────────────────────────
   PoolAlreadyInitialized: "A pool already exists for this token pair.",

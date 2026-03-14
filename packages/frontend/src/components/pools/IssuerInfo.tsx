@@ -44,6 +44,8 @@ interface IssuerInfoProps {
   poolCommitment?: PoolCommitmentData;
   isStricterThanDefault?: boolean;
   triggerConfig?: TriggerConfigData;
+  issuerSellStatus?: readonly [bigint, bigint, number, number, number, number, bigint];
+  issuerLpRemovalStatus?: readonly [bigint, bigint, number, number, number, number, bigint];
 }
 
 const DEFAULTS = {
@@ -111,6 +113,54 @@ function CommitmentTag({ value, defaultValue, isLowerBetter }: {
   return <span className="text-[10px] text-amber-600 ml-1.5 px-1.5 py-0.5 rounded bg-amber-50">Relaxed</span>;
 }
 
+function UsageBar({ used, max, label, windowStart }: {
+  used: number;
+  max: number;
+  label: string;
+  windowStart: number;
+}) {
+  const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
+  const isNearLimit = pct >= 80;
+  const isAtLimit = pct >= 100;
+
+  // Calculate window reset time
+  const isDaily = label.toLowerCase().includes("daily");
+  const windowDuration = isDaily ? 86400 : 7 * 86400;
+  const resetTime = windowStart > 0 ? windowStart + windowDuration : 0;
+  const now = Math.floor(Date.now() / 1000);
+  const timeLeft = resetTime > now ? resetTime - now : 0;
+
+  const resetLabel = timeLeft > 0
+    ? isDaily
+      ? `${Math.floor(timeLeft / 3600)}h ${Math.floor((timeLeft % 3600) / 60)}m`
+      : `${Math.floor(timeLeft / 86400)}d ${Math.floor((timeLeft % 86400) / 3600)}h`
+    : "—";
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-gray-500">{label}</span>
+        <span className={`font-medium tabular-nums ${isAtLimit ? "text-red-600" : isNearLimit ? "text-amber-600" : "text-gray-700"}`}>
+          {formatBps(used)} / {formatBps(max)}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${
+            isAtLimit ? "bg-red-500" : isNearLimit ? "bg-amber-400" : "bg-bastion-400"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {timeLeft > 0 && (
+        <p className="text-[10px] text-gray-400">
+          Resets in {resetLabel}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   const chainId = useChainId();
   const contracts = getContracts(chainId);
@@ -156,7 +206,7 @@ function ScoreBreakdown({ issuerAddress }: { issuerAddress: string }) {
   );
 }
 
-export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness, poolCommitment, isStricterThanDefault, triggerConfig }: IssuerInfoProps) {
+export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, vestingStrictness, poolCommitment, isStricterThanDefault, triggerConfig, issuerSellStatus, issuerLpRemovalStatus }: IssuerInfoProps) {
   const score = parseInt(issuer.reputationScore);
   const created = issuer.totalEscrowsCreated ?? 0;
   const completed = issuer.totalEscrowsCompleted ?? 0;
@@ -338,6 +388,77 @@ export function IssuerInfo({ issuer, commitment, lockDuration, vestingDuration, 
         <div className="border-t border-subtle px-6 py-4">
           <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-2">Commitments</p>
           <p className="text-xs text-gray-400">Using default parameters</p>
+        </div>
+      )}
+
+      {/* Live Issuer Status */}
+      {(issuerSellStatus || issuerLpRemovalStatus) && (
+        <div className="border-t border-subtle px-6 py-4">
+          <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3">Current Usage</p>
+          <div className="space-y-3">
+            {issuerSellStatus && (() => {
+              const [dailySold, weeklySold, dailyWindowStart, weeklyWindowStart, maxDailyBps, maxWeeklyBps, currentReserve] = issuerSellStatus;
+              const reserve = Number(currentReserve);
+              if (reserve === 0 && Number(maxDailyBps) === 0 && Number(maxWeeklyBps) === 0) return null;
+
+              const dailyUsedBps = reserve > 0 ? Math.round((Number(dailySold) * 10_000) / reserve) : 0;
+              const weeklyUsedBps = reserve > 0 ? Math.round((Number(weeklySold) * 10_000) / reserve) : 0;
+
+              return (
+                <>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider">Token Sells</p>
+                  {Number(maxDailyBps) > 0 && (
+                    <UsageBar
+                      used={dailyUsedBps}
+                      max={Number(maxDailyBps)}
+                      label="Daily Sell"
+                      windowStart={Number(dailyWindowStart)}
+                    />
+                  )}
+                  {Number(maxWeeklyBps) > 0 && (
+                    <UsageBar
+                      used={weeklyUsedBps}
+                      max={Number(maxWeeklyBps)}
+                      label="Weekly Sell"
+                      windowStart={Number(weeklyWindowStart)}
+                    />
+                  )}
+                </>
+              );
+            })()}
+            {issuerLpRemovalStatus && (() => {
+              const [dailyRemoved, weeklyRemoved, dailyWindowStart, weeklyWindowStart, maxDailyBps, maxWeeklyBps, initialLiquidity] = issuerLpRemovalStatus;
+              const initLiq = Number(initialLiquidity);
+              if (initLiq === 0) return null;
+
+              const dailyUsedBps = Math.round((Number(dailyRemoved) * 10_000) / initLiq);
+              const weeklyUsedBps = Math.round((Number(weeklyRemoved) * 10_000) / initLiq);
+
+              if (Number(maxDailyBps) === 0 && Number(maxWeeklyBps) === 0) return null;
+
+              return (
+                <>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider mt-2">LP Removal</p>
+                  {Number(maxDailyBps) > 0 && (
+                    <UsageBar
+                      used={dailyUsedBps}
+                      max={Number(maxDailyBps)}
+                      label="Daily LP Removal"
+                      windowStart={Number(dailyWindowStart)}
+                    />
+                  )}
+                  {Number(maxWeeklyBps) > 0 && (
+                    <UsageBar
+                      used={weeklyUsedBps}
+                      max={Number(maxWeeklyBps)}
+                      label="Weekly LP Removal"
+                      windowStart={Number(weeklyWindowStart)}
+                    />
+                  )}
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
     </div>
