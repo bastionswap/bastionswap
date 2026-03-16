@@ -58,6 +58,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     error EscrowTriggered();
     error NothingToRelease();
     error CommitmentNotStricter();
+    error ForceRemovalCallFailed(bytes reason);
     error LockDurationTooShort();
     error VestingDurationTooShort();
 
@@ -204,30 +205,24 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         if (escrow.createdAt == 0) revert EscrowNotFound();
         if (escrow.isTriggered) revert EscrowTriggered();
 
-        // CEI: effects before interactions
-        escrow.isTriggered = true;
-        escrow.triggerType = triggerType_;
-
         // Compute remaining liquidity to seize
         uint128 remainingLiquidity = escrow.totalLiquidity - escrow.removedLiquidity;
-        escrow.removedLiquidity = escrow.totalLiquidity; // all seized
 
-        // Force-remove issuer LP via hook → router → poolManager
+        // Force-remove issuer LP via hook → router → poolManager (reverts on failure)
         if (remainingLiquidity > 0) {
-            // Look up the poolId for this escrow
             PoolId poolId = _escrowPoolIds[escrowId];
-            // Use low-level call to safely handle non-contract addresses and reverts
             (bool success, bytes memory reason) = BASTION_HOOK.call(
                 abi.encodeCall(IBastionHook.forceRemoveIssuerLP, (poolId))
             );
-            if (success) {
-                emit ForceRemoval(escrowId, triggerType_, remainingLiquidity);
-            } else {
-                emit ForceRemovalFailed(escrowId, reason);
-            }
-        } else {
-            emit ForceRemoval(escrowId, triggerType_, 0);
+            if (!success) revert ForceRemovalCallFailed(reason);
         }
+
+        // Effects after successful interaction (protected by nonReentrant)
+        escrow.isTriggered = true;
+        escrow.triggerType = triggerType_;
+        escrow.removedLiquidity = escrow.totalLiquidity; // all seized
+
+        emit ForceRemoval(escrowId, triggerType_, remainingLiquidity);
     }
 
     /// @inheritdoc IEscrowVault

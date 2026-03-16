@@ -261,20 +261,20 @@ contract GasBenchmarkTest is Test, Deployers {
     function test_gasBenchmark_beforeRemoveLiquidity() public {
         _initPoolWithIssuer();
 
-        // Add more liquidity to have something to remove
+        // Add more liquidity to have something to remove (non-issuer position, salt != 0)
+        bytes32 salt = bytes32(uint256(uint160(address(this))));
         modifyLiquidityRouter.modifyLiquidity(
             poolKey,
-            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 10e18, salt: 0}),
-            ""
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 10e18, salt: salt}),
+            abi.encode(address(this))
         );
 
-        // Must pass hookData with user address since modifyLiquidityRouter == _issuerLPOwner
         bytes memory hookData = abi.encode(address(this));
 
         uint256 gasBefore = gasleft();
         modifyLiquidityRouter.modifyLiquidity(
             poolKey,
-            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: -5e18, salt: 0}),
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: -5e18, salt: salt}),
             hookData
         );
         uint256 gasUsed = gasBefore - gasleft();

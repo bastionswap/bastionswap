@@ -163,6 +163,7 @@ contract BastionHook is BaseTestHooks {
     error OnlyEscrowVault();
     error OnlyOwner();
     error OnlyGovernance();
+    error OnlyIssuer();
     error RouterAlreadySet();
     error RouterNotSet();
     error InvalidHookData();
@@ -359,14 +360,19 @@ contract BastionHook is BaseTestHooks {
 
         if (removeAmount == 0) {
             // Fee collection (liquidityDelta == 0)
-            // Block issuer fee collection after trigger
-            if (sender == _issuerLPOwner[poolId] && hookData.length > 0) {
+            // Force removal in progress → skip all access checks
+            if (_tload(_FORCE_REMOVAL_SLOT) == 1) {
+                return IHooks.beforeRemoveLiquidity.selector;
+            }
+            if (sender == _issuerLPOwner[poolId] && params.salt == bytes32(0)) {
+                // Salt-0 = issuer's position — only issuer may collect fees (C-02 fix)
+                if (hookData.length == 0) revert MustIdentifyUser();
                 address user = abi.decode(hookData, (address));
-                if (user == issuer) {
-                    uint256 escrowId = _escrowIds[poolId];
-                    if (escrowVault.isTriggered(escrowId)) {
-                        revert EscrowTriggered();
-                    }
+                if (user != issuer) revert OnlyIssuer();
+                // Block issuer fee collection after trigger
+                uint256 escrowId = _escrowIds[poolId];
+                if (escrowVault.isTriggered(escrowId)) {
+                    revert EscrowTriggered();
                 }
             }
             return IHooks.beforeRemoveLiquidity.selector;
@@ -386,7 +392,9 @@ contract BastionHook is BaseTestHooks {
         if (sender == _issuerLPOwner[poolId]) {
             if (hookData.length == 0) revert MustIdentifyUser();
             address user = abi.decode(hookData, (address));
-            if (user == issuer) {
+            if (params.salt == bytes32(0)) {
+                // Salt-0 = issuer's position — only issuer may remove (C-01 fix)
+                if (user != issuer) revert OnlyIssuer();
                 // Block issuer LP removal after trigger
                 if (isPoolTriggered[poolId]) revert PoolTriggered();
 
@@ -399,7 +407,7 @@ contract BastionHook is BaseTestHooks {
                     revert ExceedsVestedAmount(liquidityToRemove, removable);
                 }
                 escrowVault.recordLPRemoval(escrowId, liquidityToRemove);
-                // Decrement issuer liquidity tracking (C-01 fix)
+                // Decrement issuer liquidity tracking
                 _issuerLiquidity[poolId] -= removeAmount;
 
                 // Fire COMMITMENT_HONORED when escrow is fully completed (no trigger = honored)
@@ -424,7 +432,7 @@ contract BastionHook is BaseTestHooks {
                     }
                 }
             }
-            // else: non-issuer using same router → allow freely
+            // else: non-zero salt = general LP position → allow freely
         }
         // else: different router → different position → allow freely
 
@@ -551,8 +559,8 @@ contract BastionHook is BaseTestHooks {
                     int128 issuedDelta = issuedIsToken0 ? delta.amount0() : delta.amount1();
                     if (issuedDelta < 0) {
                         uint256 soldAmount = uint256(uint128(-issuedDelta));
-                        uint256 currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
-                        if (currentReserve > 0) {
+                        uint256 poolReserve = _getPoolIssuedTokenReserve(poolId);
+                        if (poolReserve > 0) {
                             // Enforce sell limits (2nd layer — catches all paths, revert only)
                             PoolCommitment memory commitment = _poolCommitments[poolId];
                             if (commitment.isSet) {
@@ -1033,6 +1041,32 @@ contract BastionHook is BaseTestHooks {
         return FullMath.mulDiv(liquidity, effectiveUpper - sqrtPriceAX96, FixedPoint96.Q96);
     }
 
+    /// @dev Returns the current reserve of the issued token in the pool (H-02 fix).
+    ///      Computes virtual reserves from in-range liquidity and current sqrtPrice,
+    ///      giving the per-pool reserve instead of the global balanceOf(poolManager).
+    function _getPoolIssuedTokenReserve(PoolId poolId) internal view returns (uint256) {
+        address issuedToken = _issuedTokens[poolId];
+        if (issuedToken == address(0)) return 0;
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        uint128 liquidity = poolManager.getLiquidity(poolId);
+        if (liquidity == 0) return 0;
+
+        PoolKey storage key = _poolKeys[poolId];
+        int24 tickSpacing = key.tickSpacing;
+        if (tickSpacing == 0) return 0;
+        int24 tl = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tu = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+
+        bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
+
+        if (issuedIsToken0) {
+            return _getAmount0ForLiquidity(sqrtPriceX96, TickMath.getSqrtPriceAtTick(tl), TickMath.getSqrtPriceAtTick(tu), liquidity);
+        } else {
+            return _getAmount1ForLiquidity(sqrtPriceX96, TickMath.getSqrtPriceAtTick(tl), TickMath.getSqrtPriceAtTick(tu), liquidity);
+        }
+    }
+
     /// @dev Calculate and collect insurance fee from the swap input via PoolManager delta.
     ///      Takes fee from the base token (specified currency) using poolManager.take(),
     ///      then deposits to InsurancePool. Works for both ETH and ERC-20 base tokens.
@@ -1148,9 +1182,8 @@ contract BastionHook is BaseTestHooks {
         PoolCommitment memory commitment,
         uint256 sellAmount
     ) internal view {
-        address issuedToken = _issuedTokens[poolId];
-        uint256 currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
-        if (currentReserve == 0) return;
+        uint256 poolReserve = _getPoolIssuedTokenReserve(poolId);
+        if (poolReserve == 0) return;
 
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
@@ -1161,7 +1194,7 @@ contract BastionHook is BaseTestHooks {
                 dailyCum = 0;
             }
             uint256 projected = dailyCum + sellAmount;
-            uint256 sellBps = (projected * 10_000 + currentReserve - 1) / currentReserve;
+            uint256 sellBps = (projected * 10_000 + poolReserve - 1) / poolReserve;
             if (sellBps > commitment.maxDailySellBps) revert IssuerDailySellExceeded();
         }
 
@@ -1173,7 +1206,7 @@ contract BastionHook is BaseTestHooks {
                 weeklyCum = 0;
             }
             uint256 projected = weeklyCum + sellAmount;
-            uint256 sellBps = (projected * 10_000 + currentReserve - 1) / currentReserve;
+            uint256 sellBps = (projected * 10_000 + poolReserve - 1) / poolReserve;
             if (sellBps > commitment.maxWeeklySellBps) revert IssuerWeeklySellExceeded();
         }
     }
@@ -1185,9 +1218,8 @@ contract BastionHook is BaseTestHooks {
         PoolCommitment memory commitment,
         uint256 soldAmount
     ) internal {
-        address issuedToken = _issuedTokens[poolId];
-        uint256 currentReserve = ERC20(issuedToken).balanceOf(address(poolManager));
-        if (currentReserve == 0) return;
+        uint256 poolReserve = _getPoolIssuedTokenReserve(poolId);
+        if (poolReserve == 0) return;
 
         // Reset daily window if expired
         uint40 dailyStart = dailySellWindowStart[poolId];
@@ -1209,13 +1241,13 @@ contract BastionHook is BaseTestHooks {
 
         // Check daily limit
         if (commitment.maxDailySellBps > 0) {
-            uint256 dailyBps = (dailySellCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
+            uint256 dailyBps = (dailySellCumulative[poolId] * 10_000 + poolReserve - 1) / poolReserve;
             if (dailyBps > commitment.maxDailySellBps) revert IssuerDumpDetected();
         }
 
         // Check weekly limit
         if (commitment.maxWeeklySellBps > 0) {
-            uint256 weeklyBps = (weeklySellCumulative[poolId] * 10_000 + currentReserve - 1) / currentReserve;
+            uint256 weeklyBps = (weeklySellCumulative[poolId] * 10_000 + poolReserve - 1) / poolReserve;
             if (weeklyBps > commitment.maxWeeklySellBps) revert IssuerDumpDetected();
         }
     }
@@ -1225,6 +1257,11 @@ contract BastionHook is BaseTestHooks {
     /// @notice Get the initial total supply recorded at pool creation.
     function getInitialTotalSupply(PoolId poolId) external view returns (uint256) {
         return _initialTotalSupply[poolId];
+    }
+
+    /// @notice Get the current virtual reserve of the issued token in the pool (H-02 fix).
+    function getPoolIssuedTokenReserve(PoolId poolId) external view returns (uint256) {
+        return _getPoolIssuedTokenReserve(poolId);
     }
 
     // ─── Transient Storage Helpers (EIP-1153) ──────────────────────────

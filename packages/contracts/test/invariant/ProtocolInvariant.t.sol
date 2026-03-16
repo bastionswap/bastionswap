@@ -32,6 +32,8 @@ contract MockBastionHookSimple {
         return _issuers[PoolId.unwrap(poolId)];
     }
 
+    function forceRemoveIssuerLP(PoolId) external {}
+
     receive() external payable {}
 }
 

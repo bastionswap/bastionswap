@@ -398,6 +398,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         delete emergencyRequests[requestId];
 
         PoolData storage pool = _getPool(req.poolId);
+        if (pool.isTriggered) revert AlreadyTriggered();
         if (pool.balance < req.amount) revert InsufficientPoolBalance();
 
         pool.balance -= req.amount;

@@ -27,6 +27,11 @@ contract MockReputationEngine {
     function getScore(address) external pure returns (uint256) { return 500; }
 }
 
+contract MockBastionRouter {
+    function forceRemoveLiquidity(PoolKey calldata, uint128, address) external {}
+    function forceCollectFees(PoolKey calldata, address) external {}
+}
+
 /// @title E2E Scenario Tests for BastionSwap Protocol (LP Permission Model)
 /// @notice Validates the protocol's core value proposition through three full lifecycle scenarios:
 ///         1. Rug-pull attempt -> LP removal blocked by vesting + Trigger lockdown
@@ -100,8 +105,15 @@ contract E2E_ScenariosTest is Test, Deployers {
             vm.store(hookAddr, bytes32(uint256(24)), bytes32(uint256(uint160(governance))));
             // Restore duration params + LP removal defaults: defaultLockDuration=7days, defaultVestingDuration=83days, minLockDuration=7days, minVestingDuration=7days, dailyLpRemovalBps=1000, weeklyLpRemovalBps=3000
             vm.store(hookAddr, bytes32(uint256(26)), bytes32(uint256(uint40(7 days)) | (uint256(uint40(83 days)) << 40) | (uint256(uint40(7 days)) << 80) | (uint256(uint40(7 days)) << 120) | (uint256(uint16(1000)) << 160) | (uint256(uint16(3000)) << 176)));
+            // Restore _owner at slot 21 so setBastionRouter works
+            vm.store(hookAddr, bytes32(uint256(21)), bytes32(uint256(uint160(governance))));
         }
         hook = BastionHook(payable(hookAddr));
+
+        // Wire up mock router for force removal
+        MockBastionRouter mockRouter = new MockBastionRouter();
+        vm.prank(governance);
+        hook.setBastionRouter(address(mockRouter));
 
         issuedToken = new MockERC20("IssuedToken", "ISS", 18);
         baseToken = new MockERC20("BaseToken", "BASE", 18);

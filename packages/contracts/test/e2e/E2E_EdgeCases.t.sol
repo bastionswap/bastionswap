@@ -444,7 +444,7 @@ contract E2E_EdgeCases is Test {
 
     function test_SellExactlyAtLimit_Allowed() public {
         // Default daily sell limit is 300 bps (3%)
-        uint256 poolReserve = tokenA.balanceOf(address(pm));
+        uint256 poolReserve = hook.getPoolIssuedTokenReserve(poolKeyA.toId());
         // Sell exactly 3% of pool reserve = at the limit -> should succeed with > comparison
         uint256 exactLimitAmount = (poolReserve * 300) / 10_000;
 
@@ -474,7 +474,7 @@ contract E2E_EdgeCases is Test {
 
         (PoolKey memory key,) = _createPoolForIssuer(issuerB, tkLimit, 5 ether, 100_000e18, cfg);
 
-        uint256 poolReserve = tkLimit.balanceOf(address(pm));
+        uint256 poolReserve = hook.getPoolIssuedTokenReserve(key.toId());
         // Sell exactly at limit (should succeed)
         uint256 atLimit = (poolReserve * 300) / 10_000;
 
@@ -489,7 +489,7 @@ contract E2E_EdgeCases is Test {
         // (due to ceil division rounding).
         // Re-read pool reserve (grows after sell since issued tokens flow into pool)
         vm.warp(block.timestamp + 1 days);
-        uint256 newReserve = tkLimit.balanceOf(address(pm));
+        uint256 newReserve = hook.getPoolIssuedTokenReserve(key.toId());
         uint256 overLimit = (newReserve * (300 + 1)) / 10_000; // 301 bps = 3.01%
         vm.expectRevert();
         swapRouter.swapExactInput(key, false, overLimit, 0, block.timestamp + 3600);

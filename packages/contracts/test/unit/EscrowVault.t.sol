@@ -354,15 +354,17 @@ contract EscrowVaultTest is Test {
         assertTrue(mockHook.forceRemoveCalled());
     }
 
-    function test_triggerForceRemoval_persistsOnHookFailure() public {
+    function test_triggerForceRemoval_revertsOnHookFailure() public {
         _createDefaultEscrow();
 
         mockHook.setShouldRevert(true);
 
         vm.prank(oracle);
+        vm.expectRevert();
         vault.triggerForceRemoval(defaultEscrowId, 1);
 
-        assertEq(vault.getRemovableLiquidity(defaultEscrowId), 0);
+        // Escrow should NOT be triggered (call reverted, state rolled back)
+        assertFalse(vault.isTriggered(defaultEscrowId));
     }
 
     function test_triggerForceRemoval_revertsNotOracle() public {

@@ -17,6 +17,7 @@ import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {ISignatureTransfer} from "permit2/src/interfaces/ISignatureTransfer.sol";
 import {IBastionRouter} from "../interfaces/IBastionRouter.sol";
+import {IBastionHook} from "../interfaces/IBastionHook.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 
@@ -71,6 +72,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     error OnlyDeployer();
     error HookAlreadySet();
     error HookNotSet();
+    error OnlyIssuer();
     error SlippageExceeded();
     error FeeOnTransferNotSupported();
     error RebaseTokenNotSupported();
@@ -198,10 +200,10 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     ) external payable returns (PoolId poolId) {
         if (bastionHook == address(0)) revert HookNotSet();
 
-        // Rebase-only check — no standard transferFrom available for FoT test
-        _validateTokenCompatibility(token, false);
+        // Full token compatibility check (FoT + rebase)
+        _validateTokenCompatibility(token, true);
         if (baseToken != address(0)) {
-            _validateTokenCompatibility(baseToken, false);
+            _validateTokenCompatibility(baseToken, true);
         }
 
         (PoolKey memory key, uint256 amount0Max, uint256 amount1Max) =
@@ -297,6 +299,8 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         uint256 deadline
     ) external {
         if (block.timestamp > deadline) revert Expired();
+        if (bastionHook == address(0)) revert HookNotSet();
+        if (msg.sender != IBastionHook(bastionHook).getPoolIssuer(key.toId())) revert OnlyIssuer();
         int24 tickSpacing = key.tickSpacing;
         int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
         int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
@@ -329,6 +333,8 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     /// @dev Issuer LP uses salt=0, so needs a separate fee collection path.
     ///      Passes hookData with sender so BastionHook can verify issuer & check trigger.
     function collectIssuerFees(PoolKey calldata key) external {
+        if (bastionHook == address(0)) revert HookNotSet();
+        if (msg.sender != IBastionHook(bastionHook).getPoolIssuer(key.toId())) revert OnlyIssuer();
         int24 tickSpacing = key.tickSpacing;
         int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
         int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
