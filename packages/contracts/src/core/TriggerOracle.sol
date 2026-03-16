@@ -110,6 +110,8 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     // ─── Constructor ──────────────────────────────────────────────────
 
+    error ZeroConstructorAddress();
+
     constructor(
         address bastionHook,
         address escrowVault,
@@ -118,6 +120,13 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         address reputationEngine,
         address governance
     ) {
+        if (bastionHook == address(0)) revert ZeroConstructorAddress();
+        if (escrowVault == address(0)) revert ZeroConstructorAddress();
+        if (insurancePool == address(0)) revert ZeroConstructorAddress();
+        if (guardian_ == address(0)) revert ZeroConstructorAddress();
+        if (reputationEngine == address(0)) revert ZeroConstructorAddress();
+        if (governance == address(0)) revert ZeroConstructorAddress();
+
         BASTION_HOOK = bastionHook;
         ESCROW_VAULT = escrowVault;
         INSURANCE_POOL = insurancePool;

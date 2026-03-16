@@ -70,7 +70,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         deployFreshManagerAndRouters();
 
         uint160 flags = uint160(
-            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
+            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
         );
         address hookAddr = address(flags);
 
@@ -291,9 +291,6 @@ contract E2E_ScenariosTest is Test, Deployers {
             ModifyLiquidityParams({tickLower: TICK_LOWER, tickUpper: TICK_UPPER, liquidityDelta: -int256(uint256(safeChunk)), salt: 0}),
             abi.encode(issuerAddr)
         );
-
-        // Not yet triggerable (within daily and weekly limits)
-        assertFalse(hook.isLPRemovalTriggerable(_poolId), "should not be triggerable after first removal");
 
         // Second removal within same day exceeds daily limit (90+90=180e18 = 18% > 10%)
         vm.warp(block.timestamp + 6 hours);

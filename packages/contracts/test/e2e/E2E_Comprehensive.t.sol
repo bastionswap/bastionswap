@@ -48,6 +48,7 @@ contract E2E_Comprehensive is Test {
     uint160 constant HOOK_FLAGS = uint160(
         Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
             | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
+            | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
     );
 
     // ─── Test Accounts (Anvil defaults) ─────────────────────────────
@@ -387,9 +388,6 @@ contract E2E_Comprehensive is Test {
         assertEq(c.maxDailyLpRemovalBps, 500, "daily LP 5%");
         assertEq(c.maxDailySellBps, 200, "daily sell 2%");
         assertEq(c.maxWeeklySellBps, 1000, "weekly sell 10%");
-
-        // 2. Stricter than default
-        assertTrue(hook.isCommitmentStricterThanDefault(pid), "stricter");
     }
 
     // Scenario 3: Pool creation failures
@@ -980,8 +978,6 @@ contract E2E_Comprehensive is Test {
         uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
         positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
-
-        assertFalse(hook.isLPRemovalTriggerable(poolIdA), "not yet triggerable");
 
         // Another 9% in the same day -> daily total 18% > 10% daily limit -> reverts
         vm.prank(issuerA);
@@ -1804,7 +1800,6 @@ contract E2E_Comprehensive is Test {
 
         // No trigger fired — just reverted
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
-        assertFalse(hook.isLPRemovalTriggerable(poolIdA), "not triggerable");
     }
 
     // v1: executeTrigger interface preserved for v2 watcher network
@@ -1812,9 +1807,6 @@ contract E2E_Comprehensive is Test {
         // Verify executeTrigger exists and is callable (fails with threshold check, not missing function)
         vm.expectRevert(); // "Threshold not met" or similar — function exists
         hook.executeTrigger(poolIdA);
-
-        // Verify isLPRemovalTriggerable view works
-        assertFalse(hook.isLPRemovalTriggerable(poolIdA));
 
         // Verify direct trigger from hook context works (v2 path)
         uint256 totalSupply = tokenA.totalSupply();

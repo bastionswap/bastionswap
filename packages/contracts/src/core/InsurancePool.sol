@@ -80,6 +80,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint256 escrowBaseTokenBalance; // ERC-20 base tokens from force-removed LP
         address escrowBaseToken; // base token address from escrow
         uint256 triggerBlockNumber; // block number when trigger executed (flash-loan protection)
+        uint40 snapshotMerkleDeadline; // governance param snapshot at trigger time (M-03 fix)
+        uint40 snapshotMerkleClaimPeriod; // governance param snapshot at trigger time (M-03 fix)
+        uint40 snapshotFallbackClaimPeriod; // governance param snapshot at trigger time (M-03 fix)
         mapping(address => bool) claimed;
     }
 
@@ -155,6 +158,10 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     // ─── Constructor ──────────────────────────────────────────────────
 
     constructor(address bastionHook, address triggerOracle, address governance, address escrowVault, address treasury_) {
+        if (bastionHook == address(0)) revert ZeroAddress();
+        if (triggerOracle == address(0)) revert ZeroAddress();
+        if (governance == address(0)) revert ZeroAddress();
+
         BASTION_HOOK = bastionHook;
         TRIGGER_ORACLE = triggerOracle;
         GOVERNANCE = governance;
@@ -231,6 +238,10 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         pool.triggerTimestamp = uint40(block.timestamp);
         pool.triggerBlockNumber = block.number;
         pool.triggerType = triggerType;
+        // Snapshot governance params at trigger time (M-03 fix)
+        pool.snapshotMerkleDeadline = merkleSubmissionDeadline;
+        pool.snapshotMerkleClaimPeriod = merkleClaimPeriod;
+        pool.snapshotFallbackClaimPeriod = fallbackClaimPeriod;
         pool.totalEligibleSupply = totalEligibleSupply;
         pool.payoutBalance = totalPayout;
         pool.tokenPayoutBalance = pool.escrowTokenBalance; // snapshot issued token balance
@@ -254,8 +265,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (!pool.isTriggered) revert NotTriggered();
         if (pool.useMerkleProof) revert MerkleAlreadySubmitted();
 
-        // Fallback is irreversible: if 24h has passed, merkle submission is permanently blocked
-        if (block.timestamp > pool.triggerTimestamp + merkleSubmissionDeadline) {
+        // Fallback is irreversible: if deadline has passed, merkle submission is permanently blocked
+        if (block.timestamp > pool.triggerTimestamp + pool.snapshotMerkleDeadline) {
             revert FallbackAlreadyActive();
         }
 
@@ -283,8 +294,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (pool.claimed[msg.sender]) revert AlreadyClaimed();
         if (holderBalance == 0) revert ZeroAmount();
 
-        // Merkle mode: claim period from trigger timestamp
-        if (block.timestamp > pool.triggerTimestamp + merkleClaimPeriod) revert ClaimPeriodExpired();
+        // Merkle mode: claim period from trigger timestamp (uses snapshot)
+        if (block.timestamp > pool.triggerTimestamp + pool.snapshotMerkleClaimPeriod) revert ClaimPeriodExpired();
         if (pool.merkleRoot == bytes32(0)) revert MerkleRootNotSet();
 
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, holderBalance))));
@@ -310,13 +321,13 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (pool.claimed[msg.sender]) revert AlreadyClaimed();
         if (holderBalance == 0) revert ZeroAmount();
 
-        // Must wait for merkle submission deadline to pass (24h)
-        if (block.timestamp <= pool.triggerTimestamp + merkleSubmissionDeadline) {
+        // Must wait for merkle submission deadline to pass (uses snapshot)
+        if (block.timestamp <= pool.triggerTimestamp + pool.snapshotMerkleDeadline) {
             revert MerkleSubmissionWindowActive();
         }
 
-        // Fallback claim period: 7 days after the 24h deadline
-        if (block.timestamp > pool.triggerTimestamp + merkleSubmissionDeadline + fallbackClaimPeriod) {
+        // Fallback claim period after deadline (uses snapshot)
+        if (block.timestamp > pool.triggerTimestamp + pool.snapshotMerkleDeadline + pool.snapshotFallbackClaimPeriod) {
             revert ClaimPeriodExpired();
         }
 
@@ -413,8 +424,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     /// @notice Check if a pool is in fallback mode (24h elapsed, no merkle root)
     function isFallbackMode(PoolId poolId) external view returns (bool) {
         PoolData storage pool = _getPool(poolId);
+        uint40 deadline = pool.snapshotMerkleDeadline > 0 ? pool.snapshotMerkleDeadline : merkleSubmissionDeadline;
         return pool.isTriggered && !pool.useMerkleProof
-            && block.timestamp > pool.triggerTimestamp + merkleSubmissionDeadline;
+            && block.timestamp > pool.triggerTimestamp + deadline;
     }
 
     /// @notice Check if a pool is in merkle mode

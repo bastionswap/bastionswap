@@ -38,7 +38,4 @@ interface IBastionHook {
     /// @param poolId Uniswap V4 pool identifier
     function getPoolCommitment(PoolId poolId) external view returns (PoolCommitment memory);
 
-    /// @notice Returns true if ANY commitment dimension is stricter than governance defaults.
-    /// @param poolId Uniswap V4 pool identifier
-    function isCommitmentStricterThanDefault(PoolId poolId) external view returns (bool);
 }

@@ -79,7 +79,13 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     // ─── Constructor ──────────────────────────────────────────────────
 
+    error ZeroConstructorAddress();
+
     constructor(address bastionHook, address triggerOracle, address reputationEngine) {
+        if (bastionHook == address(0)) revert ZeroConstructorAddress();
+        if (triggerOracle == address(0)) revert ZeroConstructorAddress();
+        if (reputationEngine == address(0)) revert ZeroConstructorAddress();
+
         BASTION_HOOK = bastionHook;
         TRIGGER_ORACLE = triggerOracle;
         REPUTATION_ENGINE = IReputationEngine(reputationEngine);

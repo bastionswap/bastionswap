@@ -57,7 +57,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         // Compute the hook address with correct permission bits
         uint160 flags =
-            uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
+            uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG);
 
         address hookAddr = address(flags);
 
@@ -983,7 +983,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         uint24 fee = 3000;
         int24 tickSpacing = 60;
         PoolKey memory _key = PoolKey(currency0, currency1, fee, tickSpacing, IHooks(address(hook)));
-        PoolId _poolId = _key.toId();
         manager.initialize(_key, SQRT_PRICE_1_1);
 
         ITriggerOracle.TriggerConfig memory strictConfig = ITriggerOracle.TriggerConfig({
@@ -1006,12 +1005,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
         vm.prank(issuerAddr);
         modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
 
-        assertTrue(hook.isCommitmentStricterThanDefault(_poolId));
-    }
-
-    function test_isCommitmentStricterThanDefault_falseWhenDefault() public {
-        _initPoolWithIssuer();
-        assertFalse(hook.isCommitmentStricterThanDefault(poolId));
     }
 
     function test_governanceChangeDoesNotAffectExistingCommitment() public {
@@ -1161,8 +1154,6 @@ contract BastionHookIntegrationTest is Test, Deployers {
 
         vm.prank(issuerAddr);
         modifyLiquidityRouter.modifyLiquidity(_key, params, hookData);
-
-        assertTrue(hook.isCommitmentStricterThanDefault(_poolId));
 
         BastionHook.PoolCommitment memory c = hook.getPoolCommitment(_poolId);
         assertEq(c.maxWeeklySellBps, 1000);

@@ -154,6 +154,9 @@ contract BastionHook is BaseTestHooks {
     /// @notice Maximum weekly LP removal limit (default 30%). Issuers can only commit ≤ this.
     uint16 public maxWeeklyLpRemovalBps = 3000;
 
+    /// @dev poolId => issuer's LP liquidity (salt=0 position only, for force removal)
+    mapping(PoolId => uint256) internal _issuerLiquidity;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyPoolManager();
@@ -232,6 +235,8 @@ contract BastionHook is BaseTestHooks {
         address _weth,
         address _usdc
     ) {
+        if (_governance == address(0)) revert ZeroAddress();
+
         poolManager = _poolManager;
         escrowVault = _escrowVault;
         insurancePool = _insurancePool;
@@ -269,7 +274,7 @@ contract BastionHook is BaseTestHooks {
             beforeDonate: false,
             afterDonate: false,
             beforeSwapReturnDelta: true,
-            afterSwapReturnDelta: false,
+            afterSwapReturnDelta: true,
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
         });
@@ -304,6 +309,10 @@ contract BastionHook is BaseTestHooks {
             // result == 1 means validation passed (single base token, amount OK)
 
             _registerIssuerAndCreateEscrow(poolId, key, sender, liquidity, hookData);
+            // Track issuer's salt-0 LP separately for force removal (C-01 fix)
+            if (liquidity > 0) {
+                _issuerLiquidity[poolId] += liquidity;
+            }
         } else if (liquidity > 0 && sender == _issuerLPOwner[poolId]) {
             // Subsequent issuer LP addition via same router → decode hookData to identify user
             if (hookData.length > 0) {
@@ -312,6 +321,8 @@ contract BastionHook is BaseTestHooks {
                     // All issuer LP additions get locked in escrow
                     uint256 escrowId = _escrowIds[poolId];
                     escrowVault.addLiquidity(escrowId, liquidity);
+                    // Track issuer's salt-0 LP separately for force removal (C-01 fix)
+                    _issuerLiquidity[poolId] += liquidity;
                 }
             }
         }
@@ -364,6 +375,9 @@ contract BastionHook is BaseTestHooks {
         // Force removal in progress → skip all vesting checks
         if (_tload(_FORCE_REMOVAL_SLOT) == 1) {
             _subTotalLiquidity(poolId, removeAmount);
+            // Decrement issuer liquidity during force removal (C-01 fix)
+            uint256 curIssuer = _issuerLiquidity[poolId];
+            _issuerLiquidity[poolId] = removeAmount <= curIssuer ? curIssuer - removeAmount : 0;
             return IHooks.beforeRemoveLiquidity.selector;
         }
 
@@ -385,6 +399,8 @@ contract BastionHook is BaseTestHooks {
                     revert ExceedsVestedAmount(liquidityToRemove, removable);
                 }
                 escrowVault.recordLPRemoval(escrowId, liquidityToRemove);
+                // Decrement issuer liquidity tracking (C-01 fix)
+                _issuerLiquidity[poolId] -= removeAmount;
 
                 // Fire COMMITMENT_HONORED when escrow is fully completed (no trigger = honored)
                 if (escrowVault.isFullyVested(poolId)) {
@@ -488,10 +504,16 @@ contract BastionHook is BaseTestHooks {
                 }
             }
 
-            // Collect insurance fee on exactInput buy swaps
-            if (!isSell && params.amountSpecified < 0) {
-                BeforeSwapDelta feeDelta = _collectInsuranceFee(poolId, key, params, issuedToken);
-                return (IHooks.beforeSwap.selector, feeDelta, 0);
+            // Collect insurance fee on buy swaps
+            if (!isSell) {
+                if (params.amountSpecified < 0) {
+                    // exactInput buy: collect fee in beforeSwap
+                    BeforeSwapDelta feeDelta = _collectInsuranceFee(poolId, key, params, issuedToken);
+                    return (IHooks.beforeSwap.selector, feeDelta, 0);
+                } else {
+                    // exactOutput buy: defer fee collection to afterSwap (H-01 fix)
+                    _tstore(_pendingBuyFeeSlot(poolId), 1);
+                }
             }
         }
 
@@ -513,6 +535,7 @@ contract BastionHook is BaseTestHooks {
     ) external override onlyPoolManager returns (bytes4, int128) {
         PoolId poolId = key.toId();
         address issuedToken = address(uint160(_tload(_issuedTokenSlot(poolId))));
+        int128 hookDeltaUnspecified = 0;
 
         if (issuedToken != address(0)) {
             address poolIssuer = address(uint160(_tload(_issuerSlot(poolId))));
@@ -540,9 +563,33 @@ contract BastionHook is BaseTestHooks {
                     }
                 }
             }
+
+            // Collect insurance fee for exactOutput buy swaps (H-01 fix)
+            if (_tload(_pendingBuyFeeSlot(poolId)) == 1) {
+                _tstore(_pendingBuyFeeSlot(poolId), 0);
+                uint256 cachedFee = _cachedFeeRate;
+                if (cachedFee > 0) {
+                    bool issuedIsToken0 = Currency.unwrap(key.currency0) == issuedToken;
+                    // For buy: base token is the input (negative delta = user pays)
+                    int128 baseDelta = issuedIsToken0 ? delta.amount1() : delta.amount0();
+                    if (baseDelta < 0) {
+                        Currency baseCurrency = issuedIsToken0 ? key.currency1 : key.currency0;
+                        uint256 absInput = uint256(uint128(-baseDelta));
+                        uint256 feeAmount = (absInput * cachedFee) / 10_000;
+                        if (feeAmount > 0) {
+                            // Take fee from pool manager and deposit to insurance
+                            poolManager.take(baseCurrency, address(this), feeAmount);
+                            _depositInsuranceFee(poolId, baseCurrency, feeAmount);
+                            emit InsuranceFeeDeposited(poolId, feeAmount);
+                            // Return delta so user pays the fee
+                            hookDeltaUnspecified = int128(uint128(feeAmount));
+                        }
+                    }
+                }
+            }
         }
 
-        return (IHooks.afterSwap.selector, 0);
+        return (IHooks.afterSwap.selector, hookDeltaUnspecified);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -570,7 +617,8 @@ contract BastionHook is BaseTestHooks {
         isPoolTriggered[poolId] = true;
 
         PoolKey memory key = _poolKeys[poolId];
-        uint256 liquidity = _totalLiquidity[poolId];
+        // Use issuer-only liquidity, not total pool liquidity (C-01 fix)
+        uint256 liquidity = _issuerLiquidity[poolId];
         if (liquidity == 0) return;
 
         // Set transient flag to bypass vesting checks in beforeRemoveLiquidity
@@ -585,8 +633,7 @@ contract BastionHook is BaseTestHooks {
         // Clear transient flag
         _tstore(_FORCE_REMOVAL_SLOT, 0);
 
-        // Update tracked liquidity
-        _totalLiquidity[poolId] = 0;
+        // _totalLiquidity and _issuerLiquidity are updated by beforeRemoveLiquidity callback
 
         // Forward received ETH + tokens to InsurancePool
         address token = _issuedTokens[poolId];
@@ -642,27 +689,6 @@ contract BastionHook is BaseTestHooks {
         return _poolCommitments[poolId];
     }
 
-    /// @notice Returns true if ANY commitment dimension is stricter than governance defaults.
-    function isCommitmentStricterThanDefault(PoolId poolId) external view returns (bool) {
-        PoolCommitment memory c = _poolCommitments[poolId];
-        if (!c.isSet) return false;
-
-        // Duration: stricter if total is longer than default
-        uint80 commitmentTotal = uint80(c.lockDuration) + uint80(c.vestingDuration);
-        uint80 defaultTotal = uint80(defaultLockDuration) + uint80(defaultVestingDuration);
-        if (commitmentTotal > defaultTotal) return true;
-
-        // Thresholds: stricter if lower than defaults from TriggerOracle
-        ITriggerOracle.TriggerConfig memory def = triggerOracle.getDefaultTriggerConfig();
-
-        if (c.maxDailyLpRemovalBps < maxDailyLpRemovalBps) return true;
-        if (c.maxWeeklyLpRemovalBps < maxWeeklyLpRemovalBps) return true;
-        if (c.maxDailySellBps < def.dumpThresholdPercent) return true;
-        if (c.maxWeeklySellBps < def.weeklyDumpThresholdPercent) return true;
-
-        return false;
-    }
-
     /// @notice Get pool info.
     function getPoolInfo(PoolId poolId)
         external
@@ -701,26 +727,6 @@ contract BastionHook is BaseTestHooks {
         PoolKey memory key = _poolKeys[poolId];
         uint256 totalEligibleSupply = _initialTotalSupply[poolId];
         triggerOracle.executeTrigger(poolId, key, ITriggerOracle.TriggerType.RUG_PULL, totalEligibleSupply);
-    }
-
-    /// @notice View: check if cumulative LP removal threshold is currently met.
-    function isLPRemovalTriggerable(PoolId poolId) external view returns (bool) {
-        PoolCommitment memory c = _poolCommitments[poolId];
-        if (!c.isSet) return false;
-
-        uint256 weeklyRemoved = weeklyLpRemoved[poolId];
-        uint40 windowStart = weeklyLpWindowStart[poolId];
-
-        // Check if window expired (reset would happen)
-        if (block.timestamp >= windowStart + 7 days) {
-            return false; // window would reset
-        }
-
-        uint256 initLiq = initialLiquidity[poolId];
-        if (initLiq == 0) return false;
-
-        uint256 weeklyBps = (weeklyRemoved * 10_000) / initLiq;
-        return weeklyBps >= c.maxWeeklyLpRemovalBps;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1053,15 +1059,7 @@ contract BastionHook is BaseTestHooks {
         poolManager.take(baseCurrency, address(this), feeAmount);
 
         // Deposit to InsurancePool
-        address baseToken = Currency.unwrap(baseCurrency);
-        if (baseToken == address(0)) {
-            // ETH base token
-            insurancePool.depositFee{value: feeAmount}(poolId);
-        } else {
-            // ERC-20 base token (USDC, WETH, etc.)
-            SafeTransferLib.safeTransfer(ERC20(baseToken), address(insurancePool), feeAmount);
-            insurancePool.depositFeeToken(poolId, baseToken, feeAmount);
-        }
+        _depositInsuranceFee(poolId, baseCurrency, feeAmount);
 
         emit InsuranceFeeDeposited(poolId, feeAmount);
 
@@ -1069,6 +1067,17 @@ contract BastionHook is BaseTestHooks {
         // The PoolManager will account this delta to the hook and adjust the caller's delta,
         // so the caller pays the fee on top of the swap amount.
         return toBeforeSwapDelta(int128(uint128(feeAmount)), 0);
+    }
+
+    /// @dev Deposits insurance fee (ETH or ERC-20) to InsurancePool.
+    function _depositInsuranceFee(PoolId poolId, Currency baseCurrency, uint256 feeAmount) internal {
+        address baseToken = Currency.unwrap(baseCurrency);
+        if (baseToken == address(0)) {
+            insurancePool.depositFee{value: feeAmount}(poolId);
+        } else {
+            SafeTransferLib.safeTransfer(ERC20(baseToken), address(insurancePool), feeAmount);
+            insurancePool.depositFeeToken(poolId, baseToken, feeAmount);
+        }
     }
 
     /// @dev Validates issuer trigger thresholds are ≤ governance defaults and stores PoolCommitment.
@@ -1238,6 +1247,10 @@ contract BastionHook is BaseTestHooks {
 
     function _actualSwapperSlot(PoolId poolId) internal pure returns (bytes32) {
         return keccak256(abi.encode(poolId, uint8(3)));
+    }
+
+    function _pendingBuyFeeSlot(PoolId poolId) internal pure returns (bytes32) {
+        return keccak256(abi.encode(poolId, uint8(4)));
     }
 
     /// @dev Allow receiving ETH for insurance fee deposits

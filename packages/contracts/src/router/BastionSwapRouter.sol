@@ -69,17 +69,26 @@ contract BastionSwapRouter is IUnlockCallback {
         uint160 sqrtPriceX96, int24 tick
     );
 
+    error ZeroAddress();
+
+    address private immutable _deployer;
+
     constructor(IPoolManager _poolManager, ISignatureTransfer _permit2) {
+        if (address(_poolManager) == address(0)) revert ZeroAddress();
         poolManager = _poolManager;
         permit2 = _permit2;
+        _deployer = msg.sender;
     }
 
     // ═══════════════════════════════════════════════════════════════
     //  HOOK SETUP
     // ═══════════════════════════════════════════════════════════════
 
-    /// @notice Set the BastionHook address. One-time setter.
+    error OnlyDeployer();
+
+    /// @notice Set the BastionHook address. One-time setter, deployer only.
     function setBastionHook(address hook) external {
+        if (msg.sender != _deployer) revert OnlyDeployer();
         if (bastionHook != address(0)) revert HookAlreadySet();
         bastionHook = hook;
     }
@@ -139,7 +148,7 @@ contract BastionSwapRouter is IUnlockCallback {
         });
 
         BalanceDelta delta = abi.decode(
-            poolManager.unlock(abi.encode(ACTION_SWAP_EXACT_INPUT, msg.sender, key, params)),
+            poolManager.unlock(abi.encode(ACTION_SWAP_EXACT_OUTPUT, msg.sender, key, params)),
             (BalanceDelta)
         );
 
@@ -263,7 +272,7 @@ contract BastionSwapRouter is IUnlockCallback {
 
         BalanceDelta delta = abi.decode(
             poolManager.unlock(abi.encode(
-                ACTION_SWAP_EXACT_INPUT_PERMIT2, msg.sender, key, params,
+                ACTION_SWAP_EXACT_OUTPUT_PERMIT2, msg.sender, key, params,
                 permitSingle.permit, permitSingle.signature
             )),
             (BalanceDelta)
@@ -287,9 +296,9 @@ contract BastionSwapRouter is IUnlockCallback {
 
         uint8 action = abi.decode(data, (uint8));
 
-        if (action == ACTION_SWAP_EXACT_INPUT) {
+        if (action == ACTION_SWAP_EXACT_INPUT || action == ACTION_SWAP_EXACT_OUTPUT) {
             return _handleSwap(data);
-        } else if (action == ACTION_SWAP_EXACT_INPUT_PERMIT2) {
+        } else if (action == ACTION_SWAP_EXACT_INPUT_PERMIT2 || action == ACTION_SWAP_EXACT_OUTPUT_PERMIT2) {
             return _handleSwapPermit2(data);
         } else if (action == ACTION_SWAP_MULTI_HOP) {
             return _handleMultiHopSwap(data);

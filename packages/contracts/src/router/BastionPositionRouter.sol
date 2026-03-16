@@ -68,11 +68,13 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     error Expired();
     error OnlyPoolManager();
     error OnlyHook();
+    error OnlyDeployer();
     error HookAlreadySet();
     error HookNotSet();
     error SlippageExceeded();
     error FeeOnTransferNotSupported();
     error RebaseTokenNotSupported();
+    error ZeroAddress();
 
     event LiquidityChanged(
         PoolId indexed poolId, address indexed user,
@@ -80,17 +82,22 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         int256 liquidityDelta, int128 amount0, int128 amount1
     );
 
+    address private immutable _deployer;
+
     constructor(IPoolManager _poolManager, ISignatureTransfer _permit2) {
+        if (address(_poolManager) == address(0)) revert ZeroAddress();
         poolManager = _poolManager;
         permit2 = _permit2;
+        _deployer = msg.sender;
     }
 
     // ═══════════════════════════════════════════════════════════════
     //  HOOK SETUP
     // ═══════════════════════════════════════════════════════════════
 
-    /// @notice Set the BastionHook address for access control. One-time setter.
+    /// @notice Set the BastionHook address for access control. One-time setter, deployer only.
     function setBastionHook(address hook) external {
+        if (msg.sender != _deployer) revert OnlyDeployer();
         if (bastionHook != address(0)) revert HookAlreadySet();
         bastionHook = hook;
     }

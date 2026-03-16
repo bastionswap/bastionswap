@@ -60,7 +60,13 @@ contract ReputationEngine is IReputationEngine {
 
     // ─── Constructor ─────────────────────────────────────────────────
 
+    error ZeroConstructorAddress();
+
     constructor(address bastionHook, address escrowVault, address triggerOracle) {
+        if (bastionHook == address(0)) revert ZeroConstructorAddress();
+        if (escrowVault == address(0)) revert ZeroConstructorAddress();
+        if (triggerOracle == address(0)) revert ZeroConstructorAddress();
+
         BASTION_HOOK = bastionHook;
         ESCROW_VAULT = escrowVault;
         TRIGGER_ORACLE = triggerOracle;
