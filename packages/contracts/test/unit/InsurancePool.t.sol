@@ -36,7 +36,7 @@ contract InsurancePoolTest is Test {
         issuer = makeAddr("issuer");
         guardianAddr = makeAddr("guardian");
 
-        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0xBEEF));
         defaultPoolId = PoolId.wrap(bytes32(uint256(1)));
 
         // Set default issuer for pools
@@ -941,6 +941,10 @@ contract InsurancePoolTest is Test {
         vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
 
+        // Approve InsurancePool to lock tokens (H-01 fix requires token lockup)
+        vm.prank(holder1);
+        mockToken.approve(address(pool), 100_000 ether);
+
         // Claim using balanceOf fallback
         vm.prank(holder1);
         uint256 claimed = pool.claimCompensationFallback(defaultPoolId, 100_000 ether);
@@ -1414,14 +1418,27 @@ contract MockToken {
     uint8 public decimals = 18;
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
 
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
         totalSupply += amount;
     }
 
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
     function transfer(address to, uint256 amount) external returns (bool) {
         balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        allowance[from][msg.sender] -= amount;
+        balanceOf[from] -= amount;
         balanceOf[to] += amount;
         return true;
     }

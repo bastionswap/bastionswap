@@ -203,14 +203,11 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         state.isTriggered = true;
         state.triggerType = triggerType;
 
-        // Propagate to EscrowVault
+        // Propagate to EscrowVault — must succeed or entire trigger reverts (H-03 fix)
         address issuer = _poolIssuers[key];
         if (issuer != address(0)) {
             uint256 escrowId = _computeEscrowId(poolId, issuer);
-            try IEscrowVault(ESCROW_VAULT).triggerForceRemoval(escrowId, uint8(triggerType)) {}
-            catch {
-                emit ExternalCallFailed("EscrowVault.triggerForceRemoval", poolId);
-            }
+            IEscrowVault(ESCROW_VAULT).triggerForceRemoval(escrowId, uint8(triggerType));
         }
 
         // Propagate to InsurancePool (enters 24h waiting state for guardian Merkle root submission)

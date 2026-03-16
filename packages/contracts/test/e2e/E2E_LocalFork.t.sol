@@ -669,8 +669,10 @@ contract E2E_LocalFork is Test {
 
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
-        vm.prank(holder);
+        vm.startPrank(holder);
+        tokenA.approve(address(insurancePool), holderBal);
         insurancePool.claimCompensationFallback(poolIdA, holderBal);
+        vm.stopPrank();
 
         assertGt(holder.balance, holderEthBefore, "holder got ETH");
 
@@ -836,9 +838,11 @@ contract E2E_LocalFork is Test {
         vm.roll(block.number + 1);
 
         uint256 holderBal = tokenA.balanceOf(holder);
-        vm.prank(holder);
         uint256 holderEthBefore = holder.balance;
+        vm.startPrank(holder);
+        tokenA.approve(address(insurancePool), holderBal);
         insurancePool.claimCompensationFallback(poolIdA, holderBal);
+        vm.stopPrank();
         assertGt(holder.balance, holderEthBefore, "holder compensated");
 
         // After 7-day fallback period (from 24h deadline) expires, claims should fail

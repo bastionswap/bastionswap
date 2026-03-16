@@ -792,6 +792,10 @@ contract E2E_EdgeCases is Test {
         // Verify: attacker only gets paid once (no double-claim).
         uint256 attackerBal = tokenA.balanceOf(address(reentrancyAttacker));
         if (attackerBal > 0) {
+            // Approve InsurancePool to transfer attacker's tokens (required by H-01 safeTransferFrom)
+            vm.prank(address(reentrancyAttacker));
+            tokenA.approve(address(insurancePool), type(uint256).max);
+
             uint256 ethBefore = address(reentrancyAttacker).balance;
             vm.prank(address(reentrancyAttacker));
             reentrancyAttacker.attack(poolIdA, attackerBal);
@@ -871,8 +875,10 @@ contract E2E_EdgeCases is Test {
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
         vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
-        vm.prank(holder);
+        vm.startPrank(holder);
+        tokenA.approve(address(insurancePool), holderBal);
         insurancePool.claimCompensationFallback(poolIdA, holderBal);
+        vm.stopPrank();
     }
 
     function test_SlowDrainAttack_CumulativeTracking() public {

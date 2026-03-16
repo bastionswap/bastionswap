@@ -88,7 +88,7 @@ contract E2E_ScenariosTest is Test, Deployers {
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
         escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
-        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
+        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0xBEEF));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr, governance);
 
         {
@@ -520,6 +520,12 @@ contract E2E_ScenariosTest is Test, Deployers {
 
         uint256 t1Bal = issuedToken.balanceOf(trader1);
         uint256 t2Bal = issuedToken.balanceOf(trader2);
+
+        // Approve InsurancePool to lock tokens (H-01 fix)
+        vm.prank(trader1);
+        issuedToken.approve(address(insurancePool), t1Bal);
+        vm.prank(trader2);
+        issuedToken.approve(address(insurancePool), t2Bal);
 
         // Trader1 claims using fallback mode
         uint256 baseBefore1 = baseToken.balanceOf(trader1);

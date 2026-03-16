@@ -71,7 +71,7 @@ contract GasBenchmarkTest is Test, Deployers {
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
         escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
-        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
+        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0xBEEF));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr, governance);
 
         // Set guardian for InsurancePool Merkle root submission
@@ -301,6 +301,10 @@ contract GasBenchmarkTest is Test, Deployers {
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
         vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
+
+        // Approve InsurancePool to lock tokens (H-01 fix)
+        vm.prank(holder);
+        claimToken.approve(address(insurancePool), 100 ether);
 
         uint256 gasBefore = gasleft();
         vm.prank(holder);

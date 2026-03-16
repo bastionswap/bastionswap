@@ -1048,8 +1048,10 @@ contract E2E_Comprehensive is Test {
         // 4. Holder claims using fallback mode
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
-        vm.prank(holder);
+        vm.startPrank(holder);
+        tokenA.approve(address(insurancePool), holderBal);
         insurancePool.claimCompensationFallback(poolIdA, holderBal);
+        vm.stopPrank();
         assertGt(holder.balance, holderEthBefore, "holder compensated");
 
         // 5. Issuer cannot claim
@@ -1135,8 +1137,10 @@ contract E2E_Comprehensive is Test {
         // Holder claims via fallback (no merkle root)
         uint256 holderBal = tokenA.balanceOf(holder);
         uint256 holderEthBefore = holder.balance;
-        vm.prank(holder);
+        vm.startPrank(holder);
+        tokenA.approve(address(insurancePool), holderBal);
         insurancePool.claimCompensationFallback(poolIdA, holderBal);
+        vm.stopPrank();
         assertGt(holder.balance, holderEthBefore, "compensated");
 
         // After 7-day fallback period -> claims fail
@@ -1171,8 +1175,10 @@ contract E2E_Comprehensive is Test {
 
         // Holder claims -> succeeds
         uint256 holderEthBefore = holder.balance;
-        vm.prank(holder);
+        vm.startPrank(holder);
+        tokenA.approve(address(insurancePool), holderBalance);
         insurancePool.claimCompensationFallback(poolIdA, holderBalance);
+        vm.stopPrank();
         assertGt(holder.balance, holderEthBefore, "holder got ETH");
 
         // Issuer claims -> revert

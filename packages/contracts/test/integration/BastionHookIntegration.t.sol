@@ -77,7 +77,7 @@ contract BastionHookIntegrationTest is Test, Deployers {
         address triggerAddr = vm.computeCreateAddress(address(this), nonce + 2);
 
         escrowVault = new EscrowVault(hookAddr, triggerAddr, reputationAddr);
-        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0));
+        insurancePool = new InsurancePool(hookAddr, triggerAddr, governance, escrowAddr, address(0xBEEF));
         triggerOracle = new TriggerOracle(hookAddr, escrowAddr, insuranceAddr, guardian, reputationAddr, governance);
 
         // Deploy hook implementation and etch it at the correct address

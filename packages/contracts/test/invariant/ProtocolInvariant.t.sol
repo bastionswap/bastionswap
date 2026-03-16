@@ -240,7 +240,7 @@ contract ProtocolInvariantTest is Test {
         vault = new EscrowVault(hook, oracle, address(new MockRepEngine()));
 
         // InsurancePool: hook deposits fees, oracle triggers payouts
-        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0xBEEF));
         insuranceAddr = address(pool);
 
         handler = new ProtocolHandler(vault, pool, hook, oracle, insuranceAddr, governance);
@@ -433,7 +433,7 @@ contract EconomicInvariantTest is Test {
         governance = makeAddr("governance");
 
         vault = new EscrowVault(hook, oracle, address(new MockRepEngine()));
-        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0xBEEF));
 
         handler = new EconomicHandler(vault, pool, hook, oracle, LIQUIDITY);
 
@@ -496,7 +496,7 @@ contract CrossContractFuzzTest is Test {
 
         token = new MockERC20Token();
         vault = new EscrowVault(hook, oracle, address(new MockRepEngine()));
-        pool = new InsurancePool(hook, oracle, governance, address(0), address(0));
+        pool = new InsurancePool(hook, oracle, governance, address(0), address(0xBEEF));
     }
 
     function _createEscrowWithParams(
@@ -616,6 +616,10 @@ contract CrossContractFuzzTest is Test {
         uint256 expectedAmount = (feeAmount * holderBalance) / totalSupply;
         if (expectedAmount == 0) return;
 
+        // Approve InsurancePool to lock tokens (H-01 fix)
+        vm.prank(holder);
+        claimToken.approve(address(pool), holderBalance);
+
         // Claim using fallback mode
         uint256 holderBalBefore = holder.balance;
 
@@ -665,6 +669,12 @@ contract CrossContractFuzzTest is Test {
         // Advance past 24h merkle submission deadline
         vm.warp(block.timestamp + 24 hours + 1);
         vm.roll(block.number + 1);
+
+        // All holders approve InsurancePool to lock tokens (H-01 fix)
+        for (uint256 i; i < holderCount; ++i) {
+            vm.prank(holders[i]);
+            claimToken.approve(address(pool), balancePerHolder);
+        }
 
         // All holders claim using fallback mode
         uint256 totalClaimed;

@@ -610,6 +610,7 @@ contract BastionHook is BaseTestHooks {
     /// @notice Set the BastionRouter address. One-time setter (router deployed after hook).
     function setBastionRouter(address router) external {
         if (msg.sender != _owner) revert OnlyOwner();
+        if (router == address(0)) revert ZeroAddress();
         if (bastionRouter != address(0)) revert RouterAlreadySet();
         bastionRouter = router;
         emit BastionRouterSet(router);

@@ -132,6 +132,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     error NotInMerkleMode();
     error NotInFallbackMode();
     error MerkleSubmissionWindowActive();
+    error GracePeriodNotExpired();
 
     // ─── Modifiers ────────────────────────────────────────────────────
 
@@ -161,6 +162,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (bastionHook == address(0)) revert ZeroAddress();
         if (triggerOracle == address(0)) revert ZeroAddress();
         if (governance == address(0)) revert ZeroAddress();
+        if (treasury_ == address(0)) revert ZeroAddress();
 
         BASTION_HOOK = bastionHook;
         TRIGGER_ORACLE = triggerOracle;
@@ -337,6 +339,9 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         if (ERC20(pool.issuedToken).balanceOf(msg.sender) < holderBalance) {
             revert InsufficientTokenBalance();
         }
+
+        // Lock claimer's issued tokens to prevent transfer-and-reclaim from another address (H-01 fix)
+        SafeTransferLib.safeTransferFrom(ERC20(pool.issuedToken), msg.sender, address(this), holderBalance);
 
         amount = _executeClaimTransfers(pool, poolId, holderBalance);
     }
@@ -553,6 +558,64 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
         emit IInsurancePool.TreasuryFundsClaimed(poolId, totalTreasuryAmount, totalIssuerReward);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  EXPIRED POOL SWEEP (H-02 fix)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @notice Sweep unclaimed funds from a triggered pool after all claim periods + 30-day grace.
+    /// @dev Only callable by governance after claim periods have expired plus a 30-day grace period.
+    ///      Sends remaining ETH, issued tokens, and base tokens to the treasury.
+    /// @param poolId Uniswap V4 pool identifier
+    function sweepExpiredPool(PoolId poolId) external onlyGovernance nonReentrant {
+        if (treasury == address(0)) revert TreasuryNotSet();
+
+        PoolData storage pool = _getPool(poolId);
+        if (!pool.isTriggered) revert NotTriggered();
+
+        // Compute the latest claim period end
+        uint256 merkleEnd = uint256(pool.triggerTimestamp) + uint256(pool.snapshotMerkleClaimPeriod);
+        uint256 fallbackEnd = uint256(pool.triggerTimestamp)
+            + uint256(pool.snapshotMerkleDeadline)
+            + uint256(pool.snapshotFallbackClaimPeriod);
+        uint256 claimEnd = merkleEnd > fallbackEnd ? merkleEnd : fallbackEnd;
+
+        // 30-day grace period after all claim windows close
+        if (block.timestamp <= claimEnd + 30 days) revert GracePeriodNotExpired();
+
+        uint256 ethSwept;
+        uint256 tokenSwept;
+        uint256 baseTokenSwept;
+
+        // Sweep remaining ETH
+        if (pool.balance > 0) {
+            ethSwept = pool.balance;
+            pool.balance = 0;
+            (bool success,) = treasury.call{value: ethSwept}("");
+            if (!success) revert TransferFailed();
+        }
+
+        // Sweep remaining issued tokens
+        if (pool.escrowToken != address(0)) {
+            tokenSwept = ERC20(pool.escrowToken).balanceOf(address(this));
+            if (tokenSwept > 0) {
+                SafeTransferLib.safeTransfer(ERC20(pool.escrowToken), treasury, tokenSwept);
+            }
+        }
+
+        // Sweep remaining ERC-20 base tokens (fees + escrow)
+        address baseToken = pool.baseTokenFeeToken != address(0) ? pool.baseTokenFeeToken : pool.escrowBaseToken;
+        if (baseToken != address(0)) {
+            baseTokenSwept = ERC20(baseToken).balanceOf(address(this));
+            if (baseTokenSwept > 0) {
+                SafeTransferLib.safeTransfer(ERC20(baseToken), treasury, baseTokenSwept);
+            }
+        }
+
+        emit ExpiredPoolSwept(poolId, ethSwept, tokenSwept, baseTokenSwept);
+    }
+
+    event ExpiredPoolSwept(PoolId indexed poolId, uint256 ethSwept, uint256 tokenSwept, uint256 baseTokenSwept);
 
     // ─── Internal Functions ───────────────────────────────────────────
 

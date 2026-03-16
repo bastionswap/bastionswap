@@ -418,8 +418,9 @@ contract TriggerOracleTest is Test {
     //  EXTERNAL CALL FAILURE (catch branches in _executeImmediate)
     // ═══════════════════════════════════════════════════════════════════
 
-    function test_trigger_escrowVaultReverts_emitsEvent() public {
+    function test_trigger_escrowVaultReverts_revertsEntireTrigger() public {
         // Deploy oracle with reverting escrow vault
+        // H-03 fix: EscrowVault failure must revert the entire trigger to prevent state inconsistency
         RevertingEscrowVault revertingEscrow = new RevertingEscrowVault();
         MockReputationEngine repEngine = new MockReputationEngine();
         TriggerOracle oracleWithBadEscrow = new TriggerOracle(
@@ -431,13 +432,13 @@ contract TriggerOracleTest is Test {
         vm.prank(hook);
         oracleWithBadEscrow.registerIssuer(defaultPoolId, issuer, TOTAL_SUPPLY, address(0xBEEF));
 
-        vm.expectEmit(false, true, false, true);
-        emit TriggerOracle.ExternalCallFailed("EscrowVault.triggerForceRemoval", defaultPoolId);
-
+        // Entire trigger must revert when EscrowVault fails (no silent continue)
         vm.prank(hook);
+        vm.expectRevert();
         oracleWithBadEscrow.reportCommitmentBreach(defaultPoolId);
 
-        assertTrue(oracleWithBadEscrow.checkTrigger(defaultPoolId).triggered);
+        // Pool should NOT be marked as triggered (entire tx rolled back)
+        assertFalse(oracleWithBadEscrow.checkTrigger(defaultPoolId).triggered);
     }
 
     function test_trigger_insurancePoolReverts_emitsEvent() public {

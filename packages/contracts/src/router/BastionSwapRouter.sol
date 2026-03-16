@@ -89,6 +89,7 @@ contract BastionSwapRouter is IUnlockCallback {
     /// @notice Set the BastionHook address. One-time setter, deployer only.
     function setBastionHook(address hook) external {
         if (msg.sender != _deployer) revert OnlyDeployer();
+        if (hook == address(0)) revert ZeroAddress();
         if (bastionHook != address(0)) revert HookAlreadySet();
         bastionHook = hook;
     }
