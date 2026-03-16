@@ -98,6 +98,16 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     /// @dev Emergency withdrawal requests subject to timelock
     mapping(bytes32 => IInsurancePool.EmergencyRequest) public emergencyRequests;
 
+    /// @dev ERC-20 emergency withdrawal request (M-03 fix)
+    struct EmergencyTokenRequest {
+        PoolId poolId;
+        address token;
+        address to;
+        uint256 amount;
+        uint40 requestedAt;
+    }
+    mapping(bytes32 => EmergencyTokenRequest) public emergencyTokenRequests;
+
     // ─── Errors ───────────────────────────────────────────────────────
 
     error OnlyHook();
@@ -422,6 +432,58 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         emit IInsurancePool.EmergencyWithdrawCancelled(requestId);
     }
 
+    // ─── Emergency ERC-20 Withdrawal (M-03 fix) ───────────────────
+
+    event EmergencyTokenWithdrawRequested(bytes32 indexed requestId, PoolId indexed poolId, address token, address to, uint256 amount);
+    event EmergencyTokenWithdrawCancelled(bytes32 indexed requestId);
+    event EmergencyTokenWithdrawal(PoolId indexed poolId, address indexed token, address indexed to, uint256 amount);
+
+    /// @notice Request an emergency ERC-20 token withdrawal (subject to timelock).
+    function requestEmergencyTokenWithdraw(PoolId poolId, address token, address to, uint256 amount)
+        external
+        onlyGovernance
+        returns (bytes32 requestId)
+    {
+        if (token == address(0)) revert ZeroAddress();
+        if (to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+
+        requestId = keccak256(abi.encode("token", poolId, token, to, amount, block.timestamp));
+        emergencyTokenRequests[requestId] = EmergencyTokenRequest({
+            poolId: poolId,
+            token: token,
+            to: to,
+            amount: amount,
+            requestedAt: uint40(block.timestamp)
+        });
+
+        emit EmergencyTokenWithdrawRequested(requestId, poolId, token, to, amount);
+    }
+
+    /// @notice Execute a previously requested ERC-20 emergency withdrawal after timelock.
+    function executeEmergencyTokenWithdraw(bytes32 requestId) external onlyGovernance nonReentrant {
+        EmergencyTokenRequest memory req = emergencyTokenRequests[requestId];
+        if (req.requestedAt == 0) revert EmergencyRequestNotFound();
+        if (block.timestamp < req.requestedAt + emergencyTimelock) revert EmergencyDelayNotElapsed();
+
+        delete emergencyTokenRequests[requestId];
+
+        PoolData storage pool = _getPool(req.poolId);
+        if (pool.isTriggered) revert AlreadyTriggered();
+
+        SafeTransferLib.safeTransfer(ERC20(req.token), req.to, req.amount);
+
+        emit EmergencyTokenWithdrawal(req.poolId, req.token, req.to, req.amount);
+    }
+
+    /// @notice Cancel a pending ERC-20 emergency withdrawal request.
+    function cancelEmergencyTokenWithdraw(bytes32 requestId) external onlyGovernance {
+        if (emergencyTokenRequests[requestId].requestedAt == 0) revert EmergencyRequestNotFound();
+        delete emergencyTokenRequests[requestId];
+
+        emit EmergencyTokenWithdrawCancelled(requestId);
+    }
+
     /// @notice Check if a holder has already claimed for a pool
     function hasClaimed(PoolId poolId, address holder) external view returns (bool) {
         return _getPool(poolId).claimed[holder];
@@ -531,7 +593,12 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
 
             if (issuerEth > 0) {
                 (bool s1,) = issuer.call{value: issuerEth}("");
-                if (!s1) revert TransferFailed();
+                if (!s1) {
+                    // Issuer cannot receive ETH → redirect to treasury (M-02 fix)
+                    treasuryEth += issuerEth;
+                    totalTreasuryAmount += issuerEth;
+                    totalIssuerReward -= issuerEth;
+                }
             }
             if (treasuryEth > 0) {
                 (bool s2,) = treasury.call{value: treasuryEth}("");
@@ -549,7 +616,13 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
             totalTreasuryAmount += treasuryToken;
 
             if (issuerToken > 0) {
-                SafeTransferLib.safeTransfer(ERC20(pool.baseTokenFeeToken), issuer, issuerToken);
+                try ERC20(pool.baseTokenFeeToken).transfer(issuer, issuerToken) returns (bool) {}
+                catch {
+                    // Issuer cannot receive tokens → redirect to treasury (M-02 fix)
+                    treasuryToken += issuerToken;
+                    totalTreasuryAmount += issuerToken;
+                    totalIssuerReward -= issuerToken;
+                }
             }
             if (treasuryToken > 0) {
                 SafeTransferLib.safeTransfer(ERC20(pool.baseTokenFeeToken), treasury, treasuryToken);

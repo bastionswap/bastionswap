@@ -314,15 +314,14 @@ contract BastionHook is BaseTestHooks {
             if (liquidity > 0) {
                 _issuerLiquidity[poolId] += liquidity;
             }
-        } else if (liquidity > 0 && sender == _issuerLPOwner[poolId]) {
-            // Subsequent issuer LP addition via same router → decode hookData to identify user
+        } else if (liquidity > 0 && sender == _issuerLPOwner[poolId] && params.salt == bytes32(0)) {
+            // Subsequent issuer LP addition via salt-0 position only (M-01 fix)
+            // addLiquidityV2 uses salt=issuerAddress (non-zero) → skip escrow/issuerLiquidity tracking
             if (hookData.length > 0) {
                 address user = abi.decode(hookData, (address));
                 if (user == _issuers[poolId]) {
-                    // All issuer LP additions get locked in escrow
                     uint256 escrowId = _escrowIds[poolId];
                     escrowVault.addLiquidity(escrowId, liquidity);
-                    // Track issuer's salt-0 LP separately for force removal (C-01 fix)
                     _issuerLiquidity[poolId] += liquidity;
                 }
             }

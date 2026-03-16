@@ -13,7 +13,7 @@
 |----------|-------|--------|
 | Critical | 1 | Acknowledged |
 | High     | 3 | All Fixed |
-| Medium   | 3 | Open |
+| Medium   | 3 | All Fixed |
 | Low      | 4 | L-01, L-02 Fixed |
 | Informational | 2 | — |
 
@@ -137,85 +137,70 @@ If force removal fails, the entire trigger reverts atomically — no state incon
 
 ### M-01: Issuer LP Addition via addLiquidityV2 Causes Accounting Mismatch
 
-**Status: Open**
+**Status: FIXED** — Added `params.salt == bytes32(0)` guard in `beforeAddLiquidity`
 
 **Location:** `BastionHook.sol:317-328`
 
 **Description:**
 
-When the issuer adds liquidity after pool creation via `BastionPositionRouter.addLiquidityV2`, the router uses `salt = bytes32(uint256(uint160(sender)))` (BastionPositionRouter.sol:617). However, BastionHook's `beforeAddLiquidity` detects this as an issuer addition and increments `_issuerLiquidity`:
+When the issuer adds liquidity via `addLiquidityV2`, the router uses `salt = bytes32(uint256(uint160(sender)))` (non-zero). The hook previously tracked this in `_issuerLiquidity` and `escrowVault`, but the actual LP was in a different position (salt != 0). During force removal, `forceRemoveIssuerLP` would attempt to remove more liquidity than exists at salt-0, causing a revert.
+
+**Fix Applied:**
+
+Added `params.salt == bytes32(0)` check to the condition, so only salt-0 LP additions are tracked in escrow and `_issuerLiquidity`:
 
 ```solidity
-} else if (liquidity > 0 && sender == _issuerLPOwner[poolId]) {
-    if (hookData.length > 0) {
-        address user = abi.decode(hookData, (address));
-        if (user == _issuers[poolId]) {
-            escrowVault.addLiquidity(escrowId, liquidity);
-            _issuerLiquidity[poolId] += liquidity;  // line 326
-        }
-    }
-}
+} else if (liquidity > 0 && sender == _issuerLPOwner[poolId] && params.salt == bytes32(0)) {
+    // Only track salt-0 LP additions (M-01 fix)
 ```
 
-The additional LP goes to `salt = issuerAddress` (a different position than `salt = 0`), but `_issuerLiquidity` tracks it as if it were at `salt = 0`. During force removal, `forceRemoveIssuerLP` attempts to remove `_issuerLiquidity` amount from `salt = 0`, which will revert in PoolManager.
-
-**Impact:** Force removal breaks for any pool where the issuer adds LP via `addLiquidityV2`. With H-03 fixed, this will cause the entire trigger to revert atomically (no inconsistency), but the trigger cannot succeed until the mismatch is resolved.
-
-**Recommended Fix:**
-
-Either:
-1. Don't track `addLiquidityV2` additions as issuer LP (they're in a different position)
-2. Or force all issuer additions to use salt=0 via a dedicated `addIssuerLiquidity` path
+Issuer LP added via `addLiquidityV2` (salt != 0) is now treated as a regular LP position — freely removable, not escrowed, not counted toward force removal.
 
 ---
 
 ### M-02: Reverting Issuer Contract Permanently Blocks Treasury Claims
 
-**Status: Open**
+**Status: FIXED** — Issuer transfer failure redirects to treasury
 
 **Location:** `InsurancePool.sol:527-529`
 
 **Description:**
 
-In `claimTreasuryFunds`, the issuer's reward is sent via low-level call:
+In `claimTreasuryFunds`, if the issuer address cannot receive ETH or ERC-20 tokens (reverting contract, USDC blacklist), the entire transaction reverted permanently.
 
-```solidity
-if (issuerEth > 0) {
-    (bool s1,) = issuer.call{value: issuerEth}("");
-    if (!s1) revert TransferFailed();  // line 529
-}
-```
+**Fix Applied:**
 
-If the issuer address is a contract that reverts on ETH receipt, the entire `claimTreasuryFunds` transaction reverts permanently. Similarly, if USDC blacklists the issuer address, the `safeTransfer` at line 547 reverts, blocking all ERC-20 fee claims.
-
-**Recommended Fix:**
-
-Use a pull pattern or try/catch, sending failed issuer portion to treasury:
+ETH: If issuer ETH transfer fails, the issuer's share is redirected to treasury:
 ```solidity
 (bool s1,) = issuer.call{value: issuerEth}("");
 if (!s1) {
-    (bool s2,) = treasury.call{value: issuerEth}("");
-    if (!s2) revert TransferFailed();
+    treasuryEth += issuerEth;
+    // ... adjust accounting
 }
 ```
+
+ERC-20: Uses try/catch on `ERC20.transfer` — failure redirects issuer's token share to treasury.
 
 ---
 
 ### M-03: No Emergency Withdrawal Path for ERC-20 Tokens in InsurancePool
 
-**Status: Open**
+**Status: FIXED** — Added ERC-20 emergency withdrawal with timelock
 
 **Location:** `InsurancePool.sol:392-410`
 
 **Description:**
 
-The emergency withdrawal system only handles ETH. ERC-20 base token fees (`pool.baseTokenFeeBalance`) and escrow tokens have no emergency extraction path. If a pool accumulates significant ERC-20 fees but is never triggered and the issuer never completes vesting, those tokens are permanently locked.
+The emergency withdrawal system only handled ETH. ERC-20 base token fees and escrow tokens had no emergency extraction path for non-triggered pools.
 
-**Note:** For triggered pools, the new `sweepExpiredPool` (H-02 fix) handles post-claim-period ERC-20 recovery. This M-03 issue only affects **non-triggered** pools.
+**Fix Applied:**
 
-**Recommended Fix:**
+Added three new functions mirroring the existing ETH emergency pattern:
+- `requestEmergencyTokenWithdraw(poolId, token, to, amount)` — governance-only, creates timelocked request
+- `executeEmergencyTokenWithdraw(requestId)` — governance-only, nonReentrant, same timelock as ETH
+- `cancelEmergencyTokenWithdraw(requestId)` — governance-only, cancels pending request
 
-Add ERC-20 emergency withdrawal with the same timelock pattern as ETH emergency withdrawal.
+All use the same `emergencyTimelock` (default 2 days) and block triggered pools (`AlreadyTriggered`).
 
 ---
 
@@ -298,9 +283,10 @@ For mintable/burnable tokens, creation-time supply may differ from trigger-time 
 | Check | Result |
 |-------|--------|
 | `forge build` | Compiled successfully |
-| `forge build --sizes` | All contracts < 24,576 bytes (BastionHook: 24,524) |
+| `forge build --sizes` | All contracts < 24,576 bytes (BastionHook: 24,538, InsurancePool: 14,218) |
 | Non-fork tests | **396 passed**, 0 failed |
 | Fork tests (Base mainnet) | **86 passed**, 0 failed |
 | **Total** | **482 passed**, 0 failed |
 | Critical fixes needed | 0 (C-01 Acknowledged) |
 | High fixes needed | 0 (All fixed) |
+| Medium fixes needed | 0 (All fixed) |

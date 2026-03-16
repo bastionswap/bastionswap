@@ -787,6 +787,8 @@ contract E2E_Comprehensive is Test {
 
     // Scenario 11: Issuer additional LP
     function test_e2e_issuerAdditionalLP() public {
+        // M-01 fix: addLiquidityV2 uses salt=issuerAddress (non-zero), so it does NOT
+        // count toward escrow/issuerLiquidity. Only salt-0 LP (from createPool) is tracked.
         uint128 liqBefore = escrowVault.getTotalLiquidity(escrowIdA);
 
         vm.startPrank(issuerA);
@@ -797,7 +799,7 @@ contract E2E_Comprehensive is Test {
         vm.stopPrank();
 
         uint128 liqAfter = escrowVault.getTotalLiquidity(escrowIdA);
-        assertGt(liqAfter, liqBefore, "totalLiquidity increased");
+        assertEq(liqAfter, liqBefore, "escrow totalLiquidity unchanged (salt!=0 LP not tracked)");
     }
 
     // ═══════════════════════════════════════════════════════════════════
