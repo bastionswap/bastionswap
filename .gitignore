@@ -39,3 +39,7 @@ Thumbs.db
 
 # Turbo
 .turbo/
+
+# Slither
+slither-output*.txt
+slither-report*.json
