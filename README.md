@@ -85,7 +85,7 @@ graph TB
     BH -->|"enforce all violations (revert)"| BH
     BH -->|recordEvent| RE
 
-    TO -->|executeTrigger (permissionless, no grace period)| EV
+    TO -->|"executeTrigger (permissionless, no grace period)"| EV
     TO -->|executePayout| IP
 
     EV -.->|remaining funds on trigger| IP
