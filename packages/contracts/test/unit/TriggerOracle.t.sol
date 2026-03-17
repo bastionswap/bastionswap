@@ -601,14 +601,23 @@ contract TriggerOracleTest is Test {
     }
 
     function test_updatePoolTriggerConfig_updatesConfig() public {
+        // Use an unregistered pool (M-01 fix: registered pools cannot be updated)
+        PoolId unregisteredPool = PoolId.wrap(bytes32(uint256(999)));
         ITriggerOracle.TriggerConfig memory newCfg = _defaultConfig();
         newCfg.dumpThresholdPercent = 2000;
 
         vm.prank(governance);
-        oracle.updatePoolTriggerConfig(defaultPoolId, newCfg);
+        oracle.updatePoolTriggerConfig(unregisteredPool, newCfg);
 
-        ITriggerOracle.TriggerConfig memory stored = oracle.getTriggerConfig(defaultPoolId);
+        ITriggerOracle.TriggerConfig memory stored = oracle.getTriggerConfig(unregisteredPool);
         assertEq(stored.dumpThresholdPercent, 2000);
+    }
+
+    function test_updatePoolTriggerConfig_revertsRegisteredPool() public {
+        // M-01 fix: registered pools cannot have config updated by governance
+        vm.prank(governance);
+        vm.expectRevert(TriggerOracle.PoolAlreadyRegistered.selector);
+        oracle.updatePoolTriggerConfig(defaultPoolId, _defaultConfig());
     }
 
     function test_updatePoolTriggerConfig_revertsNotGovernance() public {

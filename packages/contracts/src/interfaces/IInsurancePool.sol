@@ -175,6 +175,7 @@ interface IInsurancePool {
         address to;
         uint256 amount;
         uint40 requestedAt;
+        uint40 timelockSnapshot; // M-03 V4 fix: snapshot timelock at request time
     }
 
     /// @notice Emitted when an emergency withdrawal is requested.

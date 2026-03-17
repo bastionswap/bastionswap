@@ -250,14 +250,14 @@ contract E2E_Comprehensive is Test {
     function _buyTokenA(address buyer, uint256 ethAmount) internal returns (uint256) {
         vm.prank(buyer);
         return swapRouter.swapExactInput{value: ethAmount}(
-            poolKeyA, true, ethAmount, 0, block.timestamp + 3600
+            poolKeyA, true, ethAmount, 0, type(uint256).max
         );
     }
 
     function _sellTokenA(address seller, uint256 tokenAmount) internal returns (uint256) {
         vm.startPrank(seller);
         tokenA.approve(address(swapRouter), tokenAmount);
-        uint256 out = swapRouter.swapExactInput(poolKeyA, false, tokenAmount, 0, block.timestamp + 3600);
+        uint256 out = swapRouter.swapExactInput(poolKeyA, false, tokenAmount, 0, type(uint256).max);
         vm.stopPrank();
         return out;
     }
@@ -300,18 +300,18 @@ contract E2E_Comprehensive is Test {
         while (removable > 0) {
             // After enough daily removals to approach weekly limit, advance 7 days to reset
             if (daysInWeek >= maxDaysPerWeek) {
-                vm.warp(block.timestamp + 7 days + 1);
+                vm.warp(vm.getBlockTimestamp() + 7 days + 1);
                 daysInWeek = 0;
             }
             uint128 chunk = removable > maxChunk ? maxChunk : removable;
             if (chunk == 0) break;
             vm.prank(issuer);
-            positionRouter.removeIssuerLiquidity(key, chunk, 0, 0, block.timestamp + 3600);
+            positionRouter.removeIssuerLiquidity(key, chunk, 0, 0, type(uint256).max);
             removable = escrowVault.getRemovableLiquidity(eid);
             daysInWeek++;
             // Advance 1 day to reset daily counter
             if (removable > 0) {
-                vm.warp(block.timestamp + 1 days + 1);
+                vm.warp(vm.getBlockTimestamp() + 1 days + 1);
             }
         }
     }
@@ -585,7 +585,7 @@ contract E2E_Comprehensive is Test {
 
         // Determine swap direction: buy tkUsdc = sell USDC
         bool zeroForOne = Currency.unwrap(c0) == USDC; // if USDC is currency0, sell 0 for 1
-        swapRouter.swapExactInput(poolKeyUsdc, zeroForOne, 100e6, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyUsdc, zeroForOne, 100e6, 0, type(uint256).max);
         vm.stopPrank();
 
         // Insurance should have USDC balance (ERC20 fees stored in baseTokenFeeBalance, not ETH balance)
@@ -629,7 +629,7 @@ contract E2E_Comprehensive is Test {
 
         vm.startPrank(trader);
         tokenA.approve(address(swapRouter), 1000e18);
-        uint256 out = swapRouter.swapMultiHop(steps, 1000e18, 0, block.timestamp + 3600);
+        uint256 out = swapRouter.swapMultiHop(steps, 1000e18, 0, type(uint256).max);
         vm.stopPrank();
 
         assertGt(out, 0, "got output");
@@ -656,7 +656,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 1 ether}(
-            poolKeyA, 0, 0, 1 ether, 10_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 1 ether, 10_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -681,7 +681,7 @@ contract E2E_Comprehensive is Test {
         // 8d: Full removal
         uint128 currentLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         vm.prank(generalLP);
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, currentLiq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, currentLiq, 0, 0, type(uint256).max);
         assertEq(positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0), 0, "all removed");
 
         // No trigger
@@ -690,11 +690,11 @@ contract E2E_Comprehensive is Test {
         // 8e: Partial removal
         vm.startPrank(generalLP);
         positionRouter.addLiquidityV2{value: 2 ether}(
-            poolKeyA, 0, 0, 2 ether, 20_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 2 ether, 20_000e18, type(uint256).max
         );
         uint128 fullLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         uint128 halfLiq = fullLiq / 2;
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, halfLiq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, halfLiq, 0, 0, type(uint256).max);
         uint128 remainLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         assertApproxEqAbs(remainLiq, fullLiq - halfLiq, 1, "half remaining");
         vm.stopPrank();
@@ -715,7 +715,7 @@ contract E2E_Comprehensive is Test {
 
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, 1, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, 1, 0, 0, type(uint256).max);
 
         // 9b: Lock ends at 7 days — 0% removable
         vm.warp(poolACreatedAt + 7 days);
@@ -729,12 +729,12 @@ contract E2E_Comprehensive is Test {
         // Remove 9% of initial LP (within 10% daily limit)
         uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Try removing another 9% in same day -> revert (would exceed 10% daily limit)
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // 9d: Full vesting (90 days) — remove all LP incrementally
         // Daily limit 10%, weekly limit 30%. Remove 9%/day, warp 7 days after 3 days to reset weekly.
@@ -744,14 +744,14 @@ contract E2E_Comprehensive is Test {
             uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
             if (remaining == 0) break;
             if (daysInWeek == 3) {
-                vm.warp(block.timestamp + 7 days + 1);
+                vm.warp(vm.getBlockTimestamp() + 7 days + 1);
                 daysInWeek = 0;
             }
             uint128 chunk = ninePercent > remaining ? remaining : ninePercent;
             vm.prank(issuerA);
-            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, type(uint256).max);
             daysInWeek++;
-            vm.warp(block.timestamp + 1 days + 1);
+            vm.warp(vm.getBlockTimestamp() + 1 days + 1);
         }
         assertEq(escrowVault.getRemovableLiquidity(escrowIdA), 0, "fully removed");
     }
@@ -787,19 +787,27 @@ contract E2E_Comprehensive is Test {
 
     // Scenario 11: Issuer additional LP
     function test_e2e_issuerAdditionalLP() public {
-        // M-01 fix: addLiquidityV2 uses salt=issuerAddress (non-zero), so it does NOT
-        // count toward escrow/issuerLiquidity. Only salt-0 LP (from createPool) is tracked.
-        uint128 liqBefore = escrowVault.getTotalLiquidity(escrowIdA);
-
+        // V4 fix: issuer cannot use addLiquidityV2 (salt!=0) — must use addIssuerLiquidity (salt=0)
+        // Verify addLiquidityV2 reverts for issuer (IssuerMustUseSaltZero)
         vm.startPrank(issuerA);
         tokenA.approve(address(positionRouter), type(uint256).max);
+        vm.expectRevert();
         positionRouter.addLiquidityV2{value: 1 ether}(
-            poolKeyA, 0, 0, 1 ether, 10_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 1 ether, 10_000e18, type(uint256).max
+        );
+        vm.stopPrank();
+
+        // Verify addIssuerLiquidity works and tracks in escrow
+        uint128 liqBefore = escrowVault.getTotalLiquidity(escrowIdA);
+        vm.startPrank(issuerA);
+        tokenA.approve(address(positionRouter), type(uint256).max);
+        positionRouter.addIssuerLiquidity{value: 1 ether}(
+            poolKeyA, 1 ether, 10_000e18, type(uint256).max
         );
         vm.stopPrank();
 
         uint128 liqAfter = escrowVault.getTotalLiquidity(escrowIdA);
-        assertEq(liqAfter, liqBefore, "escrow totalLiquidity unchanged (salt!=0 LP not tracked)");
+        assertGt(liqAfter, liqBefore, "escrow totalLiquidity increased via addIssuerLiquidity");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -814,7 +822,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 50 ether}(
-            poolKeyA, 0, 0, 50 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 50 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -824,21 +832,21 @@ contract E2E_Comprehensive is Test {
 
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
-        swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, type(uint256).max);
         vm.stopPrank();
 
         // 12b: Additional 2% of original reserve -> total >3% of current reserve -> revert
         vm.startPrank(issuerA);
         vm.expectRevert();
-        swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, type(uint256).max);
         vm.stopPrank();
 
         // 12c: 24h later -> reset -> small sell succeeds
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 1 days + 1);
         uint256 newReserve = tokenA.balanceOf(address(pm));
         uint256 smallSell = (newReserve * 100) / 10_000; // 1% of current reserve
         vm.startPrank(issuerA);
-        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -848,7 +856,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 50 ether}(
-            poolKeyA, 0, 0, 50 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 50 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -863,7 +871,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
         uint256 smallSell = (poolReserve * 200) / 10_000; // 2% of pool reserve
-        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, type(uint256).max);
         vm.stopPrank();
 
         // Note: attacker selling issuer's tokens — swapper is attacker not issuer,
@@ -872,7 +880,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(attacker);
         tokenA.approve(address(swapRouter), type(uint256).max);
         // This succeeds because attacker != issuer in hookData
-        swapRouter.swapExactInput(poolKeyA, false, bigAmount, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, bigAmount, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -882,7 +890,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 100 ether}(
-            poolKeyA, 0, 0, 100 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 100 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -894,27 +902,27 @@ contract E2E_Comprehensive is Test {
 
         // Days 1-5: sell 2.9% of current reserve each (under 3% daily limit)
         for (uint256 i = 0; i < 5; i++) {
-            if (i > 0) vm.warp(block.timestamp + 1 days + 1);
+            if (i > 0) vm.warp(vm.getBlockTimestamp() + 1 days + 1);
             uint256 r = tokenA.balanceOf(address(pm));
             uint256 ds = (r * 290) / 10_000;
-            swapRouter.swapExactInput(poolKeyA, false, ds, 0, block.timestamp + 3600);
+            swapRouter.swapExactInput(poolKeyA, false, ds, 0, type(uint256).max);
         }
 
         // Day 6: 2.9% of current reserve -> weekly cumulative exceeds 15% -> revert
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 1 days + 1);
         uint256 reserve = tokenA.balanceOf(address(pm));
         uint256 dailySell = (reserve * 290) / 10_000;
         vm.expectRevert();
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, type(uint256).max);
 
         vm.stopPrank();
 
         // 14b: After 7-day window reset -> can sell again
-        vm.warp(block.timestamp + 2 days);
+        vm.warp(vm.getBlockTimestamp() + 2 days);
         uint256 resetReserve = tokenA.balanceOf(address(pm));
         uint256 resetSell = (resetReserve * 100) / 10_000; // 1% of current reserve
         vm.startPrank(issuerA);
-        swapRouter.swapExactInput(poolKeyA, false, resetSell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, resetSell, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -924,7 +932,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 50 ether}(
-            poolKeyA, 0, 0, 50 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 50 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -953,7 +961,7 @@ contract E2E_Comprehensive is Test {
 
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, sixtyPercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, sixtyPercent, 0, 0, type(uint256).max);
 
         // LP state unchanged
         assertEq(escrowVault.getTotalLiquidity(escrowIdA), total, "LP unchanged");
@@ -965,7 +973,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 5 ether}(
-            poolKeyA, 0, 0, 5 ether, 50_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 5 ether, 50_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -979,12 +987,12 @@ contract E2E_Comprehensive is Test {
         // 9% removal -> succeeds (under 10% daily limit)
         uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Another 9% in the same day -> daily total 18% > 10% daily limit -> reverts
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Pool is NOT triggered (v1: revert, no trigger firing)
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered - v1 reverts instead");
@@ -995,10 +1003,10 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 10 ether}(
-            poolKeyA, 0, 0, 10 ether, 100_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 10 ether, 100_000e18, type(uint256).max
         );
         uint128 liq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, liq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, liq, 0, 0, type(uint256).max);
         vm.stopPrank();
 
         assertFalse(hook.isPoolTriggered(poolIdA), "no trigger");
@@ -1014,7 +1022,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 5 ether}(
-            poolKeyA, 0, 0, 5 ether, 50_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 5 ether, 50_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -1044,7 +1052,7 @@ contract E2E_Comprehensive is Test {
         assertTrue(ps.isTriggered, "insurance triggered");
 
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 24 hours + 1);
         vm.roll(block.number + 1);
 
         // 4. Holder claims using fallback mode
@@ -1076,7 +1084,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 5 ether}(
-            poolKeyA, 0, 0, 5 ether, 50_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 5 ether, 50_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -1094,13 +1102,13 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
         vm.expectRevert();
-        swapRouter.swapExactInput(poolKeyA, false, 1000e18, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, 1000e18, 0, type(uint256).max);
         vm.stopPrank();
 
         // 20b: Issuer LP removal -> revert
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, 1, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, 1, 0, 0, type(uint256).max);
 
         // 20c: Issuer fee collect -> revert
         vm.prank(issuerA);
@@ -1114,7 +1122,7 @@ contract E2E_Comprehensive is Test {
         // 20e: General LP removal -> works
         uint128 glpLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         vm.prank(generalLP);
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, glpLiq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, glpLiq, 0, 0, type(uint256).max);
     }
 
     // Scenario 21: Fallback claim
@@ -1133,7 +1141,7 @@ contract E2E_Comprehensive is Test {
         assertTrue(status.isTriggered, "triggered");
 
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 24 hours + 1);
         vm.roll(block.number + 1);
 
         // Holder claims via fallback (no merkle root)
@@ -1146,7 +1154,7 @@ contract E2E_Comprehensive is Test {
         assertGt(holder.balance, holderEthBefore, "compensated");
 
         // After 7-day fallback period -> claims fail
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(vm.getBlockTimestamp() + 8 days);
         address lateClaimer = makeAddr("late");
         vm.deal(lateClaimer, 1 ether);
         deal(address(tokenA), lateClaimer, 1000e18);
@@ -1172,7 +1180,7 @@ contract E2E_Comprehensive is Test {
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.ISSUER_DUMP, totalSupply);
 
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 24 hours + 1);
         vm.roll(block.number + 1);
 
         // Holder claims -> succeeds
@@ -1319,7 +1327,7 @@ contract E2E_Comprehensive is Test {
         // Remove 9% of initial LP (within 10% daily limit)
         uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
     }
@@ -1330,7 +1338,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 100 ether}(
-            poolKeyA, 0, 0, 100 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 100 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -1342,7 +1350,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
         vm.expectRevert();
-        swapRouter.swapExactInput(poolKeyA, false, overLimit, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, overLimit, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -1461,7 +1469,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 100 ether}(
-            poolKeyA, 0, 0, 100 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 100 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -1472,7 +1480,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
         vm.expectRevert();
-        swapRouter.swapExactInput(poolKeyA, false, overLimit, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, overLimit, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -1482,7 +1490,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 100 ether}(
-            poolKeyA, 0, 0, 100 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 100 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -1492,18 +1500,18 @@ contract E2E_Comprehensive is Test {
         tokenA.approve(address(swapRouter), type(uint256).max);
 
         for (uint256 i = 0; i < 5; i++) {
-            if (i > 0) vm.warp(block.timestamp + 1 days + 1);
+            if (i > 0) vm.warp(vm.getBlockTimestamp() + 1 days + 1);
             uint256 r = tokenA.balanceOf(address(pm));
             uint256 ds = (r * 290) / 10_000;
-            swapRouter.swapExactInput(poolKeyA, false, ds, 0, block.timestamp + 3600);
+            swapRouter.swapExactInput(poolKeyA, false, ds, 0, type(uint256).max);
         }
 
         // Day 6: weekly limit exceeded
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 1 days + 1);
         uint256 reserve = tokenA.balanceOf(address(pm));
         uint256 dailySell = (reserve * 290) / 10_000;
         vm.expectRevert();
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, type(uint256).max);
 
         vm.stopPrank();
     }
@@ -1517,10 +1525,10 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 10 ether}(
-            poolKeyA, 0, 0, 10 ether, 100_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 10 ether, 100_000e18, type(uint256).max
         );
         uint128 liq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, liq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, liq, 0, 0, type(uint256).max);
         vm.stopPrank();
 
         assertFalse(hook.isPoolTriggered(poolIdA), "no trigger");
@@ -1531,7 +1539,7 @@ contract E2E_Comprehensive is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 50 ether}(
-            poolKeyA, 0, 0, 50 ether, 200_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 50 ether, 200_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -1583,7 +1591,7 @@ contract E2E_Comprehensive is Test {
         insurancePool.executeEmergencyWithdraw(requestId);
 
         // After 2-day timelock -> success
-        vm.warp(block.timestamp + 2 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 2 days + 1);
         uint256 govBefore = deployer.balance;
         vm.prank(deployer);
         insurancePool.executeEmergencyWithdraw(requestId);
@@ -1612,7 +1620,7 @@ contract E2E_Comprehensive is Test {
         triggerOracle.pause();
         assertTrue(triggerOracle.paused(), "paused again");
 
-        vm.warp(block.timestamp + 7 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 7 days + 1);
         assertFalse(triggerOracle.paused(), "auto-expired");
     }
 
@@ -1668,7 +1676,7 @@ contract E2E_Comprehensive is Test {
         tokenA.approve(address(positionRouter), type(uint256).max);
         vm.expectRevert();
         positionRouter.addLiquidityV2{value: 1 ether}(
-            poolKeyA, 0, 0, 1 ether, 10_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 1 ether, 10_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -1679,7 +1687,7 @@ contract E2E_Comprehensive is Test {
         // Now adding LP -> succeeds
         vm.startPrank(generalLP);
         positionRouter.addLiquidityV2{value: 1 ether}(
-            poolKeyA, 0, 0, 1 ether, 10_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 1 ether, 10_000e18, type(uint256).max
         );
         vm.stopPrank();
     }
@@ -1739,12 +1747,12 @@ contract E2E_Comprehensive is Test {
         // 9% removal -> succeeds (below 10% daily limit)
         uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Another 9% in the same day -> daily total 18% > 10% -> reverts (DailyLpRemovalExceeded)
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
     }
 
     // v1: Daily LP removal within 10% limit succeeds
@@ -1757,10 +1765,10 @@ contract E2E_Comprehensive is Test {
         uint128 fourPercent = uint128((uint256(total) * 400) / 10_000);
 
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, fivePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, fivePercent, 0, 0, type(uint256).max);
 
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, fourPercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, fourPercent, 0, 0, type(uint256).max);
 
         // Both succeeded, pool not triggered
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");
@@ -1774,10 +1782,10 @@ contract E2E_Comprehensive is Test {
         // 9% in first day (under 10% daily limit)
         uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Advance past 24h window -> daily counter resets
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 1 days + 1);
 
         // Another 9% -> succeeds (daily counter reset)
         uint128 remaining = escrowVault.getRemovableLiquidity(escrowIdA);
@@ -1785,7 +1793,7 @@ contract E2E_Comprehensive is Test {
         if (chunk2 > remaining) chunk2 = remaining;
         if (chunk2 > 0) {
             vm.prank(issuerA);
-            positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, block.timestamp + 3600);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk2, 0, 0, type(uint256).max);
         }
 
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered after window reset");
@@ -1799,12 +1807,12 @@ contract E2E_Comprehensive is Test {
         // 9% removal succeeds (under 10% daily limit)
         uint128 ninePercent = uint128((uint256(total) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Another 9% in the same day -> exceeds 10% daily limit -> reverts
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // No trigger fired — just reverted
         assertFalse(hook.isPoolTriggered(poolIdA), "not triggered");

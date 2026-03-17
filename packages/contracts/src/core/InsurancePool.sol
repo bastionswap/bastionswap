@@ -83,6 +83,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         uint40 snapshotMerkleDeadline; // governance param snapshot at trigger time (M-03 fix)
         uint40 snapshotMerkleClaimPeriod; // governance param snapshot at trigger time (M-03 fix)
         uint40 snapshotFallbackClaimPeriod; // governance param snapshot at trigger time (M-03 fix)
+        uint256 totalTokenClaimed; // cumulative issued token claimed (H-01 fix)
+        uint256 totalBaseTokenClaimed; // cumulative base token claimed (H-01 fix)
         mapping(address => bool) claimed;
     }
 
@@ -105,6 +107,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         address to;
         uint256 amount;
         uint40 requestedAt;
+        uint40 timelockSnapshot; // M-03 V4 fix: snapshot timelock at request time
     }
     mapping(bytes32 => EmergencyTokenRequest) public emergencyTokenRequests;
 
@@ -397,7 +400,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
             poolId: poolId,
             to: to,
             amount: amount,
-            requestedAt: uint40(block.timestamp)
+            requestedAt: uint40(block.timestamp),
+            timelockSnapshot: emergencyTimelock // M-03 V4 fix
         });
 
         emit IInsurancePool.EmergencyWithdrawRequested(requestId, poolId, to, amount);
@@ -407,7 +411,7 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     function executeEmergencyWithdraw(bytes32 requestId) external onlyGovernance nonReentrant {
         IInsurancePool.EmergencyRequest memory req = emergencyRequests[requestId];
         if (req.requestedAt == 0) revert EmergencyRequestNotFound();
-        if (block.timestamp < req.requestedAt + emergencyTimelock) revert EmergencyDelayNotElapsed();
+        if (block.timestamp < req.requestedAt + req.timelockSnapshot) revert EmergencyDelayNotElapsed(); // M-03 V4 fix
 
         // Delete before execution to prevent re-entrancy / double-execute
         delete emergencyRequests[requestId];
@@ -454,7 +458,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
             token: token,
             to: to,
             amount: amount,
-            requestedAt: uint40(block.timestamp)
+            requestedAt: uint40(block.timestamp),
+            timelockSnapshot: emergencyTimelock // M-03 V4 fix
         });
 
         emit EmergencyTokenWithdrawRequested(requestId, poolId, token, to, amount);
@@ -464,12 +469,17 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     function executeEmergencyTokenWithdraw(bytes32 requestId) external onlyGovernance nonReentrant {
         EmergencyTokenRequest memory req = emergencyTokenRequests[requestId];
         if (req.requestedAt == 0) revert EmergencyRequestNotFound();
-        if (block.timestamp < req.requestedAt + emergencyTimelock) revert EmergencyDelayNotElapsed();
+        if (block.timestamp < req.requestedAt + req.timelockSnapshot) revert EmergencyDelayNotElapsed(); // M-03 fix
 
         delete emergencyTokenRequests[requestId];
 
         PoolData storage pool = _getPool(req.poolId);
         if (pool.isTriggered) revert AlreadyTriggered();
+
+        // Decrement per-pool balance accounting (H-02 fix)
+        if (req.token == pool.baseTokenFeeToken && pool.baseTokenFeeBalance >= req.amount) {
+            pool.baseTokenFeeBalance -= req.amount;
+        }
 
         SafeTransferLib.safeTransfer(ERC20(req.token), req.to, req.amount);
 
@@ -616,9 +626,10 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
             totalTreasuryAmount += treasuryToken;
 
             if (issuerToken > 0) {
-                try ERC20(pool.baseTokenFeeToken).transfer(issuer, issuerToken) returns (bool) {}
+                // Use safeTransfer in try/catch (M-02 V4 fix: safe + checked)
+                try this.safeTransferExternal(pool.baseTokenFeeToken, issuer, issuerToken) {}
                 catch {
-                    // Issuer cannot receive tokens → redirect to treasury (M-02 fix)
+                    // Issuer cannot receive tokens → redirect to treasury
                     treasuryToken += issuerToken;
                     totalTreasuryAmount += issuerToken;
                     totalIssuerReward -= issuerToken;
@@ -668,18 +679,20 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
             if (!success) revert TransferFailed();
         }
 
-        // Sweep remaining issued tokens
-        if (pool.escrowToken != address(0)) {
-            tokenSwept = ERC20(pool.escrowToken).balanceOf(address(this));
+        // Sweep remaining issued tokens (per-pool tracked, not balanceOf) (H-01 fix)
+        if (pool.escrowToken != address(0) && pool.tokenPayoutBalance > pool.totalTokenClaimed) {
+            tokenSwept = pool.tokenPayoutBalance - pool.totalTokenClaimed;
+            pool.totalTokenClaimed = pool.tokenPayoutBalance; // mark fully claimed
             if (tokenSwept > 0) {
                 SafeTransferLib.safeTransfer(ERC20(pool.escrowToken), treasury, tokenSwept);
             }
         }
 
-        // Sweep remaining ERC-20 base tokens (fees + escrow)
+        // Sweep remaining ERC-20 base tokens (per-pool tracked, not balanceOf) (H-01 fix)
         address baseToken = pool.baseTokenFeeToken != address(0) ? pool.baseTokenFeeToken : pool.escrowBaseToken;
-        if (baseToken != address(0)) {
-            baseTokenSwept = ERC20(baseToken).balanceOf(address(this));
+        if (baseToken != address(0) && pool.baseTokenFeePayoutBalance > pool.totalBaseTokenClaimed) {
+            baseTokenSwept = pool.baseTokenFeePayoutBalance - pool.totalBaseTokenClaimed;
+            pool.totalBaseTokenClaimed = pool.baseTokenFeePayoutBalance; // mark fully claimed
             if (baseTokenSwept > 0) {
                 SafeTransferLib.safeTransfer(ERC20(baseToken), treasury, baseTokenSwept);
             }
@@ -689,6 +702,13 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
     }
 
     event ExpiredPoolSwept(PoolId indexed poolId, uint256 ethSwept, uint256 tokenSwept, uint256 baseTokenSwept);
+
+    /// @dev External wrapper for SafeTransferLib.safeTransfer so it can be used in try/catch (M-02 V4 fix).
+    ///      Only callable by this contract itself via `this.safeTransferExternal(...)`.
+    function safeTransferExternal(address token, address to, uint256 amount) external {
+        if (msg.sender != address(this)) revert OnlyHook(); // self-call only
+        SafeTransferLib.safeTransfer(ERC20(token), to, amount);
+    }
 
     // ─── Internal Functions ───────────────────────────────────────────
 
@@ -712,6 +732,8 @@ contract InsurancePool is IInsurancePool, ReentrancyGuard {
         // CEI: mark claimed before transfer
         pool.claimed[msg.sender] = true;
         pool.totalClaimed += amount;
+        pool.totalTokenClaimed += tokenShare; // H-01 fix
+        pool.totalBaseTokenClaimed += baseTokenShare; // H-01 fix
         pool.balance -= amount;
 
         // Transfer ETH

@@ -510,13 +510,15 @@ contract BastionHook is BaseTestHooks {
                 if (isPoolTriggered[poolId]) revert PoolTriggered();
 
                 // Direct sell defense (1st layer): check commitment limits
-                PoolCommitment memory commitment = _poolCommitments[poolId];
-                if (commitment.isSet) {
-                    uint256 sellAmount = params.amountSpecified < 0
-                        ? uint256(uint128(int128(-params.amountSpecified)))
-                        : uint256(int256(params.amountSpecified));
-
-                    _checkSellLimits(poolId, commitment, sellAmount);
+                // Only for exactInput sells where amountSpecified is the issued token amount.
+                // For exactOutput sells (amountSpecified > 0 = base token output), defer to
+                // Layer 2 (afterSwap) which uses actual BalanceDelta. (M-04 fix)
+                if (params.amountSpecified < 0) {
+                    PoolCommitment memory commitment = _poolCommitments[poolId];
+                    if (commitment.isSet) {
+                        uint256 sellAmount = uint256(uint128(int128(-params.amountSpecified)));
+                        _checkSellLimits(poolId, commitment, sellAmount);
+                    }
                 }
             }
 
@@ -1139,7 +1141,9 @@ contract BastionHook is BaseTestHooks {
         if (triggerConfig.weeklyLpRemovalBps > def.weeklyLpRemovalBps) revert CommitmentTooLenient();
         // Validate: weekly LP must be >= daily LP
         if (triggerConfig.weeklyLpRemovalBps < triggerConfig.dailyLpRemovalBps) revert ValueOutOfRange();
-        // Validate: sell thresholds must be ≤ defaults
+        // Validate: sell thresholds must be > 0 and ≤ defaults (C-01 fix)
+        if (triggerConfig.dumpThresholdPercent == 0) revert ValueOutOfRange();
+        if (triggerConfig.weeklyDumpThresholdPercent == 0) revert ValueOutOfRange();
         if (triggerConfig.dumpThresholdPercent > def.dumpThresholdPercent) revert CommitmentTooLenient();
         if (triggerConfig.weeklyDumpThresholdPercent > def.weeklyDumpThresholdPercent) revert CommitmentTooLenient();
 
@@ -1268,7 +1272,7 @@ contract BastionHook is BaseTestHooks {
         return _initialTotalSupply[poolId];
     }
 
-    /// @notice Get the current virtual reserve of the issued token in the pool (H-02 fix).
+    /// @notice Get the current virtual reserve of the issued token in the pool.
     function getPoolIssuedTokenReserve(PoolId poolId) external view returns (uint256) {
         return _getPoolIssuedTokenReserve(poolId);
     }

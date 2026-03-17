@@ -336,14 +336,14 @@ contract E2E_EdgeCases is Test {
     function _buyTokenA(address buyer, uint256 ethAmount) internal returns (uint256) {
         vm.prank(buyer);
         return swapRouter.swapExactInput{value: ethAmount}(
-            poolKeyA, true, ethAmount, 0, block.timestamp + 3600
+            poolKeyA, true, ethAmount, 0, type(uint256).max
         );
     }
 
     function _sellTokenA(address seller, uint256 tokenAmount) internal returns (uint256) {
         vm.startPrank(seller);
         tokenA.approve(address(swapRouter), tokenAmount);
-        uint256 out = swapRouter.swapExactInput(poolKeyA, false, tokenAmount, 0, block.timestamp + 3600);
+        uint256 out = swapRouter.swapExactInput(poolKeyA, false, tokenAmount, 0, type(uint256).max);
         vm.stopPrank();
         return out;
     }
@@ -458,7 +458,7 @@ contract E2E_EdgeCases is Test {
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), exactLimitAmount);
         // This should NOT revert (selling exactly at the limit)
-        swapRouter.swapExactInput(poolKeyA, false, exactLimitAmount, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, exactLimitAmount, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -482,17 +482,17 @@ contract E2E_EdgeCases is Test {
         tkLimit.approve(address(swapRouter), type(uint256).max);
 
         // First: sell at exact limit -> succeeds
-        swapRouter.swapExactInput(key, false, atLimit, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(key, false, atLimit, 0, type(uint256).max);
 
         // Next day: sell 1 BPS above the limit -> should revert
         // We need at least 1 full BPS worth of tokens to exceed the threshold
         // (due to ceil division rounding).
         // Re-read pool reserve (grows after sell since issued tokens flow into pool)
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 newReserve = hook.getPoolIssuedTokenReserve(key.toId());
         uint256 overLimit = (newReserve * (300 + 1)) / 10_000; // 301 bps = 3.01%
         vm.expectRevert();
-        swapRouter.swapExactInput(key, false, overLimit, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(key, false, overLimit, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -506,7 +506,7 @@ contract E2E_EdgeCases is Test {
 
         // Should succeed since LP removal uses > (not >=) for daily limit
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, exactTenPercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, exactTenPercent, 0, 0, type(uint256).max);
     }
 
     function test_MinimumLiquidity_Pool() public {
@@ -537,7 +537,7 @@ contract E2E_EdgeCases is Test {
         tokenA.approve(address(swapRouter), 1);
         // Tiny sell: may give 0 output but should not revert with division error
         // Note: V4 may revert with 0 output for dust amounts, which is fine
-        try swapRouter.swapExactInput(poolKeyA, false, 1, 0, block.timestamp + 3600) {
+        try swapRouter.swapExactInput(poolKeyA, false, 1, 0, type(uint256).max) {
             // Success — dust amount handled correctly
         } catch {
             // Acceptable: AMM might reject zero-output swaps
@@ -582,7 +582,7 @@ contract E2E_EdgeCases is Test {
         uint256 sellX = (reserveX * 200) / 10_000;
         vm.startPrank(issuerA);
         tkX.approve(address(swapRouter), sellX);
-        swapRouter.swapExactInput(keyX, false, sellX, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(keyX, false, sellX, 0, type(uint256).max);
         vm.stopPrank();
 
         // Both pools should have independent sell tracking
@@ -665,15 +665,15 @@ contract E2E_EdgeCases is Test {
 
         vm.startPrank(issuerA);
         tokenA.approve(address(swapRouter), type(uint256).max);
-        swapRouter.swapExactInput(poolKeyA, false, nearLimit, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, nearLimit, 0, type(uint256).max);
         vm.stopPrank();
 
         // Warp to new day (epoch boundary)
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
 
         // Should be able to sell again (counter reset)
         vm.startPrank(issuerA);
-        swapRouter.swapExactInput(poolKeyA, false, nearLimit, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, nearLimit, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -709,9 +709,9 @@ contract E2E_EdgeCases is Test {
         tokenA.approve(address(swapRouter), type(uint256).max);
 
         // Multiple sells in same block should accumulate
-        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, block.timestamp + 3600);
-        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, block.timestamp + 3600);
-        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, type(uint256).max);
+        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, type(uint256).max);
+        swapRouter.swapExactInput(poolKeyA, false, smallSell, 0, type(uint256).max);
         // All three succeeded = properly accumulated but under limit
         vm.stopPrank();
     }
@@ -728,15 +728,15 @@ contract E2E_EdgeCases is Test {
         tokenA.approve(address(swapRouter), type(uint256).max);
 
         // Sell on day 1
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, type(uint256).max);
 
         // Sell on day 2
-        vm.warp(block.timestamp + 1 days);
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, type(uint256).max);
 
         // After weekly window resets, should be able to sell again
-        vm.warp(block.timestamp + 7 days);
-        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, block.timestamp + 3600);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+        swapRouter.swapExactInput(poolKeyA, false, dailySell, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -756,7 +756,7 @@ contract E2E_EdgeCases is Test {
 
         uint256 gasBefore = gasleft();
         for (uint256 i = 0; i < 100; i++) {
-            swapRouter.swapExactInput(poolKeyA, false, perSell, 0, block.timestamp + 3600);
+            swapRouter.swapExactInput(poolKeyA, false, perSell, 0, type(uint256).max);
         }
         uint256 gasUsed = gasBefore - gasleft();
         vm.stopPrank();
@@ -784,7 +784,7 @@ contract E2E_EdgeCases is Test {
         triggerOracle.executeTrigger(poolIdA, poolKeyA, ITriggerOracle.TriggerType.ISSUER_DUMP, totalSupply);
 
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 24 hours + 1);
         vm.roll(block.number + 1);
 
         // Reentrancy attack: the outer call succeeds (first claim works),
@@ -836,7 +836,7 @@ contract E2E_EdgeCases is Test {
         // (this is correct behavior — only the registered issuer address is tracked)
         vm.startPrank(issuerWallet2);
         tokenA.approve(address(swapRouter), type(uint256).max);
-        swapRouter.swapExactInput(poolKeyA, false, 50_000e18, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(poolKeyA, false, 50_000e18, 0, type(uint256).max);
         vm.stopPrank();
 
         // But the issuer's own sells are still tracked
@@ -848,7 +848,7 @@ contract E2E_EdgeCases is Test {
             vm.startPrank(issuerA);
             tokenA.approve(address(swapRouter), overLimit);
             vm.expectRevert();
-            swapRouter.swapExactInput(poolKeyA, false, overLimit, 0, block.timestamp + 3600);
+            swapRouter.swapExactInput(poolKeyA, false, overLimit, 0, type(uint256).max);
             vm.stopPrank();
         }
     }
@@ -873,7 +873,7 @@ contract E2E_EdgeCases is Test {
         insurancePool.claimCompensationFallback(poolIdA, holderBal);
 
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 24 hours + 1);
         vm.roll(block.number + 1);
         vm.startPrank(holder);
         tokenA.approve(address(insurancePool), holderBal);
@@ -903,18 +903,18 @@ contract E2E_EdgeCases is Test {
 
         // Days 1-5: 2.9% of current reserve each day
         for (uint256 i = 0; i < 5; i++) {
-            if (i > 0) vm.warp(block.timestamp + 1 days);
+            if (i > 0) vm.warp(vm.getBlockTimestamp() + 1 days);
             uint256 r = tkSlow.balanceOf(address(pm));
             uint256 ds = (r * 290) / 10_000;
-            swapRouter.swapExactInput(key, false, ds, 0, block.timestamp + 3600);
+            swapRouter.swapExactInput(key, false, ds, 0, type(uint256).max);
         }
 
         // Day 6: 2.9% of current reserve — should push weekly cumulative over 15% and revert
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 reserve = tkSlow.balanceOf(address(pm));
         uint256 dailySell = (reserve * 290) / 10_000;
         vm.expectRevert();
-        swapRouter.swapExactInput(key, false, dailySell, 0, block.timestamp + 3600);
+        swapRouter.swapExactInput(key, false, dailySell, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -971,7 +971,7 @@ contract E2E_EdgeCases is Test {
             vm.startPrank(issuerA);
             tokenA.approve(address(swapRouter), sellAmount);
             // Should succeed — 2.9% of current reserve is under 3% limit
-            swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, block.timestamp + 3600);
+            swapRouter.swapExactInput(poolKeyA, false, sellAmount, 0, type(uint256).max);
             vm.stopPrank();
         }
     }

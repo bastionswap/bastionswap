@@ -235,14 +235,14 @@ contract E2E_LocalFork is Test {
     function _buyTokenA(address buyer, uint256 ethAmount) internal returns (uint256 out) {
         vm.prank(buyer);
         out = swapRouter.swapExactInput{value: ethAmount}(
-            poolKeyA, true, ethAmount, 0, block.timestamp + 3600
+            poolKeyA, true, ethAmount, 0, type(uint256).max
         );
     }
 
     function _sellTokenA(address seller, uint256 tokenAmount) internal returns (uint256 out) {
         vm.startPrank(seller);
         tokenA.approve(address(swapRouter), tokenAmount);
-        out = swapRouter.swapExactInput(poolKeyA, false, tokenAmount, 0, block.timestamp + 3600);
+        out = swapRouter.swapExactInput(poolKeyA, false, tokenAmount, 0, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -398,7 +398,7 @@ contract E2E_LocalFork is Test {
 
         vm.startPrank(trader);
         tokenA.approve(address(swapRouter), swapAmount);
-        uint256 amountOut = swapRouter.swapMultiHop(steps, swapAmount, 0, block.timestamp + 3600);
+        uint256 amountOut = swapRouter.swapMultiHop(steps, swapAmount, 0, type(uint256).max);
         vm.stopPrank();
 
         assertGt(amountOut, 0, "got output tokens");
@@ -425,7 +425,7 @@ contract E2E_LocalFork is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 1 ether}(
-            poolKeyA, 0, 0, 1 ether, 10_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 1 ether, 10_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -454,7 +454,7 @@ contract E2E_LocalFork is Test {
         // 5d: Remove all liquidity (immediate, no escrow check)
         uint128 currentLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         vm.prank(generalLP);
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, currentLiq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, currentLiq, 0, 0, type(uint256).max);
 
         uint128 afterLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         assertEq(afterLiq, 0, "all removed");
@@ -465,11 +465,11 @@ contract E2E_LocalFork is Test {
         // 5e: Partial removal
         vm.startPrank(generalLP);
         positionRouter.addLiquidityV2{value: 2 ether}(
-            poolKeyA, 0, 0, 2 ether, 20_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 2 ether, 20_000e18, type(uint256).max
         );
         uint128 fullLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         uint128 halfLiq = fullLiq / 2;
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, halfLiq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, halfLiq, 0, 0, type(uint256).max);
         uint128 remainLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         assertApproxEqAbs(remainLiq, fullLiq - halfLiq, 1, "half remaining");
         vm.stopPrank();
@@ -501,12 +501,12 @@ contract E2E_LocalFork is Test {
         // Remove 9% of initial LP (within 10% daily limit)
         uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Trying to remove another 9% in the same day → revert (would exceed 10% daily limit)
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // 6d: Full vesting (90 days) — remove all LP incrementally
         // Daily limit 10%, weekly limit 30%. Remove 9%/day, warp 7 days after 3 days to reset weekly.
@@ -516,14 +516,14 @@ contract E2E_LocalFork is Test {
             uint128 remaining = escrowVault.getRemovableLiquidity(escrowId);
             if (remaining == 0) break;
             if (daysInWeek == 3) {
-                vm.warp(block.timestamp + 7 days + 1);
+                vm.warp(vm.getBlockTimestamp() + 7 days + 1);
                 daysInWeek = 0;
             }
             uint128 chunk = ninePercent > remaining ? remaining : ninePercent;
             vm.prank(issuerA);
-            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, type(uint256).max);
             daysInWeek++;
-            vm.warp(block.timestamp + 1 days + 1);
+            vm.warp(vm.getBlockTimestamp() + 1 days + 1);
         }
 
         assertEq(escrowVault.getRemovableLiquidity(escrowId), 0, "fully removed");
@@ -589,7 +589,7 @@ contract E2E_LocalFork is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 5 ether}(
-            poolKeyA, 0, 0, 5 ether, 50_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 5 ether, 50_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -601,12 +601,12 @@ contract E2E_LocalFork is Test {
         // First removal: 9% of initial LP (within 10% daily limit)
         uint128 ninePercent = uint128((uint256(totalLiq) * 900) / 10_000);
         vm.prank(issuerA);
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // Second removal: another 9% would push daily total to 18% > 10% daily limit -> reverts
         vm.prank(issuerA);
         vm.expectRevert();
-        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, block.timestamp + 3600);
+        positionRouter.removeIssuerLiquidity(poolKeyA, ninePercent, 0, 0, type(uint256).max);
 
         // 8b: Trigger directly (v2 watcher path — preserved infra)
         uint256 totalSupply = tokenA.totalSupply();
@@ -631,7 +631,7 @@ contract E2E_LocalFork is Test {
         // General LP unaffected — can still remove
         uint128 glpLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
         vm.prank(generalLP);
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, glpLiq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, glpLiq, 0, 0, type(uint256).max);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -664,7 +664,7 @@ contract E2E_LocalFork is Test {
 
         // Holder claims compensation (fallback mode — no merkle root)
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 24 hours + 1);
         vm.roll(block.number + 1);
 
         uint256 holderBal = tokenA.balanceOf(holder);
@@ -725,14 +725,14 @@ contract E2E_LocalFork is Test {
             uint128 remaining = escrowVault.getRemovableLiquidity(escrowId);
             if (remaining == 0) break;
             if (daysInWeek == 3) {
-                vm.warp(block.timestamp + 7 days + 1);
+                vm.warp(vm.getBlockTimestamp() + 7 days + 1);
                 daysInWeek = 0;
             }
             uint128 chunk = ninePercent > remaining ? remaining : ninePercent;
             vm.prank(issuerA);
-            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, block.timestamp + 3600);
+            positionRouter.removeIssuerLiquidity(poolKeyA, chunk, 0, 0, type(uint256).max);
             daysInWeek++;
-            vm.warp(block.timestamp + 1 days + 1);
+            vm.warp(vm.getBlockTimestamp() + 1 days + 1);
         }
 
         // 11b: Reputation increased (ESCROW_COMPLETED event)
@@ -774,10 +774,10 @@ contract E2E_LocalFork is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 10 ether}(
-            poolKeyA, 0, 0, 10 ether, 100_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 10 ether, 100_000e18, type(uint256).max
         );
         uint128 glpLiq = positionRouter.getPositionLiquidity(poolKeyA, generalLP, 0, 0);
-        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, glpLiq, 0, 0, block.timestamp + 3600);
+        positionRouter.removeLiquidityV2(poolKeyA, 0, 0, glpLiq, 0, 0, type(uint256).max);
         vm.stopPrank();
 
         // No trigger fired
@@ -788,7 +788,7 @@ contract E2E_LocalFork is Test {
         vm.startPrank(generalLP);
         tokenA.approve(address(positionRouter), type(uint256).max);
         positionRouter.addLiquidityV2{value: 50 ether}(
-            poolKeyA, 0, 0, 50 ether, 500_000e18, block.timestamp + 3600
+            poolKeyA, 0, 0, 50 ether, 500_000e18, type(uint256).max
         );
         vm.stopPrank();
 
@@ -834,7 +834,7 @@ contract E2E_LocalFork is Test {
 
         // Holder claims via fallback (balanceOf check)
         // Advance past 24h merkle submission deadline + one block for flash-loan protection
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 24 hours + 1);
         vm.roll(block.number + 1);
 
         uint256 holderBal = tokenA.balanceOf(holder);
@@ -846,7 +846,7 @@ contract E2E_LocalFork is Test {
         assertGt(holder.balance, holderEthBefore, "holder compensated");
 
         // After 7-day fallback period (from 24h deadline) expires, claims should fail
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(vm.getBlockTimestamp() + 8 days);
         address lateClaimer = makeAddr("late");
         vm.deal(lateClaimer, 1 ether);
         deal(address(tokenA), lateClaimer, 1000e18);
@@ -880,7 +880,7 @@ contract E2E_LocalFork is Test {
         insurancePool.executeEmergencyWithdraw(requestId);
 
         // After 2-day timelock → success
-        vm.warp(block.timestamp + 2 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 2 days + 1);
         uint256 govBefore = deployer.balance;
         vm.prank(deployer);
         insurancePool.executeEmergencyWithdraw(requestId);
@@ -907,7 +907,7 @@ contract E2E_LocalFork is Test {
         triggerOracle.pause();
         assertTrue(triggerOracle.paused(), "paused again");
 
-        vm.warp(block.timestamp + 7 days + 1);
+        vm.warp(vm.getBlockTimestamp() + 7 days + 1);
         assertFalse(triggerOracle.paused(), "auto-expired");
     }
 

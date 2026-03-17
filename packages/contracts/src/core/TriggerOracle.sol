@@ -240,6 +240,7 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
 
     /// @inheritdoc ITriggerOracle
     function setTriggerConfig(PoolId poolId, TriggerConfig calldata config) external onlyHook {
+        _validateTriggerConfig(config); // C-01 fix: validate on pool creation too
         bytes32 key = _key(poolId);
         _poolStates[key].config = config;
         _poolStates[key].configSet = true;
@@ -348,10 +349,14 @@ contract TriggerOracle is ITriggerOracle, ReentrancyGuard {
         emit DefaultTriggerConfigUpdated(config);
     }
 
+    error PoolAlreadyRegistered();
+
     /// @notice Update an individual pool's trigger config (governance override).
+    /// @dev Only allowed for pools that have NOT been registered with an issuer yet (M-01 fix).
     function updatePoolTriggerConfig(PoolId poolId, TriggerConfig calldata config) external onlyGovernance {
         _validateTriggerConfig(config);
         bytes32 key = _key(poolId);
+        if (_poolIssuers[key] != address(0)) revert PoolAlreadyRegistered(); // M-01 fix
         _poolStates[key].config = config;
         _poolStates[key].configSet = true;
         emit TriggerConfigUpdated(poolId, config);
