@@ -396,6 +396,20 @@ function AddLiquidityForm({
   const { balance: balance0 } = useTokenBalance(poolKey.currency0, address);
   const { balance: balance1 } = useTokenBalance(poolKey.currency1, address);
 
+  // Fetch uncollected fees to show auto-collection notice
+  const { data: feeResult } = useReadContract({
+    address: contracts?.BastionPositionRouter as `0x${string}`,
+    abi: BastionPositionRouterABI,
+    functionName: isIssuer ? "getIssuerUnclaimedFees" : "getUnclaimedFees",
+    args: isIssuer
+      ? [poolKey]
+      : [poolKey, address, 0, 0],
+    query: { enabled: !!contracts && !!address, refetchInterval: 30_000 },
+  });
+  const pendingFees = feeResult as [bigint, bigint] | undefined;
+  const [pendingFees0, pendingFees1] = pendingFees ?? [0n, 0n];
+  const hasPendingFees = pendingFees0 > 0n || pendingFees1 > 0n;
+
   const { addLiquidity, isWriting, isConfirming, isSuccess, error, reset: resetAdd } = useAddLiquidity();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
@@ -596,6 +610,21 @@ function AddLiquidityForm({
       {parsed0 > 0n && parsed1 > 0n && (
         <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4">
           Estimated: {parseFloat(amount0).toFixed(6)} {token0Info.symbol || "T0"} + {parseFloat(amount1).toFixed(6)} {token1Info.symbol || "T1"}
+        </div>
+      )}
+
+      {/* Pending fees auto-collection notice */}
+      {hasPendingFees && canSubmit && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+          Uncollected fees of{" "}
+          {pendingFees0 > 0n && (
+            <span className="font-medium">{formatFeeAmount(pendingFees0, token0Info.decimals ?? 18)} {token0Info.symbol}</span>
+          )}
+          {pendingFees0 > 0n && pendingFees1 > 0n && " + "}
+          {pendingFees1 > 0n && (
+            <span className="font-medium">{formatFeeAmount(pendingFees1, token1Info.decimals ?? 18)} {token1Info.symbol}</span>
+          )}
+          {" "}will be automatically deducted from the deposit cost.
         </div>
       )}
 
