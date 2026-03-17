@@ -82,7 +82,7 @@ graph TB
 
     BH -->|createEscrow| EV
     BH -->|depositFee| IP
-    BH -->|enforce all violations (revert)| BH
+    BH -->|"enforce all violations (revert)"| BH
     BH -->|recordEvent| RE
 
     TO -->|executeTrigger (permissionless, no grace period)| EV
