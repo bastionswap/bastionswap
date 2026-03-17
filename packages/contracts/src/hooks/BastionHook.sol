@@ -187,6 +187,7 @@ contract BastionHook is BaseTestHooks {
     error WeeklyLpRemovalExceeded();
     error ZeroAddress();
     error ValueOutOfRange();
+    error IssuerMustUseSaltZero();
 
     // ─── Events ───────────────────────────────────────────────────────
 
@@ -324,6 +325,14 @@ contract BastionHook is BaseTestHooks {
                     escrowVault.addLiquidity(escrowId, liquidity);
                     _issuerLiquidity[poolId] += liquidity;
                 }
+            }
+        }
+
+        // Block issuer from adding LP with non-zero salt (must use salt=0 so all LP is escrowed)
+        if (liquidity > 0 && _issuers[poolId] != address(0) && params.salt != bytes32(0)) {
+            if (hookData.length >= 32) {
+                address user = abi.decode(hookData, (address));
+                if (user == _issuers[poolId]) revert IssuerMustUseSaltZero();
             }
         }
 

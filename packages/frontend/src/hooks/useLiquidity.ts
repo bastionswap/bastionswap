@@ -110,6 +110,7 @@ export interface AddLiquidityConfig {
   amount1Max: bigint;
   deadline: bigint;
   value?: bigint; // ETH to send
+  isIssuer?: boolean; // If true, use addIssuerLiquidity (salt=0, escrowed)
 }
 
 export function useAddLiquidity() {
@@ -205,6 +206,7 @@ export function useAddLiquidity() {
         );
       }
 
+      // Issuer uses addIssuerLiquidity (no Permit2 variant yet — issuer uses approve flow)
       writeContract({
         address: contracts.BastionPositionRouter as `0x${string}`,
         abi: BastionPositionRouterABI,
@@ -228,6 +230,24 @@ export function useAddLiquidity() {
   const addLiquidity = (config: AddLiquidityConfig) => {
     if (!contracts) return;
 
+    // Issuer path: use addIssuerLiquidity (salt=0, escrowed, full-range)
+    if (config.isIssuer) {
+      writeContract({
+        address: contracts.BastionPositionRouter as `0x${string}`,
+        abi: BastionPositionRouterABI,
+        functionName: "addIssuerLiquidity",
+        args: [
+          config.poolKey,
+          config.amount0Max,
+          config.amount1Max,
+          config.deadline,
+        ],
+        value: config.value || 0n,
+      });
+      return;
+    }
+
+    // Non-issuer path: use addLiquidityV2 (salt=userAddress, not escrowed)
     const hasNative =
       config.poolKey.currency0 === "0x0000000000000000000000000000000000000000";
 

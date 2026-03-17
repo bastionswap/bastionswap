@@ -105,6 +105,7 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
           token0Info={token0Info}
           token1Info={token1Info}
           pool={pool}
+          isIssuer={isIssuer}
           onSuccess={refetchPositions}
         />
       ) : (
@@ -335,6 +336,7 @@ function AddLiquidityForm({
   token0Info,
   token1Info,
   pool,
+  isIssuer,
   onSuccess,
 }: {
   poolKey: {
@@ -347,9 +349,12 @@ function AddLiquidityForm({
   token0Info: ReturnType<typeof useTokenInfo>;
   token1Info: ReturnType<typeof useTokenInfo>;
   pool: SubgraphPool;
+  isIssuer: boolean;
   onSuccess: () => void;
 }) {
   const { address } = useAccount();
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
   const [amount0, setAmount0] = useState("");
   const [amount1, setAmount1] = useState("");
   const [rangeMode, setRangeMode] = useState<"full" | "custom">("full");
@@ -358,16 +363,21 @@ function AddLiquidityForm({
   const isNative0 = poolKey.currency0 === "0x0000000000000000000000000000000000000000";
   const isNative1 = poolKey.currency1 === "0x0000000000000000000000000000000000000000";
 
-  // Check Permit2 allowances for ERC20 tokens
+  // Issuer approves the router directly; non-issuer approves Permit2
+  const approvalTarget = isIssuer
+    ? (contracts?.BastionPositionRouter as `0x${string}`)
+    : PERMIT2_ADDRESS;
+
+  // Check allowances for ERC20 tokens
   const { allowance: allowance0, refetch: refetchAllowance0 } = useTokenAllowance(
     isNative0 ? undefined : poolKey.currency0,
     address,
-    PERMIT2_ADDRESS
+    approvalTarget
   );
   const { allowance: allowance1, refetch: refetchAllowance1 } = useTokenAllowance(
     isNative1 ? undefined : poolKey.currency1,
     address,
-    PERMIT2_ADDRESS
+    approvalTarget
   );
 
   const { balance: balance0 } = useTokenBalance(poolKey.currency0, address);
@@ -448,6 +458,7 @@ function AddLiquidityForm({
       amount1Max: parsed1,
       deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
       value: isNative0 ? parsed0 : isNative1 ? parsed1 : undefined,
+      isIssuer,
     });
   };
 
@@ -540,7 +551,7 @@ function AddLiquidityForm({
       {/* Action buttons */}
       {needsApproval0 && (
         <button
-          onClick={() => approve(poolKey.currency0, PERMIT2_ADDRESS, parsed0)}
+          onClick={() => approve(poolKey.currency0, approvalTarget, parsed0)}
           disabled={isBusy}
           className="w-full btn-secondary text-sm py-2.5 mb-2"
         >
@@ -555,7 +566,7 @@ function AddLiquidityForm({
       )}
       {needsApproval1 && (
         <button
-          onClick={() => approve(poolKey.currency1, PERMIT2_ADDRESS, parsed1)}
+          onClick={() => approve(poolKey.currency1, approvalTarget, parsed1)}
           disabled={isBusy}
           className="w-full btn-secondary text-sm py-2.5 mb-2"
         >
@@ -582,6 +593,8 @@ function AddLiquidityForm({
           "Insufficient balance"
         ) : !canSubmit ? (
           "Enter amounts"
+        ) : isIssuer ? (
+          "Add Issuer Liquidity (Escrowed)"
         ) : (
           "Add Liquidity"
         )}

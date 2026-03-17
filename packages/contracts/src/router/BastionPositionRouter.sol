@@ -42,6 +42,7 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
     uint8 private constant ACTION_REMOVE_ISSUER_LP = 7;
     uint8 private constant ACTION_COLLECT_ISSUER_FEES = 8;
     uint8 private constant ACTION_FORCE_COLLECT_FEES = 9;
+    uint8 private constant ACTION_ADD_ISSUER_LIQUIDITY = 10;
 
     /// @dev BastionHook address for access control on forceRemoveLiquidity
     address public bastionHook;
@@ -317,6 +318,26 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         _refundETH();
     }
 
+    /// @notice Add liquidity to the issuer's salt=0 position (escrowed, vesting-tracked).
+    /// @dev Only callable by the pool's issuer. Uses salt=0 and full-range ticks.
+    function addIssuerLiquidity(
+        PoolKey calldata key,
+        uint256 amount0Max,
+        uint256 amount1Max,
+        uint256 deadline
+    ) external payable {
+        if (block.timestamp > deadline) revert Expired();
+        if (bastionHook == address(0)) revert HookNotSet();
+        if (msg.sender != IBastionHook(bastionHook).getPoolIssuer(key.toId())) revert OnlyIssuer();
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        int24 tickUpper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        poolManager.unlock(abi.encode(
+            ACTION_ADD_ISSUER_LIQUIDITY, msg.sender, key, tickLower, tickUpper, amount0Max, amount1Max
+        ));
+        _refundETH();
+    }
+
     /// @notice Collect accumulated fees for a per-user position.
     function collectFees(
         PoolKey calldata key,
@@ -449,6 +470,8 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
             return _handleCollectIssuerFees(data);
         } else if (action == ACTION_FORCE_COLLECT_FEES) {
             return _handleForceCollectFees(data);
+        } else if (action == ACTION_ADD_ISSUER_LIQUIDITY) {
+            return _handleAddIssuerLiquidity(data);
         }
 
         revert("Unknown action");
@@ -717,6 +740,38 @@ contract BastionPositionRouter is IUnlockCallback, IBastionRouter {
         _settle(key.currency1, sender, delta.amount1());
 
         emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, -int256(uint256(liquidityToRemove)), delta.amount0(), delta.amount1());
+
+        return abi.encode(delta);
+    }
+
+    function _handleAddIssuerLiquidity(bytes calldata data) internal returns (bytes memory) {
+        (, address sender, PoolKey memory key, int24 tickLower, int24 tickUpper, uint256 amount0Max, uint256 amount1Max) =
+            abi.decode(data, (uint8, address, PoolKey, int24, int24, uint256, uint256));
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            amount0Max,
+            amount1Max
+        );
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: int256(uint256(liquidity)),
+                salt: 0
+            }),
+            abi.encode(sender)
+        );
+
+        _settle(key.currency0, sender, delta.amount0());
+        _settle(key.currency1, sender, delta.amount1());
+
+        emit LiquidityChanged(key.toId(), sender, tickLower, tickUpper, int256(uint256(liquidity)), delta.amount0(), delta.amount1());
 
         return abi.encode(delta);
     }
