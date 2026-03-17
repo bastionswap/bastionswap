@@ -178,13 +178,12 @@ export function useTokenAllowance(
   spender: `0x${string}` | undefined
 ) {
   const isNative = token === "0x0000000000000000000000000000000000000000";
-  // Check allowance against Permit2 (not the router)
   const { data, refetch } = useReadContract({
     address: token,
     abi: ERC20_ABI,
     functionName: "allowance",
-    args: owner ? [owner, PERMIT2_ADDRESS] : undefined,
-    query: { enabled: !!token && !!owner && !isNative },
+    args: owner && spender ? [owner, spender] : undefined,
+    query: { enabled: !!token && !!owner && !!spender && !isNative },
   });
 
   return {
@@ -236,13 +235,12 @@ export function useApprove() {
     useWaitForTransactionReceipt({ hash });
   const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
 
-  const approve = (token: `0x${string}`, _spender: `0x${string}`, _amount: bigint) => {
-    // Always approve to Permit2 with max approval (one-time, reusable)
+  const approve = (token: `0x${string}`, spender: `0x${string}`, _amount: bigint) => {
     writeContract({
       address: token,
       abi: ERC20_ABI,
       functionName: "approve",
-      args: [PERMIT2_ADDRESS, MAX_UINT256],
+      args: [spender, MAX_UINT256],
     });
   };
 

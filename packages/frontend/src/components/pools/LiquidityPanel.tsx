@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useChainId, useReadContract } from "wagmi";
-import { parseUnits, formatUnits } from "viem";
+import { useAccount, useChainId, useReadContract, useWriteContract, usePublicClient } from "wagmi";
+import { parseUnits, formatUnits, maxUint256 } from "viem";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { parseErrorMessage } from "@/utils/errorMessages";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { useTokenInfo } from "@/hooks/useTokenInfo";
 import { usePoolSqrtPrice } from "@/hooks/usePoolSqrtPrice";
 import { computePairedAmount } from "@/utils/price";
-import { useTokenAllowance, useApprove, useTokenBalance } from "@/hooks/useSwap";
+import { useTokenAllowance, useTokenBalance } from "@/hooks/useSwap";
 import { getContracts } from "@/config/contracts";
 import { BastionPositionRouterABI } from "@/config/abis";
 import {
@@ -23,6 +23,19 @@ import {
 import type { SubgraphPool } from "@/hooks/usePools";
 
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as `0x${string}`;
+
+const ERC20_APPROVE_ABI = [
+  {
+    type: "function" as const,
+    name: "approve" as const,
+    inputs: [
+      { name: "spender", type: "address" as const },
+      { name: "amount", type: "uint256" as const },
+    ],
+    outputs: [{ type: "bool" as const }],
+    stateMutability: "nonpayable" as const,
+  },
+] as const;
 
 interface LiquidityPanelProps {
   pool: SubgraphPool;
@@ -383,22 +396,18 @@ function AddLiquidityForm({
   const { balance: balance0 } = useTokenBalance(poolKey.currency0, address);
   const { balance: balance1 } = useTokenBalance(poolKey.currency1, address);
 
-  const { approve, isPending: isApproving, isConfirming: isApproveConfirming, isSuccess: approveSuccess, reset: resetApprove } = useApprove();
   const { addLiquidity, isWriting, isConfirming, isSuccess, error, reset: resetAdd } = useAddLiquidity();
-
-  if (approveSuccess) {
-    setTimeout(() => {
-      resetApprove();
-      refetchAllowance0();
-      refetchAllowance1();
-    }, 2000);
-  }
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
+  const [autoApprovePhase, setAutoApprovePhase] = useState<"idle" | "approving" | "adding">("idle");
+  const [autoApproveError, setAutoApproveError] = useState<Error | null>(null);
 
   if (isSuccess) {
     setTimeout(() => {
       resetAdd();
       setAmount0("");
       setAmount1("");
+      setAutoApprovePhase("idle");
       onSuccess();
     }, 2000);
   }
@@ -447,22 +456,64 @@ function AddLiquidityForm({
 
   const canSubmit = (parsed0 > 0n || parsed1 > 0n) && !insufficientBalance0 && !insufficientBalance1;
 
-  const handleAdd = () => {
-    if (!canSubmit) return;
+  const handleAdd = async () => {
+    if (!canSubmit || !contracts) return;
+    setAutoApproveError(null);
 
-    addLiquidity({
-      poolKey,
-      tickLower: 0, // full range
-      tickUpper: 0,
-      amount0Max: parsed0,
-      amount1Max: parsed1,
-      deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
-      value: isNative0 ? parsed0 : isNative1 ? parsed1 : undefined,
-      isIssuer,
-    });
+    try {
+      // Auto-approve ERC20s if needed
+      // Issuer: approve to router; Non-issuer: approve to Permit2
+      let didApprove = false;
+
+      if (needsApproval0) {
+        setAutoApprovePhase("approving");
+        const hash = await writeContractAsync({
+          address: poolKey.currency0,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [approvalTarget, maxUint256],
+        });
+        await publicClient!.waitForTransactionReceipt({ hash });
+        refetchAllowance0();
+        didApprove = true;
+      }
+
+      if (needsApproval1) {
+        setAutoApprovePhase("approving");
+        const hash = await writeContractAsync({
+          address: poolKey.currency1,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [approvalTarget, maxUint256],
+        });
+        await publicClient!.waitForTransactionReceipt({ hash });
+        refetchAllowance1();
+        didApprove = true;
+      }
+
+      // Wait for RPC state to reflect the approval before simulating next tx
+      if (didApprove) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      setAutoApprovePhase("adding");
+      addLiquidity({
+        poolKey,
+        tickLower: 0, // full range
+        tickUpper: 0,
+        amount0Max: parsed0,
+        amount1Max: parsed1,
+        deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
+        value: isNative0 ? parsed0 : isNative1 ? parsed1 : undefined,
+        isIssuer,
+      });
+    } catch (err) {
+      setAutoApproveError(err as Error);
+      setAutoApprovePhase("idle");
+    }
   };
 
-  const isBusy = isWriting || isConfirming || isApproving || isApproveConfirming;
+  const isBusy = isWriting || isConfirming || autoApprovePhase !== "idle";
 
   return (
     <div>
@@ -548,44 +599,17 @@ function AddLiquidityForm({
         </div>
       )}
 
-      {/* Action buttons */}
-      {needsApproval0 && (
-        <button
-          onClick={() => approve(poolKey.currency0, approvalTarget, parsed0)}
-          disabled={isBusy}
-          className="w-full btn-secondary text-sm py-2.5 mb-2"
-        >
-          {isApproving || isApproveConfirming ? (
-            <span className="flex items-center justify-center gap-2">
-              <LoadingSpinner size="sm" /> Approving {token0Info.symbol}...
-            </span>
-          ) : (
-            `Approve ${token0Info.symbol}`
-          )}
-        </button>
-      )}
-      {needsApproval1 && (
-        <button
-          onClick={() => approve(poolKey.currency1, approvalTarget, parsed1)}
-          disabled={isBusy}
-          className="w-full btn-secondary text-sm py-2.5 mb-2"
-        >
-          {isApproving || isApproveConfirming ? (
-            <span className="flex items-center justify-center gap-2">
-              <LoadingSpinner size="sm" /> Approving {token1Info.symbol}...
-            </span>
-          ) : (
-            `Approve ${token1Info.symbol}`
-          )}
-        </button>
-      )}
-
+      {/* Action button */}
       <button
         onClick={handleAdd}
-        disabled={!canSubmit || needsApproval0 || needsApproval1 || isBusy}
+        disabled={!canSubmit || isBusy}
         className="w-full btn-primary text-sm py-2.5"
       >
-        {isWriting || isConfirming ? (
+        {autoApprovePhase === "approving" ? (
+          <span className="flex items-center justify-center gap-2">
+            <LoadingSpinner size="sm" /> Approving token...
+          </span>
+        ) : isWriting || isConfirming || autoApprovePhase === "adding" ? (
           <span className="flex items-center justify-center gap-2">
             <LoadingSpinner size="sm" /> {isWriting ? "Confirm in wallet..." : "Adding liquidity..."}
           </span>
@@ -603,9 +627,9 @@ function AddLiquidityForm({
       {isSuccess && (
         <p className="text-xs text-emerald-600 mt-2 text-center">Liquidity added successfully!</p>
       )}
-      {error && (
+      {(error || autoApproveError) && (
         <p className="text-xs text-red-500 mt-2 text-center">
-          {parseErrorMessage(error)}
+          {parseErrorMessage(error || autoApproveError!)}
         </p>
       )}
     </div>
