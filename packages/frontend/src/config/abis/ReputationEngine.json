@@ -222,5 +222,10 @@
     "type": "error",
     "name": "Unauthorized",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroConstructorAddress",
+    "inputs": []
   }
 ]

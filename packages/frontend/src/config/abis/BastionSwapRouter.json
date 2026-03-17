@@ -725,12 +725,22 @@
   },
   {
     "type": "error",
+    "name": "OnlyDeployer",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OnlyPoolManager",
     "inputs": []
   },
   {
     "type": "error",
     "name": "TooManyHops",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAddress",
     "inputs": []
   },
   {

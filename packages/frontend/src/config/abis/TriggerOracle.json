@@ -1005,12 +1005,22 @@
   },
   {
     "type": "error",
+    "name": "PoolAlreadyRegistered",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
   },
   {
     "type": "error",
     "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroConstructorAddress",
     "inputs": []
   }
 ]

@@ -1246,6 +1246,25 @@
   },
   {
     "type": "function",
+    "name": "getPoolIssuedTokenReserve",
+    "inputs": [
+      {
+        "name": "poolId",
+        "type": "bytes32",
+        "internalType": "PoolId"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getPoolIssuer",
     "inputs": [
       {
@@ -1297,25 +1316,6 @@
   },
   {
     "type": "function",
-    "name": "isCommitmentStricterThanDefault",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "PoolId"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "isIssuer",
     "inputs": [
       {
@@ -1327,25 +1327,6 @@
         "name": "account",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isLPRemovalTriggerable",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "PoolId"
       }
     ],
     "outputs": [
@@ -2296,6 +2277,11 @@
   },
   {
     "type": "error",
+    "name": "IssuerMustUseSaltZero",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "IssuerWeeklySellExceeded",
     "inputs": []
   },
@@ -2322,6 +2308,11 @@
   {
     "type": "error",
     "name": "OnlyGovernance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyIssuer",
     "inputs": []
   },
   {
