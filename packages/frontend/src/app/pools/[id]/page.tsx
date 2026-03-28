@@ -493,7 +493,7 @@ export default function PoolDetailPage() {
                   <div className="text-right">
                     <p className="text-[11px] text-gray-400 uppercase tracking-wider mb-1">Escrowed LP</p>
                     <p className="text-sm font-semibold text-gray-900 tabular-nums">
-                      {formatReserve(parseFloat(pool.escrow.totalLiquidity))}
+                      {formatReserve(parseFloat(pool.escrow.remainingLiquidity))}
                       <span className="text-xs text-gray-400 font-normal ml-1">LP</span>
                     </p>
                     <p className="text-xs text-emerald-600 font-medium">

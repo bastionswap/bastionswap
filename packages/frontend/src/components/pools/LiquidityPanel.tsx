@@ -11,11 +11,13 @@ import { usePoolSqrtPrice } from "@/hooks/usePoolSqrtPrice";
 import { computePairedAmount } from "@/utils/price";
 import { useTokenAllowance, useTokenBalance } from "@/hooks/useSwap";
 import { getContracts } from "@/config/contracts";
-import { BastionPositionRouterABI } from "@/config/abis";
+import { BastionPositionRouterABI, EscrowVaultABI } from "@/config/abis";
+import BastionHookAbi from "@/config/abis/BastionHook.json";
 import {
   useUserPositions,
   useAddLiquidity,
   useRemoveLiquidity,
+  useRemoveIssuerLiquidity,
   useCollectFees,
   useCollectIssuerFees,
   type SubgraphPosition,
@@ -72,7 +74,7 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-xs text-amber-800/80">
-            Your LP is <span className="font-semibold">escrowed</span> and subject to vesting. Manage withdrawals from the <span className="font-semibold">Protection</span> tab.
+            Your LP is <span className="font-semibold">escrowed</span> and subject to vesting. Removal is limited by daily/weekly caps.
           </p>
         </div>
       ) : (
@@ -98,6 +100,7 @@ export function LiquidityPanel({ pool }: LiquidityPanelProps) {
                 key={pos.id}
                 position={pos}
                 poolKey={poolKey}
+                pool={pool}
                 token0Symbol={token0Info.symbol || "T0"}
                 token1Symbol={token1Info.symbol || "T1"}
                 token0Decimals={token0Info.decimals ?? 18}
@@ -144,6 +147,7 @@ function formatFeeAmount(raw: bigint, decimals: number): string {
 function PositionCard({
   position,
   poolKey,
+  pool,
   token0Symbol,
   token1Symbol,
   token0Decimals,
@@ -160,6 +164,7 @@ function PositionCard({
     tickSpacing: number;
     hooks: `0x${string}`;
   };
+  pool: SubgraphPool;
   token0Symbol: string;
   token1Symbol: string;
   token0Decimals: number;
@@ -169,6 +174,7 @@ function PositionCard({
   onAction: () => void;
 }) {
   const [removePercent, setRemovePercent] = useState<number | null>(null);
+  const [issuerRemoveInput, setIssuerRemoveInput] = useState("");
 
   const {
     removeLiquidity,
@@ -178,6 +184,15 @@ function PositionCard({
     error: removeError,
     reset: resetRemove,
   } = useRemoveLiquidity();
+
+  const {
+    removeIssuerLiquidity,
+    isWriting: isIssuerRemoving,
+    isConfirming: isIssuerRemoveConfirming,
+    isSuccess: issuerRemoveSuccess,
+    error: issuerRemoveError,
+    reset: resetIssuerRemove,
+  } = useRemoveIssuerLiquidity();
 
   const {
     collectFees,
@@ -198,12 +213,14 @@ function PositionCard({
   } = useCollectIssuerFees();
 
   // Reset on success
-  if (removeSuccess || collectSuccess || issuerCollectSuccess) {
+  if (removeSuccess || collectSuccess || issuerCollectSuccess || issuerRemoveSuccess) {
     setTimeout(() => {
       resetRemove();
       resetCollect();
       resetIssuerCollect();
+      resetIssuerRemove();
       setRemovePercent(null);
+      setIssuerRemoveInput("");
       onAction();
     }, 2000);
   }
@@ -224,6 +241,16 @@ function PositionCard({
     });
   };
 
+  const handleIssuerRemove = (amount: bigint) => {
+    removeIssuerLiquidity({
+      poolKey,
+      liquidityToRemove: amount,
+      amount0Min: 0n,
+      amount1Min: 0n,
+      deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
+    });
+  };
+
   const handleCollect = () => {
     collectFees(poolKey, position.tickLower, position.tickUpper);
   };
@@ -232,7 +259,7 @@ function PositionCard({
     collectIssuerFees(poolKey);
   };
 
-  const isBusy = isRemoving || isRemoveConfirming || isCollecting || isCollectConfirming || isIssuerCollecting || isIssuerCollectConfirming;
+  const isBusy = isRemoving || isRemoveConfirming || isCollecting || isCollectConfirming || isIssuerCollecting || isIssuerCollectConfirming || isIssuerRemoving || isIssuerRemoveConfirming;
 
   // Uncollected fees query
   const chainId = useChainId();
@@ -252,6 +279,84 @@ function PositionCard({
   const fees = feeResult as [bigint, bigint] | undefined;
   const [fees0, fees1] = fees ?? [0n, 0n];
   const hasFees = fees0 > 0n || fees1 > 0n;
+
+  // ── Issuer-specific on-chain data ──
+  const escrowId = pool.escrow?.id ? BigInt(pool.escrow.id) : undefined;
+  const hookAddress = contracts?.BastionHook as `0x${string}` | undefined;
+
+  // Removable liquidity from EscrowVault (vesting-based)
+  const { data: removableLiq } = useReadContract({
+    address: contracts?.EscrowVault as `0x${string}`,
+    abi: EscrowVaultABI,
+    functionName: "getRemovableLiquidity",
+    args: escrowId !== undefined ? [escrowId] : undefined,
+    query: { enabled: isIssuer && escrowId !== undefined && !!contracts, refetchInterval: 30_000 },
+  });
+
+  // Pool commitment (for daily/weekly limits)
+  const { data: poolCommitment } = useReadContract({
+    address: hookAddress,
+    abi: BastionHookAbi,
+    functionName: "getPoolCommitment",
+    args: [pool.id as `0x${string}`],
+    query: { enabled: isIssuer && !!hookAddress, refetchInterval: 60_000 },
+  });
+
+  // LP removal tracking
+  const poolIdArg = [pool.id as `0x${string}`] as const;
+  const trackOpts = { enabled: isIssuer && !!hookAddress, refetchInterval: 15_000 };
+  const { data: rawDailyLpRem } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailyLpRemoved", args: poolIdArg, query: trackOpts });
+  const { data: rawWeeklyLpRem } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklyLpRemoved", args: poolIdArg, query: trackOpts });
+  const { data: rawDailyLpWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "dailyLpWindowStart", args: poolIdArg, query: trackOpts });
+  const { data: rawWeeklyLpWin } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "weeklyLpWindowStart", args: poolIdArg, query: trackOpts });
+  const { data: rawInitLiq } = useReadContract({ address: hookAddress, abi: BastionHookAbi, functionName: "initialLiquidity", args: poolIdArg, query: trackOpts });
+
+  // Compute issuer removal limits
+  const pc = poolCommitment as { maxDailyLpRemovalBps?: number | bigint; maxWeeklyLpRemovalBps?: number | bigint } | undefined;
+  const initLiq = rawInitLiq ? BigInt(rawInitLiq as bigint) : 0n;
+  const maxDailyBps = pc ? Number(pc.maxDailyLpRemovalBps ?? 0) : 0;
+  const maxWeeklyBps = pc ? Number(pc.maxWeeklyLpRemovalBps ?? 0) : 0;
+
+  const now = Math.floor(Date.now() / 1000);
+  const dailyWindowStart = Number(rawDailyLpWin ?? 0);
+  const weeklyWindowStart = Number(rawWeeklyLpWin ?? 0);
+  const dailyWindowExpired = dailyWindowStart > 0 && now >= dailyWindowStart + 86400;
+  const weeklyWindowExpired = weeklyWindowStart > 0 && now >= weeklyWindowStart + 604800;
+
+  const dailyUsed = dailyWindowExpired ? 0n : BigInt(rawDailyLpRem as bigint ?? 0n);
+  const weeklyUsed = weeklyWindowExpired ? 0n : BigInt(rawWeeklyLpRem as bigint ?? 0n);
+
+  const dailyMax = initLiq > 0n && maxDailyBps > 0 ? (initLiq * BigInt(maxDailyBps)) / 10000n : 0n;
+  const weeklyMax = initLiq > 0n && maxWeeklyBps > 0 ? (initLiq * BigInt(maxWeeklyBps)) / 10000n : 0n;
+
+  const dailyRemaining = dailyMax > dailyUsed ? dailyMax - dailyUsed : 0n;
+  const weeklyRemaining = weeklyMax > weeklyUsed ? weeklyMax - weeklyUsed : 0n;
+
+  // Effective max removable = min(vested removable, daily remaining, weekly remaining)
+  const vestedRemovable = removableLiq ? BigInt(removableLiq as bigint) : 0n;
+  const effectiveMax = (() => {
+    let max = vestedRemovable;
+    if (dailyMax > 0n && dailyRemaining < max) max = dailyRemaining;
+    if (weeklyMax > 0n && weeklyRemaining < max) max = weeklyRemaining;
+    return max;
+  })();
+
+  // Vesting phase info
+  const escrowCreatedAt = pool.escrow?.createdAt ? parseInt(pool.escrow.createdAt) : 0;
+  const lockDuration = pool.escrow?.lockDuration ? parseInt(pool.escrow.lockDuration) : 0;
+  const vestingDuration = pool.escrow?.vestingDuration ? parseInt(pool.escrow.vestingDuration) : 0;
+  const lockEndTs = escrowCreatedAt + lockDuration;
+  const vestEndTs = escrowCreatedAt + lockDuration + vestingDuration;
+  const isLocked = escrowCreatedAt > 0 && now < lockEndTs;
+  const isVesting = escrowCreatedAt > 0 && now >= lockEndTs && now < vestEndTs;
+  const isFullyVested = escrowCreatedAt > 0 && now >= vestEndTs;
+
+  // Parse issuer removal input
+  let issuerRemoveAmount = 0n;
+  try {
+    if (issuerRemoveInput) issuerRemoveAmount = parseUnits(issuerRemoveInput, 18);
+  } catch {}
+  const canIssuerRemove = issuerRemoveAmount > 0n && issuerRemoveAmount <= effectiveMax;
 
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-4">
@@ -288,7 +393,8 @@ function PositionCard({
       </div>
 
       {isIssuer ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
+          {/* Collect Fees */}
           <button
             onClick={handleIssuerCollect}
             disabled={isBusy || !hasFees}
@@ -296,6 +402,143 @@ function PositionCard({
           >
             {isIssuerCollecting || isIssuerCollectConfirming ? <LoadingSpinner size="sm" /> : "Collect Fees"}
           </button>
+
+          {/* ── Issuer LP Removal Section ── */}
+          <div className="border-t border-gray-200 pt-3">
+            <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-2">
+              Remove Escrowed LP
+            </p>
+
+            {/* Vesting Phase Status */}
+            {isLocked && (
+              <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 mb-2">
+                <svg className="h-3.5 w-3.5 text-amber-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                <span className="text-[11px] text-amber-700">
+                  LP is locked until {new Date(lockEndTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })} ({Math.ceil((lockEndTs - now) / 86400)}d remaining)
+                </span>
+              </div>
+            )}
+
+            {isVesting && (
+              <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 mb-2">
+                <svg className="h-3.5 w-3.5 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-[11px] text-emerald-700">
+                  Linear vesting active — fully vested {new Date(vestEndTs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </span>
+              </div>
+            )}
+
+            {isFullyVested && (
+              <div className="flex items-center gap-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 mb-2">
+                <svg className="h-3.5 w-3.5 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-[11px] text-gray-600">Fully vested</span>
+              </div>
+            )}
+
+            {/* Removable amount info */}
+            {!isLocked && (
+              <>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <div className="rounded-lg bg-white border border-gray-100 px-2.5 py-2">
+                    <p className="text-[10px] text-gray-400">Vested Removable</p>
+                    <p className="text-xs font-semibold text-gray-900 tabular-nums">{formatLiquidity(vestedRemovable.toString())} LP</p>
+                  </div>
+                  <div className="rounded-lg bg-white border border-gray-100 px-2.5 py-2">
+                    <p className="text-[10px] text-gray-400">Available Now</p>
+                    <p className="text-xs font-semibold text-bastion-600 tabular-nums">{formatLiquidity(effectiveMax.toString())} LP</p>
+                  </div>
+                </div>
+
+                {/* Daily/Weekly Usage Bars */}
+                {(maxDailyBps > 0 || maxWeeklyBps > 0) && initLiq > 0n && (
+                  <div className="space-y-1.5 mb-3">
+                    {maxDailyBps > 0 && (
+                      <LpUsageBar
+                        used={dailyUsed}
+                        max={dailyMax}
+                        label="Daily"
+                        windowStart={dailyWindowStart}
+                        windowDuration={86400}
+                      />
+                    )}
+                    {maxWeeklyBps > 0 && (
+                      <LpUsageBar
+                        used={weeklyUsed}
+                        max={weeklyMax}
+                        label="Weekly"
+                        windowStart={weeklyWindowStart}
+                        windowDuration={604800}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* Removal Input */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0.0"
+                      value={issuerRemoveInput}
+                      onChange={(e) => setIssuerRemoveInput(e.target.value)}
+                      className="flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs tabular-nums"
+                    />
+                    <span className="text-[10px] text-gray-400">LP</span>
+                  </div>
+
+                  {/* Quick-fill buttons */}
+                  <div className="flex gap-1.5">
+                    {[25, 50, 75, 100].map((pct) => {
+                      const amt = (effectiveMax * BigInt(pct)) / 100n;
+                      return (
+                        <button
+                          key={pct}
+                          onClick={() => setIssuerRemoveInput(amt > 0n ? formatUnits(amt, 18) : "0")}
+                          disabled={effectiveMax === 0n}
+                          className="flex-1 text-[10px] py-1 rounded-md border border-gray-200 text-gray-500 hover:border-bastion-200 hover:text-bastion-600 hover:bg-bastion-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {pct}%
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Remove button */}
+                  <button
+                    onClick={() => handleIssuerRemove(issuerRemoveAmount)}
+                    disabled={isBusy || !canIssuerRemove}
+                    className="w-full text-xs py-2 rounded-lg border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isIssuerRemoving || isIssuerRemoveConfirming ? (
+                      <span className="flex items-center justify-center gap-1.5">
+                        <LoadingSpinner size="sm" />
+                        {isIssuerRemoving ? "Confirm in wallet..." : "Removing..."}
+                      </span>
+                    ) : effectiveMax === 0n ? (
+                      isLocked ? "LP is locked" : "No removable LP"
+                    ) : !canIssuerRemove ? (
+                      "Enter amount"
+                    ) : (
+                      "Remove LP"
+                    )}
+                  </button>
+
+                  {issuerRemoveAmount > effectiveMax && effectiveMax > 0n && (
+                    <p className="text-[10px] text-red-500">
+                      Exceeds available amount ({formatLiquidity(effectiveMax.toString())} LP)
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <div className="flex items-center gap-2 flex-wrap">
@@ -327,16 +570,63 @@ function PositionCard({
         </div>
       )}
 
-      {(removeSuccess || collectSuccess || issuerCollectSuccess) && (
+      {(removeSuccess || collectSuccess || issuerCollectSuccess || issuerRemoveSuccess) && (
         <p className="text-xs text-emerald-600 mt-2">
-          {removeSuccess ? "Liquidity removed!" : "Fees collected!"}
+          {removeSuccess || issuerRemoveSuccess ? "Liquidity removed!" : "Fees collected!"}
         </p>
       )}
 
-      {(removeError || collectError || issuerCollectError) && (
+      {(removeError || collectError || issuerCollectError || issuerRemoveError) && (
         <p className="text-xs text-red-500 mt-2">
-          {parseErrorMessage((removeError || collectError || issuerCollectError) as Error)}
+          {parseErrorMessage((removeError || collectError || issuerCollectError || issuerRemoveError) as Error)}
         </p>
+      )}
+    </div>
+  );
+}
+
+// ─── LP Usage Bar (compact) ──────────────────────────────────
+
+function LpUsageBar({ used, max, label, windowStart, windowDuration }: {
+  used: bigint;
+  max: bigint;
+  label: string;
+  windowStart: number;
+  windowDuration: number;
+}) {
+  const pct = max > 0n ? Number((used * 10000n) / max) / 100 : 0;
+  const isNearLimit = pct >= 80;
+  const isAtLimit = pct >= 100;
+
+  const now = Math.floor(Date.now() / 1000);
+  const resetTime = windowStart > 0 ? windowStart + windowDuration : 0;
+  const timeLeft = resetTime > now ? resetTime - now : 0;
+  const isDaily = windowDuration <= 86400;
+
+  const resetLabel = timeLeft > 0
+    ? isDaily
+      ? `${Math.floor(timeLeft / 3600)}h ${Math.floor((timeLeft % 3600) / 60)}m`
+      : `${Math.floor(timeLeft / 86400)}d ${Math.floor((timeLeft % 86400) / 3600)}h`
+    : "";
+
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[10px] mb-0.5">
+        <span className="text-gray-400">{label}</span>
+        <span className={`tabular-nums ${isAtLimit ? "text-red-500" : isNearLimit ? "text-amber-500" : "text-gray-500"}`}>
+          {formatLiquidity(used.toString())} / {formatLiquidity(max.toString())}
+        </span>
+      </div>
+      <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${
+            isAtLimit ? "bg-red-500" : isNearLimit ? "bg-amber-400" : "bg-bastion-400"
+          }`}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
+      {resetLabel && (
+        <p className="text-[9px] text-gray-400 mt-0.5">Resets in {resetLabel}</p>
       )}
     </div>
   );

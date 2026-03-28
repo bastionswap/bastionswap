@@ -404,6 +404,67 @@ export function useRemoveLiquidity() {
   };
 }
 
+// ─── Remove Issuer Liquidity ──────────────────────────────────
+
+export interface RemoveIssuerLiquidityConfig {
+  poolKey: {
+    currency0: `0x${string}`;
+    currency1: `0x${string}`;
+    fee: number;
+    tickSpacing: number;
+    hooks: `0x${string}`;
+  };
+  liquidityToRemove: bigint;
+  amount0Min: bigint;
+  amount1Min: bigint;
+  deadline: bigint;
+}
+
+export function useRemoveIssuerLiquidity() {
+  const chainId = useChainId();
+  const contracts = getContracts(chainId);
+
+  const {
+    writeContract,
+    data: hash,
+    isPending: isWriting,
+    error,
+    reset,
+  } = useWriteContract();
+
+  const { isLoading: isReceiptLoading, isSuccess: isReceiptSuccess } =
+    useWaitForTransactionReceipt({ hash });
+
+  const { isConfirming, isSuccess } = useReceiptWithTimeout(hash, isReceiptLoading, isReceiptSuccess);
+
+  const removeIssuerLiquidity = (config: RemoveIssuerLiquidityConfig) => {
+    if (!contracts) return;
+
+    writeContract({
+      address: contracts.BastionPositionRouter as `0x${string}`,
+      abi: BastionPositionRouterABI,
+      functionName: "removeIssuerLiquidity",
+      args: [
+        config.poolKey,
+        config.liquidityToRemove,
+        config.amount0Min,
+        config.amount1Min,
+        config.deadline,
+      ],
+    });
+  };
+
+  return {
+    removeIssuerLiquidity,
+    hash,
+    isWriting,
+    isConfirming,
+    isSuccess,
+    error,
+    reset,
+  };
+}
+
 // ─── Collect Fees ──────────────────────────────────
 
 export function useCollectFees() {
